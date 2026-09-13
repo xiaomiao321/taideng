@@ -1,0 +1,48 @@
+/Doc/
+
+# Build output
+**/build/
+**/cmake-build-*/
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.d
+*.o
+*.obj
+*.a
+*.lib
+compile_commands.json
+
+# IDE and editor-local settings
+/.vscode/
+**/.idea/
+**/.settings/
+**/.project
+**/.cproject
+**/*.launch
+
+# CMake-generated files outside build directories
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+build.ninja
+.ninja_deps
+.ninja_log
+
+# Temporary, backup, and log files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+*.log
+*.stackdump
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
