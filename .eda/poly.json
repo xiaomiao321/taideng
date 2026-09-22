@@ -1,0 +1,66 @@
+{
+    "success":  true,
+    "result":  {
+                   "ids":  [
+                               "a74fa44e69a2bd05"
+                           ],
+                   "methods":  [
+                                   "async",
+                                   "constructor",
+                                   "convertToFill",
+                                   "convertToPour",
+                                   "convertToRegion",
+                                   "create",
+                                   "done",
+                                   "getState_Layer",
+                                   "getState_LineWidth",
+                                   "getState_Net",
+                                   "getState_Polygon",
+                                   "getState_PrimitiveId",
+                                   "getState_PrimitiveLock",
+                                   "getState_PrimitiveType",
+                                   "isAsync",
+                                   "layer",
+                                   "lineWidth",
+                                   "net",
+                                   "polygon",
+                                   "primitiveId",
+                                   "primitiveLock",
+                                   "primitiveType",
+                                   "reset",
+                                   "setState_Layer",
+                                   "setState_LineWidth",
+                                   "setState_Net",
+                                   "setState_Polygon",
+                                   "setState_PrimitiveLock",
+                                   "toAsync",
+                                   "toSync"
+                               ],
+                   "own":  {
+                               "async":  true,
+                               "primitiveType":  "Polyline",
+                               "layer":  11,
+                               "polygon":  {
+                                               "polygon":  [
+                                                               "R",
+                                                               0,
+                                                               0,
+                                                               4724.4094,
+                                                               3543.3071,
+                                                               0,
+                                                               59.0551
+                                                           ]
+                                           },
+                               "lineWidth":  10,
+                               "primitiveLock":  false,
+                               "primitiveId":  "a74fa44e69a2bd05"
+                           },
+                   "bbox":  {
+                                "minX":  -5,
+                                "minY":  -3548.3071,
+                                "maxX":  4729.4094,
+                                "maxY":  5
+                            }
+               },
+    "windowId":  "c0906e02-860c-491b-b882-481a42c8f4ee"
+}

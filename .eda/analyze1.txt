@@ -1,0 +1,224 @@
+components: 275 nets: 1
+component layers: {1: 254, 2: 21}
+
+--- designator prefixes ---
+  BOOT: 1
+  BUZZER: 1
+  C: 49
+  CN: 10
+  D: 18
+  DC: 1
+  F: 5
+  H: 2
+  L: 1
+  LED: 10
+  Q: 3
+  R: 89
+  RN: 4
+  RST: 1
+  SW: 1
+  TP: 41
+  U: 36
+  X: 2
+
+--- components ---
+    BOOT1 | L1 |       3385   -787.129 | rot   180 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'c6b936df5fc3dc58', 'name': 'SW-SMD_4P-L5.1-W6.1-P2.54-LS9.8'} | ={Manufacturer Part}
+  BUZZER1 | L1 |       2570       -955 | rot    90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '00eb3f6be23290ab', 'name': 'BUZ-SMD_4P-L7.5-W7.5-P7.59-TL'} | ={Value}
+       C1 | L1 |       1500       -570 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '90ddc5cec30a9002', 'name': 'CAP-TH_BD10.0-P5.00-D1.0-FD-H16.0'} | ={Value}
+      C10 | L2 |       3690      -1940 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+      C11 | L2 |       2770      -1475 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+      C12 | L2 |       2840      -1400 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C13 | L2 |       3540      -1295 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C14 | L2 |       3690      -1845 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C15 | L1 |       3595      -1065 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+      C16 | L2 |       2790      -1625 | rot   270 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C17 | L1 |       2885      -2990 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C19 | L2 |   2789.997      -1745 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+       C2 | L1 |       2415      -1215 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C20 | L1 |        915       -935 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C21 | L1 |        390      -1390 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C22 | L1 |       2220      -1680 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C23 | L1 |        915      -1740 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C24 | L1 |     374.76      -2220 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C25 | L1 |       2515      -2140 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C26 | L1 |        480       -980 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C27 | L1 |       2935       -680 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C28 | L1 |        480      -1815 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C29 | L1 |   3866.051      -1025 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+       C3 | L2 |   2789.997      -1990 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C30 | L1 |       4285       -990 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C31 | L1 |   3849.667  -1775.152 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C32 | L1 |       4285      -1740 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C33 | L1 |        905      -2500 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C34 | L1 |    479.997      -2550 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C35 | L1 |       3850      -2450 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C36 | L1 |       4285      -2435 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C37 | L1 |   4035.004  -2729.997 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C38 | L1 |       4090      -3115 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C39 | L1 |        575      -2925 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+       C4 | L2 |       2790      -1865 | rot   270 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C40 | L1 |        740      -3125 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C41 | L1 |     374.76      -3330 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C42 | L1 |       2035      -2175 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C43 | L1 |       4390      -1400 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C44 | L1 |       4145      -1395 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C45 | L1 |   4385.241      -2155 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C46 | L1 |    4151.08   -2097.81 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C47 | L1 |       4380      -3325 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C48 | L1 |       4575      -2930 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+       C5 | L2 |       3030      -1305 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+      C53 | L1 |       2265      -1205 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+      C54 | L1 |       2270       -935 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f7c6f663672c2514', 'name': 'C0603'} | ={Value}
+       C6 | L2 |    2769.39      -1540 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+       C7 | L2 |       2865   -1745.61 | rot   270 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+       C8 | L2 |       3025      -2055 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+       C9 | L2 |       3595      -1380 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '19194c559a0c10d7', 'name': 'C0603'} | ={Value}
+      CN1 | L1 |       4530      -2550 | rot    90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+     CN10 | L1 |       4530       -980 | rot    90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+     CN11 | L1 |       4530      -1745 | rot    90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+     CN12 | L1 |        740      -3350 | rot     0 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+     CN15 | L1 |       3010   -207.125 | rot     0 | pads   7 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7bc1c4c0b09c3b77', 'name': 'CONN-SMD_AFC20-S05ACC-00'} | ={Manufacturer Part}
+      CN2 | L1 |        195      -1805 | rot   -90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+      CN3 | L1 |        200      -2630 | rot   -90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+      CN4 | L1 |       4085      -3350 | rot     0 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+      CN7 | L1 |   1056.441       -205 | rot     0 | pads   7 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7bc1c4c0b09c3b77', 'name': 'CONN-SMD_AFC20-S05ACC-00'} | ={Manufacturer Part}
+      CN9 | L1 |        195       -980 | rot   -90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '498f4a08b1a05f73', 'name': 'CONN-SMD_2P-P2.00_PH2.0-2PWT'} | ={Manufacturer Part}
+       D1 | L1 |       2870      -2835 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'e1341e424b0c0252', 'name': 'SMB_L4.6-W3.6-LS5.3-RD'} | ={Manufacturer Part}
+      D12 | L1 |       2675      -2115 | rot     0 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      D13 | L1 |       2450      -1660 | rot     0 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      D14 | L1 |       1220       -620 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'e1341e424b0c0252', 'name': 'SMB_L4.6-W3.6-LS5.3-RD'} | ={Manufacturer Part}
+      D15 | L1 |   2203.698      -2175 | rot     0 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      D16 | L1 |       4085      -2230 | rot   -90 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      D17 | L1 |       4085      -1530 | rot   -90 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      D18 | L1 |       4430      -2875 | rot   180 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      D19 | L1 |       2865       -515 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '79664aecd8f1e781', 'name': 'SMB_L4.6-W3.6-LS5.4-RD'} | ={Manufacturer Part}
+      D20 | L1 |       2580  -1208.393 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'f39bfdde489f5392', 'name': 'SOD-123_L2.7-W1.6-LS3.7-FD'} | ={Manufacturer Part}
+      D21 | L1 |        280      -2200 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'cfb47ba8ed3b4808', 'name': 'SOD-882_L1.0-W0.6-RD'} | ={Manufacturer Part}
+      D22 | L1 |        305      -1385 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'cfb47ba8ed3b4808', 'name': 'SOD-882_L1.0-W0.6-RD'} | ={Manufacturer Part}
+      D23 | L1 |        280      -3320 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'cfb47ba8ed3b4808', 'name': 'SOD-882_L1.0-W0.6-RD'} | ={Manufacturer Part}
+      D24 | L1 |       4445      -3335 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'cfb47ba8ed3b4808', 'name': 'SOD-882_L1.0-W0.6-RD'} | ={Manufacturer Part}
+      D25 | L1 |       4450      -2135 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'cfb47ba8ed3b4808', 'name': 'SOD-882_L1.0-W0.6-RD'} | ={Manufacturer Part}
+      D26 | L1 |       4450      -1370 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'cfb47ba8ed3b4808', 'name': 'SOD-882_L1.0-W0.6-RD'} | ={Manufacturer Part}
+       D6 | L1 |       3300      -2800 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'fe91a308759e1af3', 'name': 'SOD-123_L2.7-W1.6-LS3.7-RD'} | ={Manufacturer Part}
+       D7 | L1 |       3085      -2880 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'e1341e424b0c0252', 'name': 'SMB_L4.6-W3.6-LS5.3-RD'} | ={Manufacturer Part}
+      DC1 | L1 |   2467.205      -3110 | rot    90 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '2e8941114bde23de', 'name': 'DC-IN-TH_DC-005-A200'} | ={Manufacturer Part}
+       F5 | L1 |       2005       -785 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'c51c1825336c93d6', 'name': 'FUSE-SMD_L6.1-W2.5-1'} | ={Manufacturer Part}
+       F6 | L1 |       1995      -2795 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'c51c1825336c93d6', 'name': 'FUSE-SMD_L6.1-W2.5-1'} | ={Manufacturer Part}
+       F7 | L1 |       3115      -2425 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'c51c1825336c93d6', 'name': 'FUSE-SMD_L6.1-W2.5-1'} | ={Manufacturer Part}
+       F8 | L1 |       1215      -2585 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'c51c1825336c93d6', 'name': 'FUSE-SMD_L6.1-W2.5-1'} | ={Manufacturer Part}
+       F9 | L1 |       2280      -2585 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': 'c51c1825336c93d6', 'name': 'FUSE-SMD_L6.1-W2.5-1'} | ={Manufacturer Part}
+       H1 | L1 |         70       -565 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '53e42d748ff35a1c', 'name': 'CONN-TH_LAIL-PZ2.54-2P-L'} | ={Manufacturer Part}
+       H2 | L1 |       4645     -661.5 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '53e42d748ff35a1c', 'name': 'CONN-TH_LAIL-PZ2.54-2P-L'} | ={Manufacturer Part}
+       L1 | L2 |       2795      -1245 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '2eef586871ec1530', 'name': 'L0805'} | ={Manufacturer Part}
+     LED1 | L1 |       2395   -504.501 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6b4d1d873a7b4e34', 'name': 'LED0603-RD_RED'} | ={Manufacturer Part}
+    LED10 | L1 |        860       -585 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '9179456d313275c2', 'name': 'LED0603-RD'} | ={Manufacturer Part}
+    LED11 | L1 |       3860       -595 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '9179456d313275c2', 'name': 'LED0603-RD'} | ={Manufacturer Part}
+    LED12 | L1 |       2125       -660 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '9179456d313275c2', 'name': 'LED0603-RD'} | ={Manufacturer Part}
+    LED13 | L1 |       3275      -3180 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6b4d1d873a7b4e34', 'name': 'LED0603-RD_RED'} | ={Manufacturer Part}
+     LED2 | L1 |   2394.999   -581.336 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '9179456d313275c2', 'name': 'LED0603-RD'} | ={Manufacturer Part}
+     LED3 | L1 |   2394.999   -658.168 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '9179456d313275c2', 'name': 'LED0603-RD'} | ={Manufacturer Part}
+     LED7 | L1 |       3195      -2710 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6b4d1d873a7b4e34', 'name': 'LED0603-RD_RED'} | ={Manufacturer Part}
+     LED8 | L1 |       1805       -775 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7376ba57d012c992', 'name': 'LED0603-R-RD'} | ={Manufacturer Part}
+     LED9 | L1 |       1525      -2945 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7376ba57d012c992', 'name': 'LED0603-R-RD'} | ={Manufacturer Part}
+      Q10 | L1 |       4060       -505 | rot   -90 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+      Q11 | L1 |       2800      -1050 | rot     0 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '6ec1fc06036c6767', 'name': 'SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR'} | ={Manufacturer Part}
+       Q2 | L1 |       3600      -2760 | rot    90 | pads   3 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '32ada574a120d133', 'name': 'TO-263-2_L10.1-W9.1-P5.08-LS15.2-TL-1'} | ={Manufacturer Part}
+     R100 | L1 |       2825      -1160 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+     R101 | L2 |       3545       -695 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d11771131d50407', 'name': 'R2512'} | ={Value}
+     R102 | L2 |       1405       -950 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d11771131d50407', 'name': 'R2512'} | ={Value}
+     R103 | L1 |       3220      -2585 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d11771131d50407', 'name': 'R2512'} | ={Value}
+     R104 | L1 |       1910       -530 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d11771131d50407', 'name': 'R2512'} | ={Value}
+     R105 | L1 |       1900      -3015 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d11771131d50407', 'name': 'R2512'} | ={Value}
+      R12 | L1 |       3320      -2915 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R13 | L1 |       3395      -3065 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R19 | L1 |       3325      -1100 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7ce7dc3abdffbe69', 'name': 'R0603'} | ={Value}
+      R20 | L1 |       3475      -1095 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7ce7dc3abdffbe69', 'name': 'R0603'} | ={Value}
+      R21 | L1 |       3305       -540 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7ce7dc3abdffbe69', 'name': 'R0603'} | ={Value}
+      R22 | L1 |       3475       -540 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7ce7dc3abdffbe69', 'name': 'R0603'} | ={Value}
+      R23 | L1 |       3675      -1065 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '7ce7dc3abdffbe69', 'name': 'R0603'} | ={Value}
+      R24 | L2 |       2940      -1985 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R25 | L1 |       2255      -1550 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R26 | L1 |    718.685      -1195 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R27 | L1 |       2255      -1590 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R28 | L1 |    632.369      -1195 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R29 | L1 |        420      -1295 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R30 | L1 |        420      -1490 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R31 | L1 |       1570      -1630 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R32 | L1 |       2285      -1685 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R33 | L1 |       2255      -1770 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R34 | L1 |    612.369      -2020 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R35 | L1 |       2255      -1835 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R36 | L1 |    718.685      -2020 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R37 | L1 |        405      -2125 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R38 | L1 |        405      -2315 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R39 | L1 |       1570      -1740 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R40 | L1 |       2585      -2140 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R41 | L1 |   3964.387   -655.205 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R42 | L1 |       4060       -655 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R43 | L1 |       2850       -685 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R44 | L1 |       3065      -2710 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R45 | L1 |       1775       -680 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R46 | L1 |       1655      -2945 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R47 | L1 |        860       -720 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R48 | L1 |       3955      -1230 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R49 | L1 |   4055.013      -1230 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R50 | L1 |   4155.025      -1230 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R51 | L1 |   4255.038      -1230 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R52 | L1 |       3955      -1960 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R53 | L1 |   4055.013      -1960 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R54 | L1 |   4255.038      -1960 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R55 | L1 |   4155.025      -1960 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R56 | L1 |       2255      -1895 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R57 | L1 |    723.685      -2710 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R58 | L1 |       2255      -1955 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R59 | L1 |    612.369      -2710 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R60 | L1 |       3955  -2620.851 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R61 | L1 |   4054.713  -2620.851 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R62 | L1 |   4154.876  -2620.851 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R63 | L1 |   4255.038  -2620.851 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R64 | L1 |       3880      -2885 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R65 | L1 |       3880  -2960.471 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R66 | L1 |       3880  -3111.411 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R67 | L1 |       3880  -3035.941 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R68 | L1 |       2255      -2075 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R69 | L1 |        970      -3035 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R70 | L1 |       2255      -2015 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R71 | L1 |        970      -2935 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R72 | L1 |        405      -3235 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R73 | L1 |        405      -3425 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R74 | L1 |       1570      -2150 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R75 | L1 |       2105      -2175 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R76 | L1 |   4365.426      -1495 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R77 | L1 |       4390      -1280 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R78 | L1 |       4250      -1365 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R79 | L1 |       4060  -1392.806 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R80 | L1 |       4380      -2255 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R81 | L1 |       4380      -2060 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R82 | L1 |       4255      -2070 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R83 | L1 |       4055      -2100 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R84 | L1 |       4355      -3440 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R85 | L1 |       4360      -3220 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R86 | L1 |       4515      -3060 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R87 | L1 |       4575      -2855 | rot   180 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R88 | L1 |       3860       -720 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R89 | L1 |       2125      -1225 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R90 | L1 |       2125       -785 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R91 | L1 |       3230      -3075 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R92 | L1 |       3050       -505 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R93 | L1 |       4330       -480 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R94 | L1 |       4250       -480 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R95 | L1 |   2256.334   -504.501 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R96 | L1 |   2256.334   -582.578 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R97 | L1 |   2256.334   -660.654 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R98 | L1 |   2256.334   -738.731 | rot     0 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      R99 | L1 |       2895      -1050 | rot   -90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '3d907739be2ae2d7', 'name': 'R0603'} | ={Value}
+      RN1 | L1 |   1014.642   -546.932 | rot     0 | pads   8 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '52ef06c994e7cf10', 'name': 'RES-ARRAY-SMD_0603-8P-L3.2-W1.6-BL'} | ={Value}
+      RN2 | L1 |       1300      -3060 | rot   180 | pads   8 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '52ef06c994e7cf10', 'name': 'RES-ARRAY-SMD_0603-8P-L3.2-W1.6-BL'} | ={Value}
+      RN3 | L1 |       1015       -715 | rot     0 | pads   8 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '52ef06c994e7cf10', 'name': 'RES-ARRAY-SMD_0603-8P-L3.2-W1.6-BL'} | ={Value}
+      RN4 | L1 |       1300      -2905 | rot   180 | pads   8 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '52ef06c994e7cf10', 'name': 'RES-ARRAY-SMD_0603-8P-L3.2-W1.6-BL'} | ={Value}
+     RST1 | L1 |       3590       -835 | rot    90 | pads   2 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '43bad9e66cea6ee5', 'name': 'SW-SMD_L6.0-W3.5-LS7.2'} | ={Manufacturer Part}
+      SW1 | L1 |       3130       -795 | rot    90 | pads   4 | {'libraryUuid': 'd4e6eb9c1981407590f484a3935b0c19', 'uuid': '95bd6d3b89f4f4fc', 'name': 'SW-SMD_4P-L6.0-W6.0-P4.50-LS9.0_H5.0'} | ={Manufacturer Part}
+Traceback (most recent call last):
+  File "D:\files\26_Summer\taideng\.eda\analyze1.py", line 24, in <module>
+    print(f'{c["designator"]:>9} | L{c["layer"]} | {c["x"]:>10} {c["y"]:>10} | rot {c["rot"]:>5} | pads {npads:>3} | {c["footprint"]} | {c["name"]}')
+UnicodeEncodeError: 'gbk' codec can't encode character '\xba' in position 160: illegal multibyte sequence

@@ -1,0 +1,142 @@
+{
+    "success":  true,
+    "result":  {
+                   "strings":  [
+                                   {
+                                       "id":  "9ca17c11efc0b5d3",
+                                       "layer":  3,
+                                       "x":  570,
+                                       "y":  -1030,
+                                       "text":  "47nF",
+                                       "fontFamily":  "Arial",
+                                       "fontSize":  45,
+                                       "lineWidth":  8,
+                                       "alignMode":  3,
+                                       "rotation":  90,
+                                       "reverse":  true,
+                                       "expansion":  0,
+                                       "mirror":  false,
+                                       "lock":  false,
+                                       "bbox":  {
+                                                    "minX":  519.6818181818182,
+                                                    "minY":  -1030,
+                                                    "maxX":  570,
+                                                    "maxY":  -927.3181818181819
+                                                }
+                                   }
+                               ],
+                   "polylineIds":  [
+                                       "a74fa44e69a2bd05"
+                                   ],
+                   "polylineBBox":  {
+                                        "minX":  -5,
+                                        "minY":  -3548.3071,
+                                        "maxX":  4729.4094,
+                                        "maxY":  5
+                                    },
+                   "polyDump":  [
+                                    {
+                                        "id":  "a74fa44e69a2bd05",
+                                        "layer":  11,
+                                        "bbox":  null
+                                    }
+                                ],
+                   "attrKeySummary":  {
+                                          "Footprint":  {
+                                                            "total":  275,
+                                                            "onTop":  254,
+                                                            "onBottom":  21,
+                                                            "reverseTrue":  0,
+                                                            "visibleKey":  0,
+                                                            "visibleValue":  0,
+                                                            "fonts":  {
+                                                                          "default":  275
+                                                                      },
+                                                            "sizes":  {
+                                                                          "45":  275
+                                                                      }
+                                                        },
+                                          "Designator":  {
+                                                             "total":  275,
+                                                             "onTop":  254,
+                                                             "onBottom":  21,
+                                                             "reverseTrue":  0,
+                                                             "visibleKey":  0,
+                                                             "visibleValue":  2,
+                                                             "fonts":  {
+                                                                           "default":  275
+                                                                       },
+                                                             "sizes":  {
+                                                                           "45":  275
+                                                                       }
+                                                         },
+                                          "Device":  {
+                                                         "total":  275,
+                                                         "onTop":  254,
+                                                         "onBottom":  21,
+                                                         "reverseTrue":  0,
+                                                         "visibleKey":  0,
+                                                         "visibleValue":  0,
+                                                         "fonts":  {
+                                                                       "default":  275
+                                                                   },
+                                                         "sizes":  {
+                                                                       "45":  275
+                                                                   }
+                                                     },
+                                          "Name":  {
+                                                       "total":  14,
+                                                       "onTop":  14,
+                                                       "onBottom":  0,
+                                                       "reverseTrue":  0,
+                                                       "visibleKey":  0,
+                                                       "visibleValue":  0,
+                                                       "fonts":  {
+                                                                     "default":  14
+                                                                 },
+                                                       "sizes":  {
+                                                                     "67.5":  14
+                                                                 }
+                                                   }
+                                      },
+                   "attrTotal":  839,
+                   "visibleAttrCount":  2,
+                   "visibleAttrs":  [
+                                        {
+                                            "id":  "ab0e4b7fcc14c906e18",
+                                            "parent":  "ab0e4b7fcc14c906",
+                                            "layer":  3,
+                                            "key":  "Designator",
+                                            "value":  "U35",
+                                            "keyVisible":  false,
+                                            "valueVisible":  true,
+                                            "x":  2675,
+                                            "y":  -360,
+                                            "fontSize":  45,
+                                            "fontFamily":  "default",
+                                            "rotation":  270,
+                                            "reverse":  false,
+                                            "expansion":  0,
+                                            "mirror":  false
+                                        },
+                                        {
+                                            "id":  "e6d21653bd0e9873e16",
+                                            "parent":  "e6d21653bd0e9873",
+                                            "layer":  4,
+                                            "key":  "Designator",
+                                            "value":  "R101",
+                                            "keyVisible":  false,
+                                            "valueVisible":  true,
+                                            "x":  3630.031,
+                                            "y":  -852.966,
+                                            "fontSize":  45,
+                                            "fontFamily":  "default",
+                                            "rotation":  90,
+                                            "reverse":  false,
+                                            "expansion":  0,
+                                            "mirror":  false
+                                        }
+                                    ]
+               },
+    "windowId":  "c0906e02-860c-491b-b882-481a42c8f4ee"
+}

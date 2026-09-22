@@ -1,0 +1,78 @@
+{
+    "success":  true,
+    "result":  {
+                   "rawPadCount":  100,
+                   "rawPadIsString":  "object",
+                   "rawPadOwnKeys":  [
+                                         "primitiveId",
+                                         "net",
+                                         "padNumber"
+                                     ],
+                   "rawPadOwn":  {
+                                     "primitiveId":  "e5",
+                                     "net":  "3V3_MCU",
+                                     "padNumber":  "100"
+                                 },
+                   "rawPadProto":  [
+
+                                   ],
+                   "padAllCount":  779,
+                   "firstPadOwnKeys":  [
+                                           "async",
+                                           "primitiveType",
+                                           "layer",
+                                           "padNumber",
+                                           "x",
+                                           "y",
+                                           "rotation",
+                                           "pad",
+                                           "net",
+                                           "hole",
+                                           "holeOffsetX",
+                                           "holeOffsetY",
+                                           "holeRotation",
+                                           "metallization",
+                                           "padType",
+                                           "specialPad",
+                                           "solderMaskAndPasteMaskExpansion",
+                                           "heatWelding",
+                                           "primitiveLock",
+                                           "primitiveId"
+                                       ],
+                   "firstPadOwn":  {
+                                       "async":  true,
+                                       "primitiveType":  "Pad",
+                                       "layer":  1,
+                                       "padNumber":  "4",
+                                       "x":  3435,
+                                       "y":  -964.2945,
+                                       "rotation":  3.141592653589793,
+                                       "pad":  [
+                                                   "RECT",
+                                                   51.2,
+                                                   78.7,
+                                                   0
+                                               ],
+                                       "net":  "$3N115",
+                                       "hole":  null,
+                                       "holeOffsetX":  0,
+                                       "holeOffsetY":  0,
+                                       "holeRotation":  0,
+                                       "metallization":  true,
+                                       "padType":  0,
+                                       "specialPad":  [
+
+                                                      ],
+                                       "solderMaskAndPasteMaskExpansion":  {
+                                                                               "topSolderMask":  0.2,
+                                                                               "bottomSolderMask":  0.2,
+                                                                               "topPasteMask":  0,
+                                                                               "bottomPasteMask":  0
+                                                                           },
+                                       "heatWelding":  null,
+                                       "primitiveLock":  false,
+                                       "primitiveId":  "e8ac780b1251d9c8e32"
+                                   }
+               },
+    "windowId":  "c0906e02-860c-491b-b882-481a42c8f4ee"
+}

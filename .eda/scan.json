@@ -1,0 +1,2087 @@
+{
+    "success":  true,
+    "result":  {
+                   "layerInfo":  [
+                                     {
+                                         "id":  1,
+                                         "name":  "Top Layer",
+                                         "type":  "SIGNAL",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  2,
+                                         "name":  "Bottom Layer",
+                                         "type":  "SIGNAL",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  3,
+                                         "name":  "Top Silkscreen Layer",
+                                         "type":  "SILKSCREEN",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  4,
+                                         "name":  "Bottom Silkscreen Layer",
+                                         "type":  "SILKSCREEN",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  5,
+                                         "name":  "Top Solder Mask Layer",
+                                         "type":  "SOLDER_MASK",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  6,
+                                         "name":  "Bottom Solder Mask Layer",
+                                         "type":  "SOLDER_MASK",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  7,
+                                         "name":  "Top Paste Mask Layer",
+                                         "type":  "PASTE_MASK",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  8,
+                                         "name":  "Bottom Paste Mask Layer",
+                                         "type":  "PASTE_MASK",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  9,
+                                         "name":  "Top Assembly Layer",
+                                         "type":  "ASSEMBLY",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  10,
+                                         "name":  "Bottom Assembly Layer",
+                                         "type":  "ASSEMBLY",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  11,
+                                         "name":  "Board Outline Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  12,
+                                         "name":  "Multi-Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  13,
+                                         "name":  "Document Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  14,
+                                         "name":  "Mechanical Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  15,
+                                         "name":  "GND",
+                                         "type":  "PLANE",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  16,
+                                         "name":  "VCC",
+                                         "type":  "SIGNAL",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  17,
+                                         "name":  "Inner3",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  18,
+                                         "name":  "Inner4",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  19,
+                                         "name":  "Inner5",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  20,
+                                         "name":  "Inner6",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  21,
+                                         "name":  "Inner7",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  22,
+                                         "name":  "Inner8",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  23,
+                                         "name":  "Inner9",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  24,
+                                         "name":  "Inner10",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  25,
+                                         "name":  "Inner11",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  26,
+                                         "name":  "Inner12",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  27,
+                                         "name":  "Inner13",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  28,
+                                         "name":  "Inner14",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  29,
+                                         "name":  "Inner15",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  30,
+                                         "name":  "Inner16",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  31,
+                                         "name":  "Inner17",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  32,
+                                         "name":  "Inner18",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  33,
+                                         "name":  "Inner19",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  34,
+                                         "name":  "Inner20",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  35,
+                                         "name":  "Inner21",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  36,
+                                         "name":  "Inner22",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  37,
+                                         "name":  "Inner23",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  38,
+                                         "name":  "Inner24",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  39,
+                                         "name":  "Inner25",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  40,
+                                         "name":  "Inner26",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  41,
+                                         "name":  "Inner27",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  42,
+                                         "name":  "Inner28",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  43,
+                                         "name":  "Inner29",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  44,
+                                         "name":  "Inner30",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  45,
+                                         "name":  "Inner31",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  46,
+                                         "name":  "Inner32",
+                                         "type":  "SIGNAL",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  47,
+                                         "name":  "Hole Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  48,
+                                         "name":  "Component Shape Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  49,
+                                         "name":  "Component Marking Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  50,
+                                         "name":  "Pin Soldering Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  51,
+                                         "name":  "Pin Floating Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  52,
+                                         "name":  "Component Model Layer",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  53,
+                                         "name":  "3D Shell Outline Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  54,
+                                         "name":  "3D Shell Top Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  55,
+                                         "name":  "3D Shell Bottom Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  56,
+                                         "name":  "Drill Drawing Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  57,
+                                         "name":  "Ratline Layer",
+                                         "type":  "OTHER",
+                                         "visible":  1,
+                                         "locked":  true
+                                     },
+                                     {
+                                         "id":  58,
+                                         "name":  "Top Stiffener Layer",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  59,
+                                         "name":  "Bottom Stiffener Layer",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  71,
+                                         "name":  "Custom1",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  72,
+                                         "name":  "Custom2",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  73,
+                                         "name":  "Custom3",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  74,
+                                         "name":  "Custom4",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  75,
+                                         "name":  "Custom5",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  76,
+                                         "name":  "Custom6",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  77,
+                                         "name":  "Custom7",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  78,
+                                         "name":  "Custom8",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  79,
+                                         "name":  "Custom9",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  80,
+                                         "name":  "Custom10",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  81,
+                                         "name":  "Custom11",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  82,
+                                         "name":  "Custom12",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  83,
+                                         "name":  "Custom13",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  84,
+                                         "name":  "Custom14",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  85,
+                                         "name":  "Custom15",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  86,
+                                         "name":  "Custom16",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  87,
+                                         "name":  "Custom17",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  88,
+                                         "name":  "Custom18",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  89,
+                                         "name":  "Custom19",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  90,
+                                         "name":  "Custom20",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  91,
+                                         "name":  "Custom21",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  92,
+                                         "name":  "Custom22",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  93,
+                                         "name":  "Custom23",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  94,
+                                         "name":  "Custom24",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  95,
+                                         "name":  "Custom25",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  96,
+                                         "name":  "Custom26",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  97,
+                                         "name":  "Custom27",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  98,
+                                         "name":  "Custom28",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  99,
+                                         "name":  "Custom29",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  100,
+                                         "name":  "Custom30",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  101,
+                                         "name":  "Custom31",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  102,
+                                         "name":  "Custom32",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  103,
+                                         "name":  "Custom33",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  104,
+                                         "name":  "Custom34",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  105,
+                                         "name":  "Custom35",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  106,
+                                         "name":  "Custom36",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  107,
+                                         "name":  "Custom37",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  108,
+                                         "name":  "Custom38",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  109,
+                                         "name":  "Custom39",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  110,
+                                         "name":  "Custom40",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  111,
+                                         "name":  "Custom41",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  112,
+                                         "name":  "Custom42",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  113,
+                                         "name":  "Custom43",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  114,
+                                         "name":  "Custom44",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  115,
+                                         "name":  "Custom45",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  116,
+                                         "name":  "Custom46",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  117,
+                                         "name":  "Custom47",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  118,
+                                         "name":  "Custom48",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  119,
+                                         "name":  "Custom49",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  120,
+                                         "name":  "Custom50",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  121,
+                                         "name":  "Custom51",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  122,
+                                         "name":  "Custom52",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  123,
+                                         "name":  "Custom53",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  124,
+                                         "name":  "Custom54",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  125,
+                                         "name":  "Custom55",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  126,
+                                         "name":  "Custom56",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  127,
+                                         "name":  "Custom57",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  128,
+                                         "name":  "Custom58",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  129,
+                                         "name":  "Custom59",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  130,
+                                         "name":  "Custom60",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  131,
+                                         "name":  "Custom61",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  132,
+                                         "name":  "Custom62",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  133,
+                                         "name":  "Custom63",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  134,
+                                         "name":  "Custom64",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  135,
+                                         "name":  "Custom65",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  136,
+                                         "name":  "Custom66",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  137,
+                                         "name":  "Custom67",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  138,
+                                         "name":  "Custom68",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  139,
+                                         "name":  "Custom69",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  140,
+                                         "name":  "Custom70",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  141,
+                                         "name":  "Custom71",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  142,
+                                         "name":  "Custom72",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  143,
+                                         "name":  "Custom73",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  144,
+                                         "name":  "Custom74",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  145,
+                                         "name":  "Custom75",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  146,
+                                         "name":  "Custom76",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  147,
+                                         "name":  "Custom77",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  148,
+                                         "name":  "Custom78",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  149,
+                                         "name":  "Custom79",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  150,
+                                         "name":  "Custom80",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  151,
+                                         "name":  "Custom81",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  152,
+                                         "name":  "Custom82",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  153,
+                                         "name":  "Custom83",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  154,
+                                         "name":  "Custom84",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  155,
+                                         "name":  "Custom85",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  156,
+                                         "name":  "Custom86",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  157,
+                                         "name":  "Custom87",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  158,
+                                         "name":  "Custom88",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  159,
+                                         "name":  "Custom89",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  160,
+                                         "name":  "Custom90",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  161,
+                                         "name":  "Custom91",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  162,
+                                         "name":  "Custom92",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  163,
+                                         "name":  "Custom93",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  164,
+                                         "name":  "Custom94",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  165,
+                                         "name":  "Custom95",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  166,
+                                         "name":  "Custom96",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  167,
+                                         "name":  "Custom97",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  168,
+                                         "name":  "Custom98",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  169,
+                                         "name":  "Custom99",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  170,
+                                         "name":  "Custom100",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  171,
+                                         "name":  "Custom101",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  172,
+                                         "name":  "Custom102",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  173,
+                                         "name":  "Custom103",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  174,
+                                         "name":  "Custom104",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  175,
+                                         "name":  "Custom105",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  176,
+                                         "name":  "Custom106",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  177,
+                                         "name":  "Custom107",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  178,
+                                         "name":  "Custom108",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  179,
+                                         "name":  "Custom109",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  180,
+                                         "name":  "Custom110",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  181,
+                                         "name":  "Custom111",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  182,
+                                         "name":  "Custom112",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  183,
+                                         "name":  "Custom113",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  184,
+                                         "name":  "Custom114",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  185,
+                                         "name":  "Custom115",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  186,
+                                         "name":  "Custom116",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  187,
+                                         "name":  "Custom117",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  188,
+                                         "name":  "Custom118",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  189,
+                                         "name":  "Custom119",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  190,
+                                         "name":  "Custom120",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  191,
+                                         "name":  "Custom121",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  192,
+                                         "name":  "Custom122",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  193,
+                                         "name":  "Custom123",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  194,
+                                         "name":  "Custom124",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  195,
+                                         "name":  "Custom125",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  196,
+                                         "name":  "Custom126",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  197,
+                                         "name":  "Custom127",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  198,
+                                         "name":  "Custom128",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  199,
+                                         "name":  "Custom129",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  200,
+                                         "name":  "Custom130",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  201,
+                                         "name":  "Custom131",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  202,
+                                         "name":  "Custom132",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  203,
+                                         "name":  "Custom133",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  204,
+                                         "name":  "Custom134",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  205,
+                                         "name":  "Custom135",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  206,
+                                         "name":  "Custom136",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  207,
+                                         "name":  "Custom137",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  208,
+                                         "name":  "Custom138",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  209,
+                                         "name":  "Custom139",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  210,
+                                         "name":  "Custom140",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  211,
+                                         "name":  "Custom141",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  212,
+                                         "name":  "Custom142",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  213,
+                                         "name":  "Custom143",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  214,
+                                         "name":  "Custom144",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  215,
+                                         "name":  "Custom145",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  216,
+                                         "name":  "Custom146",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  217,
+                                         "name":  "Custom147",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  218,
+                                         "name":  "Custom148",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  219,
+                                         "name":  "Custom149",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  220,
+                                         "name":  "Custom150",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  221,
+                                         "name":  "Custom151",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  222,
+                                         "name":  "Custom152",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  223,
+                                         "name":  "Custom153",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  224,
+                                         "name":  "Custom154",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  225,
+                                         "name":  "Custom155",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  226,
+                                         "name":  "Custom156",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  227,
+                                         "name":  "Custom157",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  228,
+                                         "name":  "Custom158",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  229,
+                                         "name":  "Custom159",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  230,
+                                         "name":  "Custom160",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  231,
+                                         "name":  "Custom161",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  232,
+                                         "name":  "Custom162",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  233,
+                                         "name":  "Custom163",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  234,
+                                         "name":  "Custom164",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  235,
+                                         "name":  "Custom165",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  236,
+                                         "name":  "Custom166",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  237,
+                                         "name":  "Custom167",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  238,
+                                         "name":  "Custom168",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  239,
+                                         "name":  "Custom169",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  240,
+                                         "name":  "Custom170",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  241,
+                                         "name":  "Custom171",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  242,
+                                         "name":  "Custom172",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  243,
+                                         "name":  "Custom173",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  244,
+                                         "name":  "Custom174",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  245,
+                                         "name":  "Custom175",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  246,
+                                         "name":  "Custom176",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  247,
+                                         "name":  "Custom177",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  248,
+                                         "name":  "Custom178",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  249,
+                                         "name":  "Custom179",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  250,
+                                         "name":  "Custom180",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  251,
+                                         "name":  "Custom181",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  252,
+                                         "name":  "Custom182",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  253,
+                                         "name":  "Custom183",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  254,
+                                         "name":  "Custom184",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  255,
+                                         "name":  "Custom185",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  256,
+                                         "name":  "Custom186",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  257,
+                                         "name":  "Custom187",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  258,
+                                         "name":  "Custom188",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  259,
+                                         "name":  "Custom189",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  260,
+                                         "name":  "Custom190",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  261,
+                                         "name":  "Custom191",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  262,
+                                         "name":  "Custom192",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  263,
+                                         "name":  "Custom193",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  264,
+                                         "name":  "Custom194",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  265,
+                                         "name":  "Custom195",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  266,
+                                         "name":  "Custom196",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  267,
+                                         "name":  "Custom197",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  268,
+                                         "name":  "Custom198",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  269,
+                                         "name":  "Custom199",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  270,
+                                         "name":  "Custom200",
+                                         "type":  "CUSTOM",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  361,
+                                         "name":  "Dielectric1",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  362,
+                                         "name":  "Dielectric2",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  363,
+                                         "name":  "Dielectric3",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  364,
+                                         "name":  "SUBSTRATE4",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  365,
+                                         "name":  "SUBSTRATE5",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  366,
+                                         "name":  "SUBSTRATE6",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  367,
+                                         "name":  "SUBSTRATE7",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  368,
+                                         "name":  "SUBSTRATE8",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  369,
+                                         "name":  "SUBSTRATE9",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  370,
+                                         "name":  "SUBSTRATE10",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  371,
+                                         "name":  "SUBSTRATE11",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  372,
+                                         "name":  "SUBSTRATE12",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  373,
+                                         "name":  "SUBSTRATE13",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  374,
+                                         "name":  "SUBSTRATE14",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  375,
+                                         "name":  "SUBSTRATE15",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  376,
+                                         "name":  "SUBSTRATE16",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  377,
+                                         "name":  "SUBSTRATE17",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  378,
+                                         "name":  "SUBSTRATE18",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  379,
+                                         "name":  "SUBSTRATE19",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  380,
+                                         "name":  "SUBSTRATE20",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  381,
+                                         "name":  "SUBSTRATE21",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  382,
+                                         "name":  "SUBSTRATE22",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  383,
+                                         "name":  "SUBSTRATE23",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  384,
+                                         "name":  "SUBSTRATE24",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  385,
+                                         "name":  "SUBSTRATE25",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  386,
+                                         "name":  "SUBSTRATE26",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  387,
+                                         "name":  "SUBSTRATE27",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  388,
+                                         "name":  "SUBSTRATE28",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  389,
+                                         "name":  "SUBSTRATE29",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     },
+                                     {
+                                         "id":  390,
+                                         "name":  "SUBSTRATE30",
+                                         "type":  "OTHER",
+                                         "visible":  0,
+                                         "locked":  false
+                                     }
+                                 ],
+                   "counts":  {
+                                  "pcb_PrimitiveLine":  1401,
+                                  "pcb_PrimitiveArc":  0,
+                                  "pcb_PrimitiveFill":  57,
+                                  "pcb_PrimitiveRegion":  2,
+                                  "pcb_PrimitivePour":  3,
+                                  "pcb_PrimitivePoured":  3,
+                                  "pcb_PrimitivePolyline":  1,
+                                  "pcb_PrimitiveDimension":  16,
+                                  "pcb_PrimitiveImage":  0,
+                                  "pcb_PrimitiveAttribute":  839,
+                                  "pcb_PrimitivePad":  779,
+                                  "pcb_PrimitiveVia":  518,
+                                  "pcb_PrimitiveString":  1
+                              },
+                   "perLayerFlat":  {
+                                        "1":  {
+                                                  "pcb_PrimitiveLine":  837,
+                                                  "pcb_PrimitiveFill":  44,
+                                                  "pcb_PrimitivePour":  1,
+                                                  "pcb_PrimitivePad":  587
+                                              },
+                                        "2":  {
+                                                  "pcb_PrimitiveLine":  476,
+                                                  "pcb_PrimitiveFill":  5,
+                                                  "pcb_PrimitiveRegion":  2,
+                                                  "pcb_PrimitivePour":  1,
+                                                  "pcb_PrimitivePad":  142
+                                              },
+                                        "3":  {
+                                                  "pcb_PrimitiveAttribute":  776,
+                                                  "pcb_PrimitiveString":  1
+                                              },
+                                        "4":  {
+                                                  "pcb_PrimitiveAttribute":  63
+                                              },
+                                        "11":  {
+                                                   "pcb_PrimitivePolyline":  1
+                                               },
+                                        "12":  {
+                                                   "pcb_PrimitivePad":  50
+                                               },
+                                        "13":  {
+                                                   "pcb_PrimitiveDimension":  16
+                                               },
+                                        "16":  {
+                                                   "pcb_PrimitiveLine":  88,
+                                                   "pcb_PrimitiveFill":  8,
+                                                   "pcb_PrimitivePour":  1
+                                               },
+                                        "null":  {
+                                                     "pcb_PrimitivePoured":  3,
+                                                     "pcb_PrimitiveVia":  518
+                                                 }
+                                    },
+                   "copperLayers":  4
+               },
+    "windowId":  "c0906e02-860c-491b-b882-481a42c8f4ee"
+}
