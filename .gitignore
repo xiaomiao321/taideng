@@ -1,5 +1,5 @@
 /Doc/
-
+/.eda/
 # Build output
 **/build/
 **/cmake-build-*/
