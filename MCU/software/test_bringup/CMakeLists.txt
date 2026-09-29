@@ -19,7 +19,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Set the project name
-set(CMAKE_PROJECT_NAME mainboard_freeRTOS)
+set(CMAKE_PROJECT_NAME test_bringup)
 
 # Enable compile command to ease indexing with e.g. clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
@@ -52,11 +52,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/stream_buffer.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/heap_4.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_log.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_led.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Inc
 )
 
 # Add project symbols (macros)
