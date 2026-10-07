@@ -1,0 +1,53 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "test_bringup: OpenOCD + ST-Link Build & Debug",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/test_bringup.elf",
+      "preLaunchTask": "test_bringup: Build Debug",
+      "servertype": "openocd",
+      "device": "STM32F407VG",
+      "interface": "swd",
+      "runToEntryPoint": "main",
+      "armToolchainPath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin",
+      "serverpath": "D:/xpack-openocd-0.12.0-7/bin/openocd.exe",
+      "svdFile": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
+      "liveWatch": {
+        "enabled": true,
+        "samplesPerSecond": 4
+      },
+      "searchDir": [
+        "D:/xpack-openocd-0.12.0-7/openocd/scripts"
+      ],
+      "configFiles": [
+        "${workspaceFolder}/.vscode/openocd.cfg"
+      ]
+    },
+    {
+      "name": "test_bringup: OpenOCD + ST-Link Attach",
+      "type": "cortex-debug",
+      "request": "attach",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/test_bringup.elf",
+      "servertype": "openocd",
+      "device": "STM32F407VG",
+      "interface": "swd",
+      "armToolchainPath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin",
+      "serverpath": "D:/xpack-openocd-0.12.0-7/bin/openocd.exe",
+      "svdFile": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
+      "liveWatch": {
+        "enabled": true,
+        "samplesPerSecond": 4
+      },
+      "searchDir": [
+        "D:/xpack-openocd-0.12.0-7/openocd/scripts"
+      ],
+      "configFiles": [
+        "${workspaceFolder}/.vscode/openocd.cfg"
+      ]
+    }
+  ]
+}

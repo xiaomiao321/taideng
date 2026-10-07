@@ -1,0 +1,19 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.cmakePath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/CMake/bin/cmake.exe",
+    "cmake.useCMakePresets": "always",
+    "cmake.environment": {
+        "PATH": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin;D:/STM32CubeCLT/STM32CubeCLT_1.18.0/Ninja/bin;${env:PATH}"
+    },
+    "cortex-debug.variableUseNaturalFormat": true,
+    "livewatch.elfPath": "D:/files/26_Summer/taideng/MCU/software/test_bringup/build/Debug/test_bringup.elf",
+    "livewatch.gdbPath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin/arm-none-eabi-gdb.exe",
+    "livewatch.svdPath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
+    "livewatch.openocdHost": "127.0.0.1",
+    "livewatch.openocdPort": 50001,
+    "livewatch.pollInterval": 250,
+    "livewatch.ramRegions": [
+        "0x20000000-0x20020000",
+        "0x10000000-0x10010000"
+    ]
+}
