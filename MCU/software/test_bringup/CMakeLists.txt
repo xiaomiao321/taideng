@@ -55,6 +55,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_buzzer.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_linux_power.c
 )
 
 # Add include paths
