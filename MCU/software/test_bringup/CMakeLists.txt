@@ -65,6 +65,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
+$<$<CONFIG:Debug>:AITAID_LOG_LEVEL=4>
+$<$<CONFIG:Release>:AITAID_LOG_LEVEL=3>
     # Add user defined symbols
 )
 
