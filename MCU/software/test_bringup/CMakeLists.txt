@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/heap_4.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_buzzer.c
 )
 
 # Add include paths

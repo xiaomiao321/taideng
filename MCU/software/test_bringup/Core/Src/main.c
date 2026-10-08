@@ -27,6 +27,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "FreeRTOS.h"
+#include "bsp_buzzer.h"
 #include "bsp_led.h"
 #include "bsp_log.h"
 #include "task.h"
@@ -51,8 +52,6 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-volatile uint32_t debug_loop_count = 0;
-volatile uint32_t debug_pa5_state = 0;
 
 /* USER CODE END PV */
 
@@ -110,6 +109,11 @@ int main(void)
     MX_USART3_UART_Init();
     /* USER CODE BEGIN 2 */
     bsp_led_init();
+    if (bsp_buzzer_init() != BSP_BUZZER_STATUS_OK)
+    {
+        (void)bsp_led_set(BSP_LED_ID_ERROR, true);
+        Error_Handler();
+    }
     if (bsp_log_init() != BSP_LOG_STATUS_OK)
     {
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
@@ -125,16 +129,16 @@ int main(void)
         }
     }
     bsp_led_set(BSP_LED_ID_STATE, true);
-    HAL_Delay(3000);
+    HAL_Delay(300);
     bsp_led_set(BSP_LED_ID_STATE, false);
     bsp_led_set(BSP_LED_ID_COMM, true);
-    HAL_Delay(3000);
+    HAL_Delay(300);
     bsp_led_set(BSP_LED_ID_COMM, false);
     bsp_led_set(BSP_LED_ID_ACTIVITY, true);
-    HAL_Delay(3000);
+    HAL_Delay(300);
     bsp_led_set(BSP_LED_ID_ACTIVITY, false);
     bsp_led_set(BSP_LED_ID_ERROR, true);
-    HAL_Delay(3000);
+    HAL_Delay(300);
     bsp_led_set(BSP_LED_ID_ERROR, false);
     /* USER CODE END 2 */
 
@@ -142,15 +146,22 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-        debug_loop_count++;
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-        debug_pa5_state = 1;
-        HAL_Delay(3000);
+        for (uint32_t i = 2000; i < 6000; i++)
+        {
+            if (bsp_buzzer_start(i) != BSP_BUZZER_STATUS_OK)
+            {
+                Error_Handler();
+            }
+            HAL_Delay(1000);
+            if (bsp_buzzer_stop() != BSP_BUZZER_STATUS_OK)
+            {
+                Error_Handler();
+            }
 
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-        debug_pa5_state = 0;
-        HAL_Delay(3000);
-        bsp_led_set(BSP_LED_ID_COMM, true);
+            HAL_Delay(1000);
+        }
+
+        bsp_buzzer_stop();
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */
