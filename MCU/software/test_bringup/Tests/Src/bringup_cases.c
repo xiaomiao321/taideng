@@ -79,12 +79,12 @@ static test_result_t test_led(void)
 
     for (uint32_t i = 0U; i < (uint32_t)BSP_LED_ID_COUNT; ++i)
     {
-        LOG_INFO("LED", "%s 点亮", led_names[i]);
+        LOG_INFO("LED", "%s on", led_names[i]);
         (void)bsp_led_set((bsp_led_id_t)i, true);
         HAL_Delay(1000U);
         (void)bsp_led_set((bsp_led_id_t)i, false);
     }
-    LOG_INFO("LED", "四个状态灯应依次点亮，全部确认后按 HOME");
+    LOG_INFO("LED", "4 LEDs should cycle; press HOME to pass");
     return bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
 }
 
@@ -95,7 +95,7 @@ static test_result_t test_key(void)
         return TEST_FAIL_CONFIG;
     }
     /* 本项就是按键测试：按 HOME 即通过 */
-    LOG_INFO("KEY", "请按一下 HOME 键");
+    LOG_INFO("KEY", "press HOME key now");
     return bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
 }
 
@@ -112,7 +112,7 @@ static test_result_t test_buzzer(void)
     HAL_Delay(1000U);
     (void)bsp_buzzer_stop();
 
-    LOG_INFO("BUZZ", "应听到约 1s 的提示音，听到后按 HOME");
+    LOG_INFO("BUZZ", "expect a ~1s beep; press HOME to pass");
     return bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
 }
 
@@ -122,7 +122,7 @@ static test_result_t test_power(void)
     {
         return TEST_FAIL_CONFIG;
     }
-    LOG_INFO("PWR", "PB12 将输出约 200ms 高脉冲（需示波器观察），按 HOME 确认");
+    LOG_INFO("PWR", "PB12 outputs ~200ms pulse (scope); press HOME to pass");
     if (bsp_linux_power_start(200U) != BSP_OK)
     {
         return TEST_FAIL_COMM;
@@ -157,7 +157,7 @@ static test_result_t test_lamp_one(bsp_light_id_t id, const char *label)
         return TEST_FAIL_COMM;
     }
 
-    LOG_INFO("LAMP", "%s = 50%%，应为 20kHz 方波；确认后按 HOME", label);
+    LOG_INFO("LAMP", "%s = 50%%, expect 20kHz; press HOME to pass", label);
     test_result_t result = bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
     (void)bsp_light_stop(id);
     return result;
@@ -213,7 +213,7 @@ static test_result_t test_motor_one(bsp_motor_id_t id, const char *label,
         return TEST_FAIL_COMM;
     }
 
-    LOG_INFO("MOTOR", "%s %s = 50%%，应为 20kHz 方波；确认后按 HOME", label,
+    LOG_INFO("MOTOR", "%s %s = 50%%, expect 20kHz; press HOME to pass", label,
              forward ? "FI" : "BI");
     test_result_t result = bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
     (void)bsp_motor_coast(id);
