@@ -50,7 +50,7 @@ void bsp_uart_loopback_init(void);
  * @retval BSP_UART_LOOPBACK_STATUS_NOT_INITIALIZED 模块尚未初始化。
  * @retval BSP_UART_LOOPBACK_STATUS_BUSY 测试尚未结束或 UART 已被占用。
  * @retval BSP_UART_LOOPBACK_STATUS_TIMEOUT 阻塞发送超时。
- * @retval BSP_UART_LOOPBACK_STATUS_UART_ERROR 启动接收或发送失败。
+ * @retval BSP_UART_LOOPBACK_STATUS_UART_ERROR 启动接收或发送失败，或此前清理失败。
  *
  * @note 固定发送内容由 .c 中的私有数组定义，接收缓冲区也由模块持有。
  *       两个数组均须在本次异步接收结束前有效，不使用函数栈上的接收数组。
@@ -60,6 +60,7 @@ void bsp_uart_loopback_init(void);
  * @note 发送失败时必须终止本次已启动的接收并检查清理结果，避免遗留忙状态。
  *       接收启动失败时不得发送；若 UART 原本被占用，不得终止他人的收发。
  * @note 正在测试时重复调用不会重置缓冲区、通知标志或超时时间。
+ * @note 清理失败后禁止再次启动；确认 UART 已恢复空闲后才能重新初始化模块。
  * @warning 发送最多阻塞 BSP_UART_LOOPBACK_TX_TIMEOUT_MS；必须保持中断开启。
  * @warning 成功启动后持续调用 bsp_uart_loopback_update() 处理结果和超时。
  */
