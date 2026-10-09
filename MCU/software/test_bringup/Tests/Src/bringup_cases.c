@@ -24,6 +24,13 @@
 #include "bsp_log.h"
 #include "bsp_motor.h"
 
+/* Linux 电源脉冲测试参数，单位毫秒。
+   脉冲会周期性重复，便于示波器随时触发测量，不会"没看清就过去了"。
+   @warning 重复发脉冲意味着会重复按电源键；连 Linux 核心板测量前请先确认其电气要求，
+            或直接断开 Linux 观察 PB12。 */
+#define PWR_TEST_PULSE_MS  (200U)  /* 单次脉冲宽度 */
+#define PWR_TEST_PERIOD_MS (1000U) /* 两次脉冲之间的间隔 */
+
 /* -------------------------------------------------------------------------- */
 /* 软件类：不需要人工判读                                                       */
 /* -------------------------------------------------------------------------- */
@@ -122,19 +129,41 @@ static test_result_t test_power(void)
     {
         return TEST_FAIL_CONFIG;
     }
-    LOG_INFO("PWR", "PB12 outputs ~200ms pulse (scope); press HOME to pass");
-    if (bsp_linux_power_start(200U) != BSP_OK)
+
+    LOG_INFO("PWR", "PB12 pulses %ums every %ums; press HOME to pass",
+             (unsigned int)PWR_TEST_PULSE_MS, (unsigned int)PWR_TEST_PERIOD_MS);
+
+    bringup_confirm_arm();
+
+    if (bsp_linux_power_start(PWR_TEST_PULSE_MS) != BSP_OK)
     {
         return TEST_FAIL_COMM;
     }
 
-    /* 脉冲必须靠周期调用 update 才会释放 */
     uint32_t start_ms = HAL_GetTick();
-    while ((uint32_t)(HAL_GetTick() - start_ms) < 300U)
+    uint32_t last_pulse_ms = start_ms;
+    test_result_t result = TEST_FAIL_NO_RESPONSE;
+
+    /* 自己驱动循环：既周期性重发脉冲，又非阻塞地等待操作员确认。
+       脉冲靠 bsp_linux_power_update() 到期释放。 */
+    while ((uint32_t)(HAL_GetTick() - start_ms) < BRINGUP_CONFIRM_TIMEOUT_MS)
     {
+        if (bringup_confirmed())
+        {
+            result = TEST_PASS;
+            break;
+        }
+        if ((uint32_t)(HAL_GetTick() - last_pulse_ms) >= PWR_TEST_PERIOD_MS)
+        {
+            last_pulse_ms = HAL_GetTick();
+            (void)bsp_linux_power_start(PWR_TEST_PULSE_MS);
+        }
         (void)bsp_linux_power_update();
     }
-    return bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
+
+    /* 结束前务必释放，避免把电源键一直按住 */
+    (void)bsp_linux_power_release();
+    return result;
 }
 
 /* -------------------------------------------------------------------------- */

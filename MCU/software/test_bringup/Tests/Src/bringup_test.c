@@ -32,11 +32,34 @@ const char *test_result_str(test_result_t result)
     }
 }
 
+static uint32_t s_confirm_baseline = 0U;
+static bool s_confirm_armed = false;
+
+void bringup_confirm_arm(void)
+{
+    s_confirm_baseline = 0U;
+    s_confirm_armed = (bsp_key_get_press_count(&s_confirm_baseline) == BSP_OK);
+}
+
+bool bringup_confirmed(void)
+{
+    uint32_t now = 0U;
+
+    if (!s_confirm_armed)
+    {
+        return false;
+    }
+    if (bsp_key_get_press_count(&now) != BSP_OK)
+    {
+        return false;
+    }
+    return (now != s_confirm_baseline);
+}
+
 test_result_t bringup_confirm(uint32_t timeout_ms)
 {
-    uint32_t baseline = 0U;
-
-    if (bsp_key_get_press_count(&baseline) != BSP_OK)
+    bringup_confirm_arm();
+    if (!s_confirm_armed)
     {
         return TEST_FAIL_CONFIG;
     }
@@ -44,13 +67,7 @@ test_result_t bringup_confirm(uint32_t timeout_ms)
     uint32_t start_ms = HAL_GetTick();
     while ((uint32_t)(HAL_GetTick() - start_ms) < timeout_ms)
     {
-        uint32_t now = 0U;
-
-        if (bsp_key_get_press_count(&now) != BSP_OK)
-        {
-            return TEST_FAIL_CONFIG;
-        }
-        if (now != baseline)
+        if (bringup_confirmed())
         {
             return TEST_PASS;
         }

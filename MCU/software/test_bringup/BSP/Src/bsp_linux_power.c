@@ -22,6 +22,21 @@ bsp_status_t bsp_linux_power_init(void)
     return BSP_OK;
 }
 
+bsp_status_t bsp_linux_power_release(void)
+{
+    if (s_is_initialized == false)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+
+    HAL_GPIO_WritePin(LINUX_PWR_PULSE_GPIO_Port, LINUX_PWR_PULSE_Pin,
+                      GPIO_PIN_RESET);
+    s_is_pulse_active = false;
+    s_duration_ms = 0U;
+    s_start_tick_ms = 0U;
+    return BSP_OK;
+}
+
 bsp_status_t bsp_linux_power_start(uint32_t duration_ms)
 {
     if (s_is_initialized == false)

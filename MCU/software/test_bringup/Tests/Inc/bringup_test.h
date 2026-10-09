@@ -17,6 +17,7 @@
 #ifndef AITAID_BRINGUP_TEST_H
 #define AITAID_BRINGUP_TEST_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /**
@@ -71,6 +72,22 @@ void bringup_run_all(void);
  * @note 用于需要人工判读的项目；调用期间被测输出应保持有效。
  */
 test_result_t bringup_confirm(uint32_t timeout_ms);
+
+/**
+ * @brief 记录当前 HOME 按键计数作为确认基线。
+ *
+ * @note 与 bringup_confirmed() 搭配，用于测试需要自己驱动周期性输出、
+ *       不能用 bringup_confirm() 阻塞等待的场合（例如需要重复发脉冲）。
+ */
+void bringup_confirm_arm(void);
+
+/**
+ * @brief 查询自 bringup_confirm_arm() 以来是否检测到一次 HOME 按下。
+ *
+ * @retval true 已确认。
+ * @retval false 尚未确认，或无法读取按键计数。
+ */
+bool bringup_confirmed(void);
 
 /**
  * @brief 返回结果码的短名称，用于日志。

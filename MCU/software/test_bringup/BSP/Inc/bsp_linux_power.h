@@ -69,4 +69,16 @@ bsp_status_t bsp_linux_power_start(uint32_t duration_ms);
  */
 bsp_status_t bsp_linux_power_update(void);
 
+/**
+ * @brief 立即释放 Linux 电源键并结束当前脉冲。
+ *
+ * @retval BSP_OK 已释放。
+ * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化，不改变输出。
+ *
+ * @note 把 PB12 置低使外部 Q10 关断，LINUX_PWR_OD 回到外部上拉的高电平。
+ *       无论当前是否在脉冲中都可以调用（未在脉冲中时视为无效操作），可重复调用。
+ * @note 用于故障处理或测试结束时，确保电源键不会被一直按住。
+ */
+bsp_status_t bsp_linux_power_release(void);
+
 #endif /* AITAID_BSP_LINUX_POWER_H */
