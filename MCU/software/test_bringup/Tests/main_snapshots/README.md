@@ -24,6 +24,9 @@ Git 导出和当前文件复制均逐字节保留，不修正历史代码。没�
 | [10_main_linux_uart_blocking.c](10_main_linux_uart_blocking.c) | 重建：当前 main 模板 + 对话中的测试流程 | 旧阻塞 ReceiveToIdle 接收流程，仅作历史参考：bsp_linux_uart_read 已被当前接口替换，不能直接用当前 BSP 编译；不是即时回环方案。 |
 | [11_main_linux_uart_it.c](11_main_linux_uart_it.c) | 2026-10-09 当前工作文件逐字节复制 | 中断变长接收，先挂接收再每秒发 Hello，收到后 USART3 原样输出。 |
 | [12_main_adc_single.c](12_main_adc_single.c) | 单路 ADC 实板通过后的工作文件逐字节复制 | POT1 / PC2 / Channel 12 轮询采样，每约 100ms 打印；用户已确认信号源及电位器测试通过。 |
+| [13_main_adc_scan_dma.c](13_main_adc_scan_dma.c) | 切换 PC5 单路定位测试前，main 工作文件逐字节复制 | 六路 DMA 的 main 测试逻辑；整组准确性仍在排查，尚未宣布六路通过。保存时 CubeMX 已切到单路 Channel 15，因此切回需另行恢复六路 ADC 配置。 |
+| [14_main_adc_pc5_poll.c](14_main_adc_pc5_poll.c) | PC5 虚焊修复、用户确认读数恢复后的 main 原样复制 | 单路 Channel 15 轮询定位测试，每秒打印 POT6 原始值；恢复此 main 时需配套单路 ADC 配置。 |
+| [15_main_adc_scan_dma_verified.c](15_main_adc_scan_dma_verified.c) | PC5 虚焊修复、恢复六路 DMA 后的 main 原样复制 | 用户已确认六路测试恢复正常；按 POT1～POT6 顺序每秒打印一组。恢复时需配套六路扫描、Normal DMA 配置。 |
 
 12 对应的单路 BSP 头文件和实现也原样保存在 `12_adc_single_bsp/` 中。切回此阶段时还需恢复单路 ADC 的 CubeMX 配置；main 与 BSP 备份不包含旧 IOC。
 
@@ -57,4 +60,7 @@ ddce46e2f576048481a37611bc4419683989b9d5cb6c6e417c57eccf9f2ed270  04_main_log_pr
 157080a4d99f220e644680a0da343ab9ef0d80c4787b499c194f9d733dc2d40c  10_main_linux_uart_blocking.c
 d6c45ac5c67eb5e1ab6a4bfa15a13896e8cb789132d6d64a48af25cd0b67e905  11_main_linux_uart_it.c
 51b06fa39c47a1d7ed4d83719662c3ac689de708876d5800bcfddb0f89c7a8a1  12_main_adc_single.c
+a85e8df736c9590e3fd1667b959c43361c9ddb1c9397d4c0156a5b4a5fd2ca85  13_main_adc_scan_dma.c
+9cebb2a8d127c765c3b146f8c84dc209d9a7fb5ff4e980e8c340fc82043100db  14_main_adc_pc5_poll.c
+c236da09195b6fb9e933a766e7f670cab89cc42f732d8c7552b033bc42efdd5a  15_main_adc_scan_dma_verified.c
 ```

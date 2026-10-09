@@ -69,7 +69,6 @@ void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
-
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
   sConfig.Channel = ADC_CHANNEL_11;
