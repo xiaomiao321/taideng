@@ -53,9 +53,11 @@
 #define LAMP_TEST_GAP_MS   (2000U)  /* 两路之间的熄灭间隔 */
 #define LAMP_TEST_SWEEP_MS (10000U) /* 每档占空比的保持时间 */
 
-/* 本次只测上灯板 UP1~UP4；以后测下灯板时把 LAST 改成 BSP_LIGHT_DOWN3。 */
+/* 测试范围：先上灯板 UP1~UP4，再下灯板 DOWN1~DOWN3。
+   两块板走不同定时器与链路（上：TIM1，U7→RN1→CN7；下：TIM3，U7→RN2→U29，
+   见 MCU/hardware/已知硬件问题.md）。只想测其中一块时改 FIRST/LAST 即可。 */
 #define LAMP_TEST_FIRST_ID BSP_LIGHT_UP1
-#define LAMP_TEST_LAST_ID  BSP_LIGHT_UP4
+#define LAMP_TEST_LAST_ID  BSP_LIGHT_DOWN3
 
 /* 诊断开关：置 1 时跳过 PWM 测试，把 UP1(PE9) 与 UP2(PE11) 都改成普通 GPIO，
    同步输出 1Hz 方波。用于区分断点在「MCU 引脚」还是「走线/排阻/连接器」。
