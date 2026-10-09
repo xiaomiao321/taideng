@@ -27,14 +27,15 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "FreeRTOS.h"
-#include "bsp_adc.h"
 #include "bsp_buzzer.h"
 #include "bsp_common.h"
 #include "bsp_key.h"
 #include "bsp_led.h"
+#include "bsp_light.h"
 #include "bsp_linux_power.h"
 #include "bsp_linux_uart.h"
 #include "bsp_log.h"
+#include "bsp_motor.h"
 #include "task.h"
 
 /* USER CODE END Includes */
@@ -46,7 +47,20 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ADC_TIME_OUT_MS (10U)
+/* 灯板 bring-up 观察参数，单位毫秒。
+   当前只有示波器：保持时间要足够把探头移到目标引脚并读完频率/占空比。 */
+#define LAMP_TEST_HOLD_MS  (10000U) /* 单路输出的保持时间（观察窗口） */
+#define LAMP_TEST_GAP_MS   (2000U)  /* 两路之间的熄灭间隔 */
+#define LAMP_TEST_SWEEP_MS (10000U) /* 每档占空比的保持时间 */
+
+/* 本次只测上灯板 UP1~UP4；以后测下灯板时把 LAST 改成 BSP_LIGHT_DOWN3。 */
+#define LAMP_TEST_FIRST_ID BSP_LIGHT_UP1
+#define LAMP_TEST_LAST_ID  BSP_LIGHT_UP4
+
+/* 诊断开关：置 1 时跳过 PWM 测试，把 UP1(PE9) 与 UP2(PE11) 都改成普通 GPIO，
+   同步输出 1Hz 方波。用于区分断点在「MCU 引脚」还是「走线/排阻/连接器」。
+   测完置回 0。 */
+#define LAMP_TEST_GPIO_PROBE (0)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,11 +77,64 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-void vLED1Task(void *pvParameters);
+#if !LAMP_TEST_GPIO_PROBE
+static void lamp_test_run(void);
+#endif
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+#if !LAMP_TEST_GPIO_PROBE
+/**
+ * @brief 逐路输出 PWM 并做三档占空比扫描，用于确认灯板 PWM 通路。
+ *
+ * @note 逐路用 50% 方波：0% 和 100% 都是直流，只有中间占空比才能同时量到
+ *       频率和占空比。TIM1/TIM3 均为 20kHz。
+ * @note 每路保持 LAMP_TEST_HOLD_MS 再切换，便于把示波器探头移到对应引脚。
+ *       要延长或缩短观察窗口，只改本文件顶部的 LAMP_TEST_* 宏。
+ * @note 三档扫描中 1000 对应引脚恒为高电平（直流），用于确认 100% 输出正确。
+ * @note 测试范围由 LAMP_TEST_FIRST_ID / LAMP_TEST_LAST_ID 决定。
+ */
+static void lamp_test_run(void)
+{
+    static const char *const lamp_names[BSP_LIGHT_COUNT] = {
+        "UP1", "UP2", "UP3", "UP4", "DOWN1", "DOWN2", "DOWN3"};
+    static const uint16_t sweep_duty[3] = {250U, 500U, 1000U};
+
+    const uint32_t first = (uint32_t)LAMP_TEST_FIRST_ID;
+    const uint32_t last = (uint32_t)LAMP_TEST_LAST_ID;
+
+    LOG_INFO("LAMP", "one-by-one, 50%%, expect 20kHz");
+    for (uint32_t id = first; id <= last; ++id)
+    {
+        LOG_INFO("LAMP", "%s = 500 (50%%)", lamp_names[id]);
+        (void)bsp_light_set_duty((bsp_light_id_t)id, 500U);
+        HAL_Delay(LAMP_TEST_HOLD_MS);
+        (void)bsp_light_stop((bsp_light_id_t)id);
+        HAL_Delay(LAMP_TEST_GAP_MS);
+    }
+
+    LOG_INFO("LAMP", "duty sweep: 250 / 500 / 1000");
+    for (uint32_t step = 0U; step < 3U; ++step)
+    {
+        for (uint32_t id = first; id <= last; ++id)
+        {
+            (void)bsp_light_set_duty((bsp_light_id_t)id, sweep_duty[step]);
+        }
+        LOG_INFO("LAMP", "all = %u (%u%%)",
+                 (unsigned int)sweep_duty[step],
+                 (unsigned int)(sweep_duty[step] / 10U));
+        HAL_Delay(LAMP_TEST_SWEEP_MS);
+    }
+
+    for (uint32_t id = first; id <= last; ++id)
+    {
+        (void)bsp_light_stop((bsp_light_id_t)id);
+    }
+    LOG_INFO("LAMP", "done");
+}
+#endif /* !LAMP_TEST_GPIO_PROBE */
 
 /* USER CODE END 0 */
 
@@ -79,7 +146,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-    uint16_t raw_values[BSP_ADC_CHANNEL_COUNT] = {0};
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -122,13 +189,35 @@ int main(void)
     (void)bsp_key_init();
     (void)bsp_linux_power_init();
 
-    bsp_status_t init_status = bsp_adc_init();
+#if LAMP_TEST_GPIO_PROBE
+    /* 诊断模式：把 UP1(PE9)/UP2(PE11) 从 TIM1 复用改为普通推挽输出 */
+    {
+        GPIO_InitTypeDef gpio_probe = {0};
+
+        gpio_probe.Pin = UP_PWM1_Pin | UP_PWM2_Pin;
+        gpio_probe.Mode = GPIO_MODE_OUTPUT_PP;
+        gpio_probe.Pull = GPIO_NOPULL;
+        gpio_probe.Speed = GPIO_SPEED_FREQ_LOW;
+        HAL_GPIO_Init(GPIOE, &gpio_probe);
+    }
+    LOG_INFO("PROBE", "PE9/PE11 as GPIO, 1Hz toggle");
+#else
+    bsp_status_t init_status = bsp_light_init();
     if (init_status != BSP_OK)
     {
-        LOG_ERROR("ADC", "init failed: %s", bsp_status_str(init_status));
+        LOG_ERROR("LAMP", "init failed: %s", bsp_status_str(init_status));
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
+
+    /* 电机不参与本次测试，但显式置为滑行（两路低电平），避免引脚状态不确定 */
+    init_status = bsp_motor_init();
+    if (init_status != BSP_OK)
+    {
+        LOG_WARN("MOTOR", "init failed: %s (ignored)",
+                 bsp_status_str(init_status));
+    }
+
     init_status = bsp_buzzer_init();
     if (init_status != BSP_OK)
     {
@@ -136,7 +225,8 @@ int main(void)
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
-    LOG_INFO("ADC", "POT1-POT6 scan DMA test");
+    LOG_INFO("LAMP", "lamp bring-up test");
+#endif /* LAMP_TEST_GPIO_PROBE */
 
   /* USER CODE END 2 */
 
@@ -144,19 +234,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1)
     {
-        bsp_status_t adc_status =
-            bsp_adc_read_all(raw_values, ADC_TIME_OUT_MS);
-        if (adc_status != BSP_OK)
-        {
-            (void)bsp_led_set(BSP_LED_ID_ERROR, true);
-            Error_Handler();
-        }
-        for (uint32_t i = 0U; i < BSP_ADC_CHANNEL_COUNT; ++i)
-        {
-            LOG_INFO("ADC", "POT%u: %u", (unsigned int)(i + 1U),
-                     (unsigned int)raw_values[i]);
-        }
-        HAL_Delay(1000U);
+#if LAMP_TEST_GPIO_PROBE
+        HAL_GPIO_TogglePin(GPIOE, UP_PWM1_Pin | UP_PWM2_Pin);
+        LOG_INFO("PROBE", "toggle");
+        HAL_Delay(500U);
+#else
+        lamp_test_run();
+        HAL_Delay(2000U);
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
