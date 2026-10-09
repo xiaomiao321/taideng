@@ -1,0 +1,33 @@
+plugins { id 'com.android.library' }
+
+version = '0.3.0'
+
+android {
+    namespace 'com.example.rk3566hardwarevalidator.sdk'
+    compileSdk 37
+    defaultConfig {
+        minSdk 29
+        consumerProguardFiles 'consumer-rules.pro'
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    // Assets, CMake sources and native runtime all belong to this SDK module.
+    sourceSets { main { assets.srcDirs = ['src/main/assets'] } }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    ndkVersion '27.2.12479018'
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.10.1'
+    api 'com.github.mik3y:usb-serial-for-android:3.11.0'
+    compileOnly files('libs/sherpa-onnx-v1.13.6-arm64-rknn-no-runtime.aar')
+    testImplementation 'junit:junit:4.13.2'
+}

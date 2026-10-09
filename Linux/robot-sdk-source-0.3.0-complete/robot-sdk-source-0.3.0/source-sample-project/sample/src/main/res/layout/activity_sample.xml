@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:fillViewport="true" android:background="#F4F7FC">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="16dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Robot SDK 接入示例" android:textSize="24sp" android:textStyle="bold" />
+        <TextView android:id="@+id/sampleIntegrationMode" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="SDK 0.3.0" android:textSize="14sp" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="首次配置：分别选择摄像头并核对预览。默认绑定仅在本次枚举会话有效；缺失时不会自动替换。" />
+        <Button android:id="@+id/refreshCamerasButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="重新枚举并清除临时角色" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="坐姿摄像头" />
+        <Spinner android:id="@+id/postureCameraSelection" android:layout_width="match_parent" android:layout_height="48dp" />
+        <Button android:id="@+id/bindPostureButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="确认坐姿角色并预览" />
+        <com.example.rk3566hardwarevalidator.sdksample.FourThreePreviewLayout
+            android:id="@+id/previewHost" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:background="#111111" />
+        <TextView android:id="@+id/cameraState" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="等待相机" />
+        <Button android:id="@+id/retryCameraButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="重试相机" />
+        <TextView android:id="@+id/postureState" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="等待坐姿结果" android:textSize="16sp" />
+        <TextView android:id="@+id/postureJson" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="尚无坐姿业务快照" android:textIsSelectable="true" android:fontFamily="monospace" />
+        <Button android:id="@+id/copyPostureJsonButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="复制坐姿快照 JSON" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="拍题摄像头（需不同设备）" android:textStyle="bold" />
+        <Spinner android:id="@+id/questionCameraSelection" android:layout_width="match_parent" android:layout_height="48dp" />
+        <Button android:id="@+id/bindQuestionButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="确认拍题角色并预览" />
+        <com.example.rk3566hardwarevalidator.sdksample.FourThreePreviewLayout
+            android:id="@+id/questionPreviewHost" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:background="#111111" />
+        <TextView android:id="@+id/questionCameraState" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="未绑定拍题摄像头；不会借用坐姿摄像头" />
+        <TextView android:id="@+id/cameraJson" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="尚无相机枚举" android:textIsSelectable="true" android:fontFamily="monospace" />
+        <Button android:id="@+id/copyCameraJsonButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="复制相机角色 JSON" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+            <Button android:id="@+id/captureAnnotatedButton" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1" android:text="抓取标注图" />
+            <Button android:id="@+id/capturePhotoButton" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1" android:text="拍题摄像头 JPEG" />
+        </LinearLayout>
+        <TextView android:id="@+id/photoState" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="未拍摄" />
+        <ImageView android:id="@+id/annotatedSnapshot" android:layout_width="match_parent"
+            android:layout_height="150dp" android:contentDescription="最近一次标注截图"
+            android:scaleType="fitCenter" android:background="#DCE4EE" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="18dp" android:text="语音识别" android:textStyle="bold" android:textSize="20sp" />
+        <TextView android:id="@+id/speechState" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="等待语音模型" />
+        <TextView android:id="@+id/speechFinal" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="最终语句：暂无" />
+        <Button android:id="@+id/retrySpeechButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="重试语音输入" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="18dp" android:text="MCU 串口控制" android:textStyle="bold" android:textSize="20sp" />
+        <TextView android:id="@+id/mcuState" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="正在搜索 USB 串口" />
+        <TextView android:id="@+id/mcuStatus" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="尚无实际状态回读" />
+        <TextView android:id="@+id/mcuResult" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="尚无命令结果" />
+        <Button android:id="@+id/refreshMcuButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="刷新串口设备" />
+        <Switch android:id="@+id/lightSwitch" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="灯光开关" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="灯光亮度（松开后发送）" />
+        <SeekBar android:id="@+id/brightnessSeekBar" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:max="100" android:progress="50" />
+        <TextView android:id="@+id/mcuCapabilities" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="模式/机械臂：没有经固件验证的 capability，不支持" />
+        <Spinner android:id="@+id/lightModeSelection" android:layout_width="match_parent" android:layout_height="48dp" />
+        <Button android:id="@+id/setLightModeButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="应用灯光模式（未支持）" />
+        <Spinner android:id="@+id/armJointSelection" android:layout_width="match_parent" android:layout_height="48dp" />
+        <EditText android:id="@+id/armPositionInput" android:layout_width="match_parent" android:layout_height="48dp"
+            android:inputType="numberSigned" android:hint="目标位置（毫度）" />
+        <EditText android:id="@+id/armSpeedInput" android:layout_width="match_parent" android:layout_height="48dp"
+            android:inputType="number" android:hint="速度（毫度/秒）" />
+        <Button android:id="@+id/setArmButton" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="应用机械臂目标（未支持）" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+            <Button android:id="@+id/stopButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="停止" />
+            <Button android:id="@+id/forwardButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="前进" />
+            <Button android:id="@+id/backwardButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="后退" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+            <Button android:id="@+id/leftButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="左转" />
+            <Button android:id="@+id/rightButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="右转" />
+        </LinearLayout>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="10dp" android:text="处理中禁止重复操作；STOP 始终可提交。ACK_RECEIVED 仅表示接收，APPLIED 需新的关联状态回读。复制 JSON 不会发送蓝牙消息。" />
+    </LinearLayout>
+</ScrollView>

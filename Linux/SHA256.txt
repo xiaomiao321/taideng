@@ -1,0 +1,3 @@
+54b065479618a1a5db1a9ffe5a8abc834f02c84686887e95cbbfe8b147118b1b  README.md
+8789c3c7624c9f72cadab8fa52143466d3f12cc634165d531351fa0ff6b3151f  robot-sdk-aar-0.3.0-complete.zip
+9063edabd8970c1824529d5d12eab763125b0f71962b946ecf2bffe5c95b2fbc  robot-sdk-source-0.3.0-complete.zip
