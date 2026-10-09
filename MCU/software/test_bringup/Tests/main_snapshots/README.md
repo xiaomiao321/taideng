@@ -20,7 +20,7 @@ Git 导出和当前文件复制均逐字节保留，不修正历史代码。没�
 | [06_main_home_poll.c](06_main_home_poll.c) | 重建：当前 main 模板 + 对话中的测试流程 | 原始电平轮询；采用评审建议的 5ms 周期，不保证软件消抖。未注册项目 EXTI 回调。 |
 | [07_main_home_exti.c](07_main_home_exti.c) | 重建：当前 main 模板 + 对话中的测试流程 | 下降沿中断累计计数；BSP 仍为 20ms 边沿过滤，不保证一按一次。 |
 | [08_main_linux_power.c](08_main_linux_power.c) | Git 11916e8 原样导出 | 启动一次 100ms 电源键脉冲，while 周期 update；先断开 Linux，观察 PB12。 |
-| [09_main_uart1_loopback.c](09_main_uart1_loopback.c) | 重建：当前 main 模板 + 对话中的测试流程 | 先中断接收，再阻塞发送；短接 USART1 TX/RX，固定 8 字节比较。 |
+| [09_main_uart1_loopback.c](09_main_uart1_loopback.c) | 重建：当前 main 模板 + 对话中的测试流程 | 先中断接收，再阻塞发送；短接 USART1 TX/RX，固定 8 字节比较。对应模块 `bsp_uart_loopback` 已移除，仅作历史记录。 |
 | [10_main_linux_uart_blocking.c](10_main_linux_uart_blocking.c) | 重建：当前 main 模板 + 对话中的测试流程 | 旧阻塞 ReceiveToIdle 接收流程，仅作历史参考：bsp_linux_uart_read 已被当前接口替换，不能直接用当前 BSP 编译；不是即时回环方案。 |
 | [11_main_linux_uart_it.c](11_main_linux_uart_it.c) | 2026-10-09 当前工作文件逐字节复制 | 中断变长接收，先挂接收再每秒发 Hello，收到后 USART3 原样输出。 |
 | [12_main_adc_single.c](12_main_adc_single.c) | 单路 ADC 实板通过后的工作文件逐字节复制 | POT1 / PC2 / Channel 12 轮询采样，每约 100ms 打印；用户已确认信号源及电位器测试通过。 |
@@ -34,7 +34,7 @@ Git 导出和当前文件复制均逐字节保留，不修正历史代码。没�
 
 1. 先备份当前 `Core/Src/main.c`，将选中的完整归档文件复制到这个位置。一次只编译一个 main。
 2. 检查 CMake 包含该版本使用的 BSP 源文件，不添加 `Tests/main_snapshots/*.c`。
-3. 09 固定回环需要加入 `bsp_uart_loopback.c`，并移除 `bsp_linux_uart.c`；11 Linux 中断串口版反过来。两个模块都定义 UART 错误回调，不能一起编译。
+3. 09 依赖已移除的 `bsp_uart_loopback` 模块，不能直接用当前 BSP 编译；如需 UART 回环，请基于 `bsp_linux_uart` 在 `Tests/` 里新增回环测试用例。11 使用当前维护的 `bsp_linux_uart` 中断接收接口。
 4. HOME 中断需要 EXTI15_10；USART1 中断测试需要 USART1_IRQn 及 `HAL_UART_IRQHandler(&huart1)`。当前 IOC 已开启两者。
 5. 10 是旧接口参考，不能直接替换后运行。历史版本应同时核对当时 BSP/IOC，不能只靠 main 完整就假定可以恢复全部运行行为。
 6. Debug 构建后按现有 F5 烧录。正式运行电源脉冲或接电机之前检查接线和外设状态。

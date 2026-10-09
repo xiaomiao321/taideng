@@ -29,6 +29,7 @@
 #include "FreeRTOS.h"
 #include "bsp_adc.h"
 #include "bsp_buzzer.h"
+#include "bsp_common.h"
 #include "bsp_key.h"
 #include "bsp_led.h"
 #include "bsp_linux_power.h"
@@ -112,17 +113,26 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-    bsp_led_init();
-    bsp_key_init();
-    bsp_linux_power_init();
-    bsp_adc_init();
-    if (bsp_buzzer_init() != BSP_BUZZER_STATUS_OK)
+    (void)bsp_led_init();  /* 出错指示先就绪 */
+    if (bsp_log_init() != BSP_OK)
     {
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
-    if (bsp_log_init() != BSP_LOG_STATUS_OK)
+    (void)bsp_key_init();
+    (void)bsp_linux_power_init();
+
+    bsp_status_t init_status = bsp_adc_init();
+    if (init_status != BSP_OK)
     {
+        LOG_ERROR("ADC", "init failed: %s", bsp_status_str(init_status));
+        (void)bsp_led_set(BSP_LED_ID_ERROR, true);
+        Error_Handler();
+    }
+    init_status = bsp_buzzer_init();
+    if (init_status != BSP_OK)
+    {
+        LOG_ERROR("BUZZ", "init failed: %s", bsp_status_str(init_status));
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
@@ -134,9 +144,9 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1)
     {
-        bsp_adc_status_t adc_status =
+        bsp_status_t adc_status =
             bsp_adc_read_all(raw_values, ADC_TIME_OUT_MS);
-        if (adc_status != BSP_ADC_STATUS_OK)
+        if (adc_status != BSP_OK)
         {
             (void)bsp_led_set(BSP_LED_ID_ERROR, true);
             Error_Handler();
@@ -200,13 +210,7 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == HOME_KEY_Pin)
-    {
-        bsp_key_on_exti_from_isr();
-    }
-}
+/* HAL 弱回调统一放在 Core/Src/hal_callback_dispatch.c，不在 main.c 定义。 */
 /* USER CODE END 4 */
 
 /**

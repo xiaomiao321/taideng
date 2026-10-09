@@ -6,6 +6,8 @@
 #ifndef AITAID_BSP_LOG_H
 #define AITAID_BSP_LOG_H
 
+#include "bsp_common.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,30 +32,15 @@
 #endif
 
 /**
- * @brief 日志发送操作的返回状态。
- */
-typedef enum
-{
-    BSP_LOG_STATUS_OK = 0,
-    BSP_LOG_STATUS_NOT_INITIALIZED,
-    BSP_LOG_STATUS_INVALID_ARGUMENT,
-    BSP_LOG_STATUS_BUSY,
-    BSP_LOG_STATUS_TIMEOUT,
-    BSP_LOG_STATUS_TRANSMIT_ERROR,
-    BSP_LOG_STATUS_FORMAT_ERROR,
-    BSP_LOG_STATUS_BUFFER_TOO_SMALL
-} bsp_log_status_t;
-
-/**
  * @brief 初始化 Bring-up 日志模块。
  *
- * @retval BSP_LOG_STATUS_OK 初始化成功。
- * @retval BSP_LOG_STATUS_TRANSMIT_ERROR 调试串口未处于可用状态。
+ * @retval BSP_OK 初始化成功。
+ * @retval BSP_ERR_CONFIG 调试串口句柄未绑定 USART3，或未处于可用状态。
  *
  * @note 调用本函数前必须已经执行 MX_USART3_UART_Init()。
  * @note 本模块固定使用 USART3，115200 bit/s、8N1、无硬件流控。
  */
-bsp_log_status_t bsp_log_init(void);
+bsp_status_t bsp_log_init(void);
 
 /**
  * @brief 通过调试串口阻塞发送一段原始字节数据。
@@ -61,32 +48,32 @@ bsp_log_status_t bsp_log_init(void);
  * @param[in] data 待发送数据的首地址，不允许为 NULL。
  * @param[in] length 待发送数据长度，单位为字节，必须大于 0。
  *
- * @retval BSP_LOG_STATUS_OK 发送成功。
- * @retval BSP_LOG_STATUS_NOT_INITIALIZED 日志模块尚未初始化。
- * @retval BSP_LOG_STATUS_INVALID_ARGUMENT 参数无效。
- * @retval BSP_LOG_STATUS_BUSY UART 当前忙。
- * @retval BSP_LOG_STATUS_TIMEOUT UART 发送超时。
- * @retval BSP_LOG_STATUS_TRANSMIT_ERROR UART 发生其他发送错误。
+ * @retval BSP_OK 发送成功。
+ * @retval BSP_ERR_NOT_INITIALIZED 日志模块尚未初始化。
+ * @retval BSP_ERR_PARAM 参数无效。
+ * @retval BSP_BUSY UART 当前忙。
+ * @retval BSP_ERR_TIMEOUT UART 发送超时。
+ * @retval BSP_ERR_HAL UART 发生其他发送错误。
  *
  * @warning 本函数为阻塞接口，不能从中断服务程序调用。
  */
-bsp_log_status_t bsp_log_write(const uint8_t *data, size_t length);
+bsp_status_t bsp_log_write(const uint8_t *data, size_t length);
 
 /**
  * @brief 通过调试串口阻塞发送以空字符结尾的字符串。
  *
  * @param[in] message 待发送字符串，不允许为 NULL。
  *
- * @retval BSP_LOG_STATUS_OK 发送成功。
- * @retval BSP_LOG_STATUS_NOT_INITIALIZED 日志模块尚未初始化。
- * @retval BSP_LOG_STATUS_INVALID_ARGUMENT 参数无效。
- * @retval BSP_LOG_STATUS_BUSY UART 当前忙。
- * @retval BSP_LOG_STATUS_TIMEOUT UART 发送超时。
- * @retval BSP_LOG_STATUS_TRANSMIT_ERROR UART 发生其他发送错误。
+ * @retval BSP_OK 发送成功。
+ * @retval BSP_ERR_NOT_INITIALIZED 日志模块尚未初始化。
+ * @retval BSP_ERR_PARAM 参数无效。
+ * @retval BSP_BUSY UART 当前忙。
+ * @retval BSP_ERR_TIMEOUT UART 发送超时。
+ * @retval BSP_ERR_HAL UART 发生其他发送错误。
  *
  * @warning 本函数为阻塞接口，不能从中断服务程序调用。
  */
-bsp_log_status_t bsp_log_write_string(const char *message);
+bsp_status_t bsp_log_write_string(const char *message);
 
 /**
  * @brief 将 printf 风格的消息格式化后，通过调试串口阻塞发送。
@@ -94,21 +81,20 @@ bsp_log_status_t bsp_log_write_string(const char *message);
  * @param[in] format 格式字符串，不允许为 NULL 或空字符串。
  * @param[in] ... 与格式字符串匹配的可变参数。
  *
- * @retval BSP_LOG_STATUS_OK 发送成功，或格式化结果为空且无须发送。
- * @retval BSP_LOG_STATUS_NOT_INITIALIZED 日志模块尚未初始化。
- * @retval BSP_LOG_STATUS_INVALID_ARGUMENT 格式字符串无效。
- * @retval BSP_LOG_STATUS_FORMAT_ERROR 格式化函数返回错误。
- * @retval BSP_LOG_STATUS_BUFFER_TOO_SMALL 格式化结果超长，整条消息不发送。
- * @retval BSP_LOG_STATUS_BUSY UART 当前忙。
- * @retval BSP_LOG_STATUS_TIMEOUT UART 发送超时。
- * @retval BSP_LOG_STATUS_TRANSMIT_ERROR UART 发生其他发送错误。
+ * @retval BSP_OK 发送成功，或格式化结果为空且无须发送。
+ * @retval BSP_ERR_NOT_INITIALIZED 日志模块尚未初始化。
+ * @retval BSP_ERR_PARAM 格式字符串无效，或格式化函数返回错误。
+ * @retval BSP_ERR_BUFFER_TOO_SMALL 格式化结果超长，整条消息不发送。
+ * @retval BSP_BUSY UART 当前忙。
+ * @retval BSP_ERR_TIMEOUT UART 发送超时。
+ * @retval BSP_ERR_HAL UART 发生其他发送错误。
  *
  * @note 使用 256 字节缓冲区，最多发送 255 字节，不发送末尾的空字符。
  * @note 本函数不自动添加换行，调用者按需在格式字符串中添加换行。
  * @warning 本函数为阻塞接口，不能从中断服务程序调用。
  * @warning 当前版本不保证多任务并发调用安全。
  */
-bsp_log_status_t bsp_log_printf(const char *format, ...);
+bsp_status_t bsp_log_printf(const char *format, ...);
 
 /**
  * @brief 输出带时间戳、等级和模块标签的单行格式化日志。
@@ -118,14 +104,13 @@ bsp_log_status_t bsp_log_printf(const char *format, ...);
  * @param[in] format printf 风格的格式字符串，不允许为 NULL 或空字符串。
  * @param[in] ... 与格式字符串匹配的可变参数。
  *
- * @retval BSP_LOG_STATUS_OK 发送成功，或日志被等级过滤而未发送。
- * @retval BSP_LOG_STATUS_NOT_INITIALIZED 日志模块尚未初始化。
- * @retval BSP_LOG_STATUS_INVALID_ARGUMENT 等级、标签或格式字符串无效。
- * @retval BSP_LOG_STATUS_FORMAT_ERROR 前缀或正文格式化失败。
- * @retval BSP_LOG_STATUS_BUFFER_TOO_SMALL 完整日志超长，整条消息不发送。
- * @retval BSP_LOG_STATUS_BUSY UART 当前忙。
- * @retval BSP_LOG_STATUS_TIMEOUT UART 发送超时。
- * @retval BSP_LOG_STATUS_TRANSMIT_ERROR UART 发生其他发送错误。
+ * @retval BSP_OK 发送成功，或日志被等级过滤而未发送。
+ * @retval BSP_ERR_NOT_INITIALIZED 日志模块尚未初始化。
+ * @retval BSP_ERR_PARAM 等级、标签或格式字符串无效，或格式化失败。
+ * @retval BSP_ERR_BUFFER_TOO_SMALL 完整日志超长，整条消息不发送。
+ * @retval BSP_BUSY UART 当前忙。
+ * @retval BSP_ERR_TIMEOUT UART 发送超时。
+ * @retval BSP_ERR_HAL UART 发生其他发送错误。
  *
  * @note 先检查初始化和参数，再过滤等级；level > AITAID_LOG_LEVEL 时
  *       返回成功，不进行格式化或发送。
@@ -140,9 +125,9 @@ bsp_log_status_t bsp_log_printf(const char *format, ...);
  * @warning 本函数为阻塞接口，不能从中断服务程序调用。
  * @warning 当前版本不保证多任务并发调用安全。
  */
-bsp_log_status_t bsp_log_print(uint32_t level,
-                               const char *tag,
-                               const char *format, ...);
+bsp_status_t bsp_log_print(uint32_t level,
+                           const char *tag,
+                           const char *format, ...);
 
 /*
  * 应用层使用 LOG_*(tag, format, ...) 宏。

@@ -4,14 +4,15 @@
 #include "stm32f4xx_hal.h"
 
 
-void bsp_led_init(void)
+bsp_status_t bsp_led_init(void)
 {
     HAL_GPIO_WritePin(LED_STATE_GPIO_Port, LED_STATE_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LED_COMM_GPIO_Port, LED_COMM_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LED_ACT_GPIO_Port, LED_ACT_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LED_ERR_GPIO_Port, LED_ERR_Pin, GPIO_PIN_SET);
+    return BSP_OK;
 }
-bsp_led_status_t bsp_led_set(bsp_led_id_t led_id, bool is_on)
+bsp_status_t bsp_led_set(bsp_led_id_t led_id, bool is_on)
 {
     switch (led_id)
     {
@@ -32,11 +33,11 @@ bsp_led_status_t bsp_led_set(bsp_led_id_t led_id, bool is_on)
                               is_on ? GPIO_PIN_RESET : GPIO_PIN_SET);
             break;
         default:
-            return BSP_LED_STATUS_INVALID_ID;
+            return BSP_ERR_PARAM;
     }
-    return BSP_LED_STATUS_OK;
+    return BSP_OK;
 }
-bsp_led_status_t bsp_led_toggle(bsp_led_id_t led_id)
+bsp_status_t bsp_led_toggle(bsp_led_id_t led_id)
 {
     switch (led_id)
     {
@@ -53,15 +54,15 @@ bsp_led_status_t bsp_led_toggle(bsp_led_id_t led_id)
             HAL_GPIO_TogglePin(LED_ERR_GPIO_Port, LED_ERR_Pin);
             break;
         default:
-            return BSP_LED_STATUS_INVALID_ID;
+            return BSP_ERR_PARAM;
     }
-    return BSP_LED_STATUS_OK;
+    return BSP_OK;
 }
-bsp_led_status_t bsp_led_get_state(bsp_led_id_t led_id, bool *is_on)
+bsp_status_t bsp_led_get_state(bsp_led_id_t led_id, bool *is_on)
 {
     if (is_on == NULL)
     {
-        return BSP_LED_STATUS_INVALID_ARGUMENT;
+        return BSP_ERR_PARAM;
     }
 
     switch (led_id)
@@ -83,7 +84,7 @@ bsp_led_status_t bsp_led_get_state(bsp_led_id_t led_id, bool *is_on)
                       GPIO_PIN_RESET);
             break;
         default:
-            return BSP_LED_STATUS_INVALID_ID;
+            return BSP_ERR_PARAM;
     }
-    return BSP_LED_STATUS_OK;
+    return BSP_OK;
 }

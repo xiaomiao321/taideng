@@ -534,6 +534,16 @@ static void communication_task(void *argument);
 static void safety_task(void *argument);
 ```
 
+### 8.4 HAL 回调的归属
+
+HAL 的 `HAL_*_Callback`（如 `HAL_UART_ErrorCallback`、`HAL_ADC_ConvCpltCallback`）是全局弱符号：整个程序只能有一处强定义，由 HAL 的中断处理函数按名称调用，不能声明为 `static`。因此它属于集成层，不属于任何单个驱动。
+
+1. 除 CubeMX 生成的时间基准回调（如 TIM6 时基的 `HAL_TIM_PeriodElapsedCallback`，必须留在 `main.c`）外，HAL 弱回调只允许在 `Core/Src/hal_callback_dispatch.c` 中定义；不得在其他文件重复定义，尤其不得写在驱动模块内。
+2. 回调只做“按实例路由”：判断 `huart->Instance`、`hadc->Instance` 等，然后转发给对应驱动的 `_from_isr` 接口；不打印日志、不比较数据、不调用阻塞接口。
+3. 驱动对外只提供 `_from_isr` 形式的普通函数（如 `bsp_linux_uart_on_rx_event_from_isr()`）；真正的处理、超时和清理放在驱动的 `poll`/`update` 中，由主循环或任务调用。
+4. 不允许把回调写进驱动 `.c`：这样该驱动无法同时存在两个实例、无法与其他同类驱动共存，复制到其他工程时还会静默覆盖全局符号。
+5. 本限制只针对“定义全局弱回调”这一件事；驱动仍可直接调用 HAL 的普通函数（如 `HAL_UART_Transmit`）。
+
 ## 9. MCU 安全规则
 
 ### 9.1 动态内存
@@ -811,6 +821,7 @@ static bool is_valid_led_id(bsp_led_id_t led_id);
 - [ ] HAL 和驱动返回值已处理。
 - [ ] 中断中没有阻塞、日志或复杂计算。
 - [ ] 任务与中断共享数据有明确同步方式。
+- [ ] HAL 弱回调只在 `hal_callback_dispatch.c` 中定义，驱动只提供 `_from_isr`。
 - [ ] 电机和灯光在异常路径下回到安全状态。
 - [ ] CubeMX 手写代码位于 USER CODE 区域。
 - [ ] 没有无意修改生成代码或第三方库。

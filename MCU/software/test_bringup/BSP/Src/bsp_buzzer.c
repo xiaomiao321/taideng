@@ -8,30 +8,30 @@
 static bool s_is_buzzer_initialized = false;
 static bool s_is_buzzer_active = false;
 
-bsp_buzzer_status_t bsp_buzzer_init(void)
+bsp_status_t bsp_buzzer_init(void)
 {
     if (s_is_buzzer_initialized)
     {
-        return BSP_BUZZER_STATUS_OK;
+        return BSP_OK;
     }
     if (htim13.Instance != TIM13)
     {
-        return BSP_BUZZER_STATUS_TIMER_ERROR;
+        return BSP_ERR_CONFIG;
     }
     __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0U);
     s_is_buzzer_initialized = true;
-    return BSP_BUZZER_STATUS_OK;
+    return BSP_OK;
 }
 
-bsp_buzzer_status_t bsp_buzzer_start(uint32_t frequency_hz)
+bsp_status_t bsp_buzzer_start(uint32_t frequency_hz)
 {
     if (frequency_hz == 0U)
     {
-        return BSP_BUZZER_STATUS_INVALID_ARGUMENT;
+        return BSP_ERR_PARAM;
     }
     if (s_is_buzzer_initialized == false)
     {
-        return BSP_BUZZER_STATUS_NOT_INITIALIZED;
+        return BSP_ERR_NOT_INITIALIZED;
     }
 
     uint32_t timer_clock_hz = HAL_RCC_GetPCLK1Freq() * 2U;
@@ -41,14 +41,14 @@ bsp_buzzer_status_t bsp_buzzer_start(uint32_t frequency_hz)
 
     if ((period_counts < 2U) || (period_counts > 65536U))
     {
-        return BSP_BUZZER_STATUS_INVALID_ARGUMENT;
+        return BSP_ERR_PARAM;
     }
 
     uint32_t arr = period_counts - 1U;
     uint32_t compare = period_counts / 2U;
     if (arr > 0xFFFFU)
     {
-        return BSP_BUZZER_STATUS_INVALID_ARGUMENT;
+        return BSP_ERR_PARAM;
     }
 
     __HAL_TIM_SET_AUTORELOAD(&htim13, arr);
@@ -58,54 +58,54 @@ bsp_buzzer_status_t bsp_buzzer_start(uint32_t frequency_hz)
         HAL_OK) /*使 ARR 和 CCR 的新值立即生效*/
     {
         __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0U);
-        return BSP_BUZZER_STATUS_TIMER_ERROR;
+        return BSP_ERR_HAL;
     }
 
     /* 已经运行，不需要再次启动 */
     if (s_is_buzzer_active)
     {
-        return BSP_BUZZER_STATUS_OK;
+        return BSP_OK;
     }
     /* 尚未运行，启动PWM输出*/
     if (HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1) != HAL_OK)
     {
         __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0U);
-        return BSP_BUZZER_STATUS_TIMER_ERROR;
+        return BSP_ERR_HAL;
     }
     s_is_buzzer_active = true;
-    return BSP_BUZZER_STATUS_OK;
+    return BSP_OK;
 }
 
-bsp_buzzer_status_t bsp_buzzer_stop(void)
+bsp_status_t bsp_buzzer_stop(void)
 {
     if (s_is_buzzer_initialized == false)
     {
-        return BSP_BUZZER_STATUS_NOT_INITIALIZED;
+        return BSP_ERR_NOT_INITIALIZED;
     }
     if (!s_is_buzzer_active)
     {
-        return BSP_BUZZER_STATUS_OK;
+        return BSP_OK;
     }
     if (HAL_TIM_PWM_Stop(&htim13, TIM_CHANNEL_1) != HAL_OK)
     {
-        return BSP_BUZZER_STATUS_TIMER_ERROR;
+        return BSP_ERR_HAL;
     }
     __HAL_TIM_SET_COMPARE(&htim13, TIM_CHANNEL_1, 0U);
     s_is_buzzer_active = false;
 
-    return BSP_BUZZER_STATUS_OK;
+    return BSP_OK;
 }
 
-bsp_buzzer_status_t bsp_buzzer_get_state(bool *is_active)
+bsp_status_t bsp_buzzer_get_state(bool *is_active)
 {
     if (s_is_buzzer_initialized == false)
     {
-        return BSP_BUZZER_STATUS_NOT_INITIALIZED;
+        return BSP_ERR_NOT_INITIALIZED;
     }
     if (is_active == NULL)
     {
-        return BSP_BUZZER_STATUS_INVALID_ARGUMENT;
+        return BSP_ERR_PARAM;
     }
     *is_active = s_is_buzzer_active;
-    return BSP_BUZZER_STATUS_OK;
+    return BSP_OK;
 }

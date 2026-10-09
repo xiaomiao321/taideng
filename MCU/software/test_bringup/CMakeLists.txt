@@ -52,6 +52,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/stream_buffer.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/heap_4.c
+    # HAL 弱回调的唯一实现位置（集成层，非 CubeMX 管理）
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/hal_callback_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_common.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_buzzer.c
