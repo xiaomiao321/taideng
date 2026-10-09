@@ -66,12 +66,15 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_linux_power.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_linux_uart.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_adc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_cases.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Inc
 )
 
 # Add project symbols (macros)
