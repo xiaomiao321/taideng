@@ -20,6 +20,7 @@
 #include "main.h"
 
 #include "adc.h"
+#include "dma.h"
 #include "gpio.h"
 #include "tim.h"
 #include "usart.h"
@@ -59,7 +60,8 @@
 
 /* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
+/* Private function prototypes
+   -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void vLED1Task(void *pvParameters);
@@ -78,6 +80,7 @@ int main(void)
 {
     /* USER CODE BEGIN 1 */
     uint16_t adc_value = 0U;
+    uint16_t raw_values[BSP_ADC_CHANNEL_COUNT] = {0};
     /* USER CODE END 1 */
 
     /* MCU
@@ -100,6 +103,7 @@ int main(void)
 
     /* Initialize all configured peripherals */
     MX_GPIO_Init();
+    MX_DMA_Init();
     MX_ADC1_Init();
     MX_TIM1_Init();
     MX_TIM2_Init();
@@ -133,14 +137,19 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-        bsp_adc_status_t adc_status = bsp_adc_read(&adc_value, ADC_TIME_OUT_MS);
+        bsp_adc_status_t adc_status =
+            bsp_adc_read_all(raw_values, ADC_TIME_OUT_MS);
         if (adc_status != BSP_ADC_STATUS_OK)
         {
             (void)bsp_led_set(BSP_LED_ID_ERROR, true);
             Error_Handler();
         }
-        LOG_INFO("ADC", "ADC Value: %u", (unsigned int)adc_value);
-        HAL_Delay(100U);
+        for (size_t i = 0U; i < BSP_ADC_CHANNEL_COUNT; ++i)
+        {
+            adc_value = raw_values[i];
+            LOG_INFO("ADC", "POT%u: %u", i + 1U, (unsigned int)adc_value);
+        }
+        HAL_Delay(1000U);
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */

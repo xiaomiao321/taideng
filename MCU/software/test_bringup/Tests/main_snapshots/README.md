@@ -23,6 +23,9 @@ Git 导出和当前文件复制均逐字节保留，不修正历史代码。没�
 | [09_main_uart1_loopback.c](09_main_uart1_loopback.c) | 重建：当前 main 模板 + 对话中的测试流程 | 先中断接收，再阻塞发送；短接 USART1 TX/RX，固定 8 字节比较。 |
 | [10_main_linux_uart_blocking.c](10_main_linux_uart_blocking.c) | 重建：当前 main 模板 + 对话中的测试流程 | 旧阻塞 ReceiveToIdle 接收流程，仅作历史参考：bsp_linux_uart_read 已被当前接口替换，不能直接用当前 BSP 编译；不是即时回环方案。 |
 | [11_main_linux_uart_it.c](11_main_linux_uart_it.c) | 2026-10-09 当前工作文件逐字节复制 | 中断变长接收，先挂接收再每秒发 Hello，收到后 USART3 原样输出。 |
+| [12_main_adc_single.c](12_main_adc_single.c) | 单路 ADC 实板通过后的工作文件逐字节复制 | POT1 / PC2 / Channel 12 轮询采样，每约 100ms 打印；用户已确认信号源及电位器测试通过。 |
+
+12 对应的单路 BSP 头文件和实现也原样保存在 `12_adc_single_bsp/` 中。切回此阶段时还需恢复单路 ADC 的 CubeMX 配置；main 与 BSP 备份不包含旧 IOC。
 
 ## 如何切回某项测试
 
@@ -53,4 +56,5 @@ ddce46e2f576048481a37611bc4419683989b9d5cb6c6e417c57eccf9f2ed270  04_main_log_pr
 1e5fe1e1c6cfe019b36b643d164127ea5a0375dc38843c538f88615e2564b5be  09_main_uart1_loopback.c
 157080a4d99f220e644680a0da343ab9ef0d80c4787b499c194f9d733dc2d40c  10_main_linux_uart_blocking.c
 d6c45ac5c67eb5e1ab6a4bfa15a13896e8cb789132d6d64a48af25cd0b67e905  11_main_linux_uart_it.c
+51b06fa39c47a1d7ed4d83719662c3ac689de708876d5800bcfddb0f89c7a8a1  12_main_adc_single.c
 ```
