@@ -13,6 +13,7 @@
 *.obj
 *.a
 *.lib
+*.exe
 compile_commands.json
 
 # IDE and editor-local settings
@@ -40,6 +41,8 @@ build.ninja
 *~
 *.log
 *.stackdump
+__pycache__/
+*.pyc
 
 # Operating-system metadata
 .DS_Store
