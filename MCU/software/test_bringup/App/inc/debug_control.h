@@ -1,0 +1,22 @@
+#ifndef DEBUG_CONTROL_H
+#define DEBUG_CONTROL_H
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef struct {
+    bool (*stop)(void);
+    bool (*run)(unsigned motor, int duty);
+    void (*reply)(const char *line);
+} debug_hw_t;
+typedef struct {
+    debug_hw_t hw;
+    uint32_t heartbeat_ms, start_ms, duration_ms, pending_ms;
+    unsigned motor, pending_motor;
+    int duty, pending_duty;
+    bool linked, locked, home, pending;
+} debug_control_t;
+void debug_control_init(debug_control_t *c, debug_hw_t hw);
+void debug_control_line(debug_control_t *c, const char *line, uint32_t now);
+void debug_control_update(debug_control_t *c, uint32_t now, bool home);
+void debug_control_fault(debug_control_t *c, const char *reason);
+#endif

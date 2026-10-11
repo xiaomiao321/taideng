@@ -71,6 +71,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/mcu_command.c
     # 应用层：串口收发与协议接线
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/app_main.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_console.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_cases.c
 )

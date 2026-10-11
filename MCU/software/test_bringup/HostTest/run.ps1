@@ -27,10 +27,17 @@ catch
 {
 }
 
-$includeArgs = @('-I', (Join-Path $projectDir 'BSP\Inc'))
+$includeArgs = @('-I', (Join-Path $projectDir 'BSP\Inc'), '-I', (Join-Path $projectDir 'App\inc'))
 $warnArgs = @('-std=c11', '-Wall', '-Wextra')
 
 $suites = @(
+    @{
+        Name = 'debug_control'
+        Sources = @(
+            (Join-Path $projectDir 'App\src\debug_control.c')
+            (Join-Path $projectDir 'HostTest\debug_control_selftest.c')
+        )
+    }
     @{
         Name = 'protocol'
         Sources = @(

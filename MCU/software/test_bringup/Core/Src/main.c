@@ -25,19 +25,14 @@
 #include "tim.h"
 #include "usart.h"
 
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "FreeRTOS.h"
-#include "app_main.h"
-#include "bringup_test.h"
 #include "bsp_common.h"
 #include "bsp_key.h"
 #include "bsp_led.h"
-#include "bsp_linux_power.h"
 #include "bsp_log.h"
-#include "task.h"
-
+#include "bsp_motor.h"
+#include "debug_console.h"
 
 /* USER CODE END Includes */
 
@@ -48,17 +43,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* 诊断开关：置 1 时不跑测试表，只把 BRINGUP_GPIO_PINS 改成普通推挽输出并输出
-   1Hz 方波。默认为 UP1(PE9)+UP2(PE11)，可改成任意引脚（例如某路电机）。
-   用于定位焊接断点（MCU 引脚 / 走线 / 串阻 / 连接器）；定位完置回 0
-   恢复测试表。 测试表与各项参数见 Tests/Inc/bringup_test.h 与
-   Tests/Src/bringup_cases.c。 */
-#define BRINGUP_GPIO_PROBE (0)
-#define BRINGUP_GPIO_PORT GPIOE
-#define BRINGUP_GPIO_PINS (UP_PWM1_Pin | UP_PWM2_Pin)
-/* 应用模式：1 = 跑与 Android 通信的协议（App/Src/app_main.c）；
-   0 = 跑 bring-up 测试表。定位焊接断点时把 BRINGUP_GPIO_PROBE 置 1。 */
-#define APP_MODE_PROTOCOL (1)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -80,11 +64,6 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-/* 测试用例与运行器在 Tests/ 下：
-   - Tests/Inc/bringup_test.h   框架接口（结果分类、确认、run_all）
-   - Tests/Src/bringup_test.c   运行器与结果转换
-   - Tests/Src/bringup_cases.c  测试表与各用例实现 */
 
 /* USER CODE END 0 */
 
@@ -137,26 +116,7 @@ int main(void)
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
-    (void)bsp_key_init();
-    (void)bsp_linux_power_init();
-
-#if BRINGUP_GPIO_PROBE
-    /* 诊断模式：把指定引脚从定时器复用改为普通推挽输出 */
-    {
-        GPIO_InitTypeDef gpio_probe = {0};
-
-        gpio_probe.Pin = BRINGUP_GPIO_PINS;
-        gpio_probe.Mode = GPIO_MODE_OUTPUT_PP;
-        gpio_probe.Pull = GPIO_NOPULL;
-        gpio_probe.Speed = GPIO_SPEED_FREQ_LOW;
-        HAL_GPIO_Init(BRINGUP_GPIO_PORT, &gpio_probe);
-    }
-    LOG_INFO("PROBE", "GPIO 1Hz toggle");
-#endif /* BRINGUP_GPIO_PROBE */
-
-#if APP_MODE_PROTOCOL
-    app_init();
-#endif /* APP_MODE_PROTOCOL */
+    debug_console_init();
 
     /* USER CODE END 2 */
 
@@ -164,17 +124,7 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-#if APP_MODE_PROTOCOL
-        app_run_once();
-#elif BRINGUP_GPIO_PROBE
-        HAL_GPIO_TogglePin(BRINGUP_GPIO_PORT, BRINGUP_GPIO_PINS);
-        LOG_INFO("PROBE", "toggle");
-        HAL_Delay(500U);
-#else
-        bringup_run_all();
-        LOG_INFO("TEST", "run finished, restarting in 5s");
-        HAL_Delay(5000U);
-#endif /* APP_MODE_PROTOCOL */
+        debug_console_update();
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */
@@ -260,6 +210,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
     /* USER CODE BEGIN Error_Handler_Debug */
+    (void)bsp_motor_stop_all();
     bsp_led_set(BSP_LED_ID_ERROR, true);
     /* User can add his own implementation to report the HAL error return state
      */
