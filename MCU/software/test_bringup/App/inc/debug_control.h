@@ -7,6 +7,10 @@ typedef struct {
     bool (*stop)(void);
     bool (*run)(unsigned motor, int duty);
     void (*reply)(const char *line);
+    const char *(*test)(unsigned seq, const char *name, int value, uint32_t duration);
+    const char *(*confirm)(bool pass);
+    const char *(*joint)(const char *op, unsigned seq, unsigned id,
+                         const int32_t *values, unsigned count, uint32_t now);
 } debug_hw_t;
 typedef struct {
     debug_hw_t hw;

@@ -10,8 +10,7 @@
  * 等待操作员按 HOME 键确认：确认即 PASS，超时即 FAIL_NO_RESPONSE。
  *
  * @note 新增测试：在 bringup_cases.c 里写一个 test_xxx() 并在表里加一行。
- * @warning 测试表会驱动灯板和电机 PWM。跑整套前请断开电机或断开电机电源，
- *          否则电机测试期间电机会转动。
+ * @note 测试表会驱动灯板和电机 PWM；每个电机方向限时点动后停止，再等待确认。
  */
 
 #ifndef AITAID_BRINGUP_TEST_H

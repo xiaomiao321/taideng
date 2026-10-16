@@ -8,6 +8,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from protocol import command, parse, PotModel
+from board_panel import BoardPanel
+from terminal_panel import TerminalPanel
+from joint_panel import JointPanel
+from joint_demo import DemoJoints
+from motor_limits import duty_limits
 
 COLORS = ("#2563eb", "#e45d32", "#159c72", "#995bd6", "#c49c12", "#d74386")
 
@@ -51,6 +56,7 @@ class SerialWorker(threading.Thread):
                     raise OSError("串口发送不完整")
                 pending[self.seq] = (time.monotonic(), kind)
                 if kind != "PING":
+                    self.events.put(("sent", (kind, self.seq, (motor, duty, duration))))
                     self.events.put(("log", "TX " + data.decode().strip()))
 
             send("PING")
@@ -86,6 +92,7 @@ class SerialWorker(threading.Thread):
                         if ping_ok and stop_ok and not ready:
                             ready = True
                             self.events.put(("connected", self.port))
+                            send("INFO")
                         if old and old[1] == "PING" and msg[0] == "ACK":
                             continue
                     self.emit(line)
@@ -102,31 +109,79 @@ class SerialWorker(threading.Thread):
 
     def run_demo(self):
         self.events.put(("connected", "模拟模式（未连接硬件）"))
+        self.emit("CAPS BOARD_TEST 2")
+        self.emit("CAPS JOINT 1")
+        joints = DemoJoints(self.emit)
         motor, duty, end = 0, 0, 0
+        board = None
         vals = [1000., 1500., 2000., 2500., 3000., 3500.]
         start = time.monotonic()
+        def finish(result):
+            nonlocal board, motor, duty
+            self.emit(f"RESULT {board['seq']} {board['name']} {result}")
+            board = None
+            motor, duty = 0, 0
         while not self.quit.wait(0.1):
             now = time.monotonic()
             try:
                 kind, selected, speed, duration = self.commands.get_nowait()
-                if kind == "STOP":
+                self.seq = (self.seq + 1) & 65535
+                self.events.put(("sent", (kind, self.seq, (selected, speed, duration))))
+                if kind in ("STOP", "RUN", "TEST", "CAL", "JMOVE"):
+                    joints.cancel()
+                    if board:
+                        finish("CANCELLED")
                     motor, duty = 0, 0
-                else:
+                if kind in ("CAL", "JMOVE", "JGET"):
+                    error = joints.request(kind, self.seq, selected, speed, duration, vals, int((now-start)*1000))
+                    if error:
+                        self.emit(f"ERR {self.seq} {error}")
+                        continue
+                if kind == "RUN":
                     motor, duty = selected, speed
                     end = now + duration / 1000 if duration else 0
-                self.seq += 1
-                self.emit(f"ACK {self.seq} {'STOP' if kind == 'STOP' else 'QUEUED'}")
+                elif kind == "TEST":
+                    board = dict(seq=self.seq, name=selected, value=speed, duration=duration,
+                                 start=now, phase="SETTLE")
+                elif kind == "CONFIRM":
+                    if board and board['phase'] == 'WAIT':
+                        finish("PASS" if selected == "PASS" else "FAIL_MANUAL")
+                    else:
+                        self.emit(f"ERR {self.seq} NOT_WAITING")
+                self.emit(f"ACK {self.seq} {'QUEUED' if kind == 'RUN' else kind}")
             except queue.Empty:
                 pass
-            if end and now >= end and motor:
+            if board:
+                elapsed = now - board['start']
+                name = board['name']
+                if name in ("LOG", "ADC6") and elapsed >= .1:
+                    if name == "LOG": self.emit("LOGTEST BRINGUP log ok (demo)")
+                    finish("PASS")
+                elif name == "KEY" and elapsed >= 1:
+                    self.emit("KEY 1000 1 1")
+                    finish("PASS")
+                elif elapsed >= .1 and board['phase'] == 'SETTLE':
+                    board['phase'] = 'DRIVE'
+                    if name.startswith('MOTOR_'):
+                        motor = int(name[7])
+                        duty = board['value'] * (1 if name.endswith('FI') else -1)
+                        end = 0
+                elif elapsed >= .1 + board['duration'] / 1000 * (4 if name == "LED" else 1) and board['phase'] == 'DRIVE':
+                    board['phase'] = 'WAIT'
+                    motor, duty = 0, 0
+                    self.emit(f"TESTWAIT {board['seq']} {name}")
+            if end and now >= end and motor and not board:
                 motor, duty = 0, 0
                 self.emit("EVENT DONE")
-            if motor:
-                i = (motor - 1) % 6
+            if 1 <= motor <= 6:
+                i = motor - 1
                 vals[i] = min(4095, max(0, vals[i] + duty * 0.04))
             tick = int((now - start) * 1000)
+            joint_motor, joint_duty = joints.step(vals, tick)
             self.emit("POT " + str(tick) + " " + " ".join(str(int(v)) for v in vals))
-            self.emit(f"STATE {tick} {motor} {duty} 0 0")
+            self.emit(f"STATE {tick} {joint_motor or motor} {joint_duty if joint_motor else duty} 0 0")
+            self.emit(f"BOARD {tick} {board['name'] if board else '-'} {board['phase'] if board else 'IDLE'}")
+            self.emit(f"KEY {tick} 0 0")
         self.events.put(("disconnected", ""))
 
 
@@ -139,7 +194,7 @@ class App:
         self.history = deque(maxlen=300)
         self.ready = False
         self.state_received = 0.
-        root.title("电机与电位器调试" + (" · 模拟模式" if demo else ""))
+        root.title("全板调试上位机" + (" · 模拟模式" if demo else ""))
         root.geometry("1050x790")
         root.minsize(860, 700)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -160,7 +215,20 @@ class App:
         self.connection = tk.StringVar(value="未连接")
         ttk.Label(connect, textvariable=self.connection).pack(side="left", padx=8)
 
-        controls = ttk.LabelFrame(outer, text="电机控制 · 默认单电机运行", padding=12)
+        notebook = ttk.Notebook(outer)
+        notebook.pack(fill="both", expand=True, pady=8)
+        motor_page = ttk.Frame(notebook)
+        board_page = ttk.Frame(notebook, padding=10)
+        notebook.add(motor_page, text="电机与电位器")
+        notebook.add(board_page, text="板级测试 · 29 项")
+        self.board_panel = BoardPanel(board_page, self)
+        terminal_page = ttk.Frame(notebook, padding=10)
+        notebook.add(terminal_page, text="终端")
+        self.terminal = TerminalPanel(terminal_page, self)
+        joint_page = ttk.Frame(notebook, padding=10)
+        notebook.add(joint_page, text="关节标定与定位")
+        self.joint_panel = JointPanel(joint_page, self)
+        controls = ttk.LabelFrame(motor_page, text="电机控制 · 默认单电机运行", padding=12)
         controls.pack(fill="x", pady=12)
         self.motor = tk.StringVar(value="M1")
         ttk.Label(controls, text="电机").grid(row=0, column=0, padx=6)
@@ -168,12 +236,14 @@ class App:
                                    values=[f"M{i}" for i in range(1, 9)],
                                    state="readonly", width=7)
         motor_choice.grid(row=0, column=1)
-        motor_choice.bind("<<ComboboxSelected>>", lambda _: self.stop())
+        motor_choice.bind("<<ComboboxSelected>>", self.motor_changed)
         self.duty = tk.DoubleVar(value=80)
-        ttk.Label(controls, text="占空比").grid(row=0, column=2, padx=12)
-        ttk.Scale(controls, from_=0, to=100, variable=self.duty, orient="horizontal",
+        self.duty_range = tk.StringVar(value="小电机 50～100%")
+        ttk.Label(controls, textvariable=self.duty_range).grid(row=0, column=2, padx=12)
+        self.duty_scale = ttk.Scale(controls, from_=50, to=100, variable=self.duty, orient="horizontal",
                   command=lambda _: self.duty_label.set(f"{self.duty.get():.0f}%"),
-                  length=200).grid(row=0, column=3)
+                  length=170)
+        self.duty_scale.grid(row=0, column=3)
         self.duty_label = tk.StringVar(value="80%")
         ttk.Label(controls, textvariable=self.duty_label, width=6).grid(row=0, column=4)
         ttk.Label(controls, text="点动时长 ms").grid(row=0, column=5, padx=8)
@@ -189,14 +259,14 @@ class App:
                            command=lambda d=direction, c=continuous: self.run_motor(d, c))
             b.pack(side="left", padx=(0, 8))
             self.run_buttons.append(b)
-        tk.Button(buttons, text="全部停止 / 解锁", bg="#c62828", fg="white", padx=14,
+        tk.Button(buttons, text="全部输出停止 / 解锁", bg="#c62828", fg="white", padx=14,
                   pady=6, command=self.stop).pack(side="left")
         root.bind("<Escape>", lambda _: self.stop())
         self.motion = tk.StringVar(value="等待 MCU 状态")
         ttk.Label(controls, textvariable=self.motion).grid(row=2, column=0, columnspan=7,
                                                         sticky="w", pady=(10, 0))
 
-        pots = ttk.LabelFrame(outer, text="电位器 · ADC 原始值 0–4095", padding=10)
+        pots = ttk.LabelFrame(motor_page, text="电位器 · ADC 原始值 0–4095", padding=10)
         pots.pack(fill="x")
         self.raw_labels, self.delta_labels, self.visible = [], [], []
         for i, color in enumerate(COLORS):
@@ -210,18 +280,25 @@ class App:
             self.delta_labels.append(delta)
             tk.Label(pots, textvariable=raw, font=("Segoe UI", 20), fg=color).grid(row=1, column=i)
             ttk.Label(pots, textvariable=delta).grid(row=2, column=i)
-        foot = ttk.Frame(outer)
+        foot = ttk.Frame(motor_page)
         foot.pack(fill="x", pady=6)
         self.adc_status = tk.StringVar(value="等待采样")
         ttk.Label(foot, textvariable=self.adc_status).pack(side="left")
         ttk.Button(foot, text="以当前值作为基准", command=self.baseline).pack(side="right")
-        self.canvas = tk.Canvas(outer, bg="#ffffff", height=220, highlightthickness=1,
+        self.canvas = tk.Canvas(motor_page, bg="#ffffff", height=220, highlightthickness=1,
                                 highlightbackground="#d5dce4")
         self.canvas.pack(fill="both", expand=True, pady=5)
         self.canvas.bind("<Configure>", lambda _: self.draw())
-        ttk.Label(outer, text="最近 30 秒 · 勾选 POT 显示曲线 · ESC 全部停止 · HOME 后点击全部停止解锁").pack(anchor="w")
-        self.log = tk.Text(outer, height=8, font=("Consolas", 10), state="disabled")
+        ttk.Label(motor_page, text="最近 30 秒 · 勾选 POT 显示曲线 · ESC 全部停止 · HOME 后点击全部停止解锁").pack(anchor="w")
+        self.log = tk.Text(outer, height=6, font=("Consolas", 10), state="disabled")
         self.log.pack(fill="x", pady=(10, 0))
+        def tab_changed(_):
+            if notebook.select() == str(terminal_page):
+                self.log.pack_forget()
+                self.terminal.entry.focus_set()
+            else:
+                self.log.pack(fill="x", pady=(10, 0))
+        notebook.bind("<<NotebookTabChanged>>", tab_changed)
         self.refresh()
         root.after(50, self.poll)
 
@@ -258,6 +335,14 @@ class App:
         self.worker = SerialWorker(self.port.get(), self.events, self.demo)
         self.worker.start()
 
+    def motor_changed(self, _=None):
+        self.stop()
+        low, high = duty_limits(int(self.motor.get()[1:]))
+        self.duty_scale.configure(from_=low/10, to=high/10)
+        self.duty.set(max(low/10, min(high/10, self.duty.get())))
+        self.duty_label.set(f"{self.duty.get():.0f}%")
+        self.duty_range.set(f"{'小电机' if high == 1000 else '大电机'} {low/10:g}～{high/10:g}%")
+
     def run_motor(self, direction, continuous):
         if not self.ready or not self.worker:
             return
@@ -268,8 +353,8 @@ class App:
                 raise ValueError()
             motor = int(self.motor.get()[1:])
             command("RUN", 0, motor, duty, duration)
-        except ValueError:
-            messagebox.showerror("参数", "占空比需为 1–100%，点动时长需为 1–60000ms")
+        except ValueError as exc:
+            messagebox.showerror("参数", str(exc) + "；点动时长需为 1～60000ms")
             return
         self.worker.submit("RUN", motor, duty, duration)
 
@@ -298,19 +383,30 @@ class App:
             if kind == "connected":
                 self.ready = True
                 self.connection.set("已连接 " + value)
+                self.terminal.connection(True)
                 self.connect_btn.configure(text="断开", state="normal")
                 self.add_log("连接成功，上电/连接后保持停止")
             elif kind == "disconnected":
                 self.worker = None
                 self.ready = False
                 self.pot.valid = False
+                self.board_panel.disconnect()
+                self.terminal.connection(False)
+                self.joint_panel.disconnect()
                 self.connection.set("未连接")
-                self.motion.set("已断开；MCU 心跳超时后自动停止")
+                self.motion.set("已断开；MCU 心跳超时后关闭全部测试输出")
                 self.connect_btn.configure(text="连接", state="normal")
+            elif kind == "sent":
+                self.board_panel.sent(*value)
+                self.joint_panel.sent(*value)
             elif kind in ("error", "log"):
+                self.terminal.write(value, "error" if kind == "error" else None)
                 self.add_log(value)
             elif kind == "line":
                 msg = parse(value)
+                self.board_panel.receive(msg)
+                self.joint_panel.receive(msg)
+                self.terminal.receive(value, msg)
                 if msg[0] == "POT":
                     self.pot.update(msg[2], time.monotonic())
                     self.history.append((time.monotonic(), msg[2]))
@@ -343,6 +439,8 @@ class App:
             for i, delta in enumerate(self.pot.deltas()):
                 self.raw_labels[i].set(str(self.pot.values[i]))
                 self.delta_labels[i].set(f"Δ {delta:+d}")
+        self.board_panel.refresh()
+        self.joint_panel.refresh()
         self.draw()
         self.root.after(50, self.poll)
 

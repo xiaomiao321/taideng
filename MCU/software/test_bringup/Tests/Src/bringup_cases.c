@@ -6,14 +6,12 @@
  * 然后返回 test_result_t。新增用例时在本文件写一个 test_xxx() 并在
  * g_bringup_cases[] 末尾加一行即可，运行器不需要改动。
  *
- * @warning 电机用例会驱动电机 PWM。整轮 run 之前请断开电机或断开电机电源，
- *          否则每个电机用例在等待确认期间电机会持续转动。
+ * 电机用例采用限时点动，结束后停止输出，再等待操作员确认。
  */
-
-#include "bringup_test.h"
 
 #include <stdbool.h>
 
+#include "bringup_test.h"
 #include "bsp_adc.h"
 #include "bsp_buzzer.h"
 #include "bsp_common.h"
@@ -26,13 +24,22 @@
 
 /* Linux 电源脉冲测试参数，单位毫秒。
    脉冲会周期性重复，便于示波器随时触发测量，不会"没看清就过去了"。
-   @warning 重复发脉冲意味着会重复按电源键；连 Linux 核心板测量前请先确认其电气要求，
-            或直接断开 Linux 观察 PB12。 */
-#define PWR_TEST_PULSE_MS  (200U)  /* 单次脉冲宽度 */
+   @warning 重复发脉冲意味着会重复按电源键；连 Linux
+   核心板测量前请先确认其电气要求， 或直接断开 Linux 观察 PB12。 */
+#define PWR_TEST_PULSE_MS (200U)   /* 单次脉冲宽度 */
 #define PWR_TEST_PERIOD_MS (1000U) /* 两次脉冲之间的间隔 */
 
+/* 电机点动测试参数。
+   点动时会周期性打印六路电位器相对起始值的偏差，用来找出"哪路电机对应哪个
+   电位器"：只有真正联动的那个电位器数字会明显变化。
+   已确认电机启动需要约 80% 占空比，每个方向最多点动 500ms。 */
+#define JOG_DUTY_PERMILLE (800)
+#define JOG_RUN_MS (500U)
+#define JOG_POT_PERIOD_MS (250U) /* 电位器偏差的打印间隔 */
+#define JOG_ADC_TIMEOUT_MS (10U) /* 单次六路扫描的等待超时 */
+
 /* -------------------------------------------------------------------------- */
-/* 软件类：不需要人工判读                                                       */
+/* 软件类：不需要人工判读 */
 /* -------------------------------------------------------------------------- */
 
 static test_result_t test_log(void)
@@ -44,7 +51,7 @@ static test_result_t test_log(void)
     return TEST_PASS;
 }
 
-static test_result_t test_adc(void)
+test_result_t test_adc(void)
 {
     bsp_status_t status = bsp_adc_init();
     if (status != BSP_OK)
@@ -71,7 +78,7 @@ static test_result_t test_adc(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 人机类：需要操作员确认                                                       */
+/* 人机类：需要操作员确认 */
 /* -------------------------------------------------------------------------- */
 
 static test_result_t test_led(void)
@@ -167,7 +174,7 @@ static test_result_t test_power(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 灯板：每路单独确认                                                           */
+/* 灯板：每路单独确认 */
 /* -------------------------------------------------------------------------- */
 
 static test_result_t test_lamp_one(bsp_light_id_t id, const char *label)
@@ -222,7 +229,7 @@ static test_result_t test_lamp_down3(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 电机：每台每个方向单独确认                                                   */
+/* 电机：每台每个方向单独确认 */
 /* -------------------------------------------------------------------------- */
 
 static test_result_t test_motor_one(bsp_motor_id_t id, const char *label,
@@ -235,17 +242,77 @@ static test_result_t test_motor_one(bsp_motor_id_t id, const char *label,
         return TEST_FAIL_CONFIG;
     }
 
-    status = bsp_motor_set_duty(id, forward ? 500 : -500);
+    /* 电位器联动：转这一路的同时盯住六路读数，用来确定电机与电位器的对应关系。
+       读不到电位器不算电机失败，只提示，免得 ADC 的问题掩盖电机本身的问题。 */
+    bool pot_ok = (bsp_adc_init() == BSP_OK);
+    uint16_t baseline[BSP_ADC_CHANNEL_COUNT] = {0};
+    if (pot_ok && (bsp_adc_read_all(baseline, JOG_ADC_TIMEOUT_MS) != BSP_OK))
+    {
+        pot_ok = false;
+    }
+    if (!pot_ok)
+    {
+        LOG_WARN("MOTOR", "pot readout unavailable; motor test continues");
+    }
+
+    /* 两次点动之间留出停止间隔。 */
+    HAL_Delay(500U);
+    bringup_confirm_arm();
+
+    status = bsp_motor_set_duty(
+        id, forward ? JOG_DUTY_PERMILLE : -JOG_DUTY_PERMILLE);
     if (status != BSP_OK)
     {
         LOG_ERROR("MOTOR", "%s set failed: %s", label, bsp_status_str(status));
+        (void)bsp_motor_coast(id);
         return TEST_FAIL_COMM;
     }
 
-    LOG_INFO("MOTOR", "%s %s = 50%%, expect 20kHz; press HOME to pass", label,
-             forward ? "FI" : "BI");
-    test_result_t result = bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
-    (void)bsp_motor_coast(id);
+    LOG_INFO("MOTOR", "%s %s at %d permille for 500ms; dPOT1..6 every %ums; HOME to stop",
+             label, forward ? "FI" : "BI", (int)JOG_DUTY_PERMILLE,
+             (unsigned int)JOG_POT_PERIOD_MS);
+
+    uint32_t start_ms = HAL_GetTick();
+    uint32_t last_pot_ms = start_ms;
+    test_result_t result = TEST_FAIL_NO_RESPONSE;
+
+    /* 自己驱动循环：一边等操作员按 HOME，一边周期性打印电位器偏差。 */
+    while ((uint32_t)(HAL_GetTick() - start_ms) < JOG_RUN_MS)
+    {
+        if (bringup_confirmed())
+        {
+            result = TEST_PASS;
+            break;
+        }
+        if (pot_ok &&
+            ((uint32_t)(HAL_GetTick() - last_pot_ms) >= JOG_POT_PERIOD_MS))
+        {
+            last_pot_ms = HAL_GetTick();
+
+            uint16_t raw[BSP_ADC_CHANNEL_COUNT] = {0};
+            if (bsp_adc_read_all(raw, JOG_ADC_TIMEOUT_MS) == BSP_OK)
+            {
+                /* 打印相对起始值的偏差：联动的那个电位器会明显偏离 0。 */
+                LOG_INFO("POT", "d=%d %d %d %d %d %d",
+                         (int)raw[0] - (int)baseline[0],
+                         (int)raw[1] - (int)baseline[1],
+                         (int)raw[2] - (int)baseline[2],
+                         (int)raw[3] - (int)baseline[3],
+                         (int)raw[4] - (int)baseline[4],
+                         (int)raw[5] - (int)baseline[5]);
+            }
+        }
+    }
+
+    if (bsp_motor_coast(id) != BSP_OK)
+    {
+        return TEST_FAIL_COMM;
+    }
+    if (result != TEST_PASS)
+    {
+        LOG_INFO("MOTOR", "%s stopped; press HOME to confirm motion", label);
+        result = bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS);
+    }
     return result;
 }
 
@@ -315,7 +382,7 @@ static test_result_t test_motor_m8_bi(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 测试表                                                                      */
+/* 测试表 */
 /* -------------------------------------------------------------------------- */
 
 const bringup_test_case_t g_bringup_cases[] = {

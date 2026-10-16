@@ -73,6 +73,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/app_main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_console.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_control.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_board.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_cases.c
 )

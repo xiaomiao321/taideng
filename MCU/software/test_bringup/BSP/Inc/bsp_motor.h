@@ -48,7 +48,7 @@ bsp_status_t bsp_motor_init(void);
  * @brief 设置一台电机的有符号占空比。
  *
  * @param[in] motor_id 电机逻辑编号，范围为 BSP_MOTOR_M1 至 BSP_MOTOR_M8。
- * @param[in] duty_permille 有符号占空比，范围 -1000 至 +1000。
+ * @param[in] duty_permille 有符号占空比，M1～M6 幅值 500～1000；M7/M8 幅值 500～800；允许 0 停止。
  *                          正值正转，负值反转，0 为滑行。
  *
  * @retval BSP_OK 占空比已设置。

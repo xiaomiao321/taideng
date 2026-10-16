@@ -27,12 +27,15 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bringup_test.h"
+#include "app_main.h"
 #include "bsp_common.h"
 #include "bsp_key.h"
 #include "bsp_led.h"
 #include "bsp_log.h"
 #include "bsp_motor.h"
 #include "debug_console.h"
+
 
 /* USER CODE END Includes */
 
@@ -43,6 +46,18 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* 只修改 APP_MODE 选择入口，修改后重新编译烧录。
+ * DEBUG: USART3 上位机 / 终端；BOARD: HOME 启动全板测试；
+ * ANDROID: USART1 二进制 Android 协议，USART3 仅输出日志。 */
+#define APP_MODE_DEBUG (0)
+#define APP_MODE_BOARD (1)
+#define APP_MODE_ANDROID (2)
+#ifndef APP_MODE
+#define APP_MODE APP_MODE_DEBUG
+#endif
+#if (APP_MODE != APP_MODE_DEBUG) && (APP_MODE != APP_MODE_BOARD) && (APP_MODE != APP_MODE_ANDROID)
+#error "Invalid APP_MODE: use APP_MODE_DEBUG, APP_MODE_BOARD or APP_MODE_ANDROID"
+#endif
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -116,7 +131,18 @@ int main(void)
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
+#if APP_MODE == APP_MODE_BOARD
+    if ((bsp_key_init() != BSP_OK) || (bsp_motor_init() != BSP_OK))
+    {
+        Error_Handler();
+    }
+    LOG_INFO("TEST",
+             "board test ready; HOME to start; motor jogs at 80%% for 500ms");
+#elif APP_MODE == APP_MODE_ANDROID
+    app_init();
+#else
     debug_console_init();
+#endif
 
     /* USER CODE END 2 */
 
@@ -124,7 +150,23 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
+#if APP_MODE == APP_MODE_BOARD
+        LOG_INFO("TEST", "press HOME to start one board test round");
+        while (bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS) != TEST_PASS)
+        {
+            HAL_Delay(5U);
+        }
+        bringup_run_all();
+        if (bsp_motor_stop_all() != BSP_OK)
+        {
+            Error_Handler();
+        }
+        LOG_INFO("TEST", "round finished; motors stopped");
+#elif APP_MODE == APP_MODE_ANDROID
+        app_run_once();
+#else
         debug_console_update();
+#endif
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */

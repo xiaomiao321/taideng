@@ -1,4 +1,5 @@
 #include "bsp_motor.h"
+#include "motor_limits.h"
 
 #include <stdbool.h>
 
@@ -62,6 +63,7 @@ bsp_status_t bsp_motor_set_duty(bsp_motor_id_t motor_id, int16_t duty_permille)
     {
         return BSP_ERR_PARAM;
     }
+    if (!motor_duty_valid((unsigned)motor_id + 1U, duty_permille)) return BSP_ERR_PARAM;
     return bsp_motor_hbridge_set_duty(&s_motors[motor_id], duty_permille);
 }
 

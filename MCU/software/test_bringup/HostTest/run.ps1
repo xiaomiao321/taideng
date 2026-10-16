@@ -32,6 +32,20 @@ $warnArgs = @('-std=c11', '-Wall', '-Wextra')
 
 $suites = @(
     @{
+        Name = 'joint'
+        Sources = @(
+            (Join-Path $projectDir 'App\src\joint_control.c')
+            (Join-Path $projectDir 'HostTest\joint_selftest.c')
+        )
+    }
+    @{
+        Name = 'debug_board'
+        Sources = @(
+            (Join-Path $projectDir 'App\src\debug_board.c')
+            (Join-Path $projectDir 'HostTest\debug_board_selftest.c')
+        )
+    }
+    @{
         Name = 'debug_control'
         Sources = @(
             (Join-Path $projectDir 'App\src\debug_control.c')

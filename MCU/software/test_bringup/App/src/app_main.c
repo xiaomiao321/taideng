@@ -2,9 +2,8 @@
  * @file app_main.c
  * @brief 应用层实现：串口收发、协议解析与命令分派的接线。
  *
- * 第一阶段的行为：灯保持关闭、运动停止、速度 0；Android 每 2 秒查询一次状态，
- * 这里就回一次 STATUS，运行秒数正常增长。SET_MOTION 只接 STOP，其余动作和
- * SET_LIGHT 暂时明确拒绝（回"未知命令"），不假装接受。
+ * Android 模式：支持灯光开关/亮度、PING、状态查询和全电机 STOP。
+ * 非 STOP 的宏观运动需要机构映射后才能启用。
  *
  * @note 调试日志继续走 USART3；USART1 只跑二进制协议，不再发文本。
  */
@@ -197,6 +196,7 @@ void app_init(void)
         fail_hard();
     }
 
+    mcu_protocol_reset();
     mcu_command_init(&g_mcu_hw, HAL_GetTick());
     arm_receive();
     LOG_INFO("APP", "protocol ready");
