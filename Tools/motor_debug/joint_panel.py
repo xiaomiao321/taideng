@@ -137,6 +137,7 @@ class JointPanel:
             cal = self.read_form()
             if not self.capable or not self.app.ready or not self.app.worker:
                 raise ValueError("请连接支持关节定位的新固件")
+            if not self.app.confirm_exclusive(): return
             self.app.worker.submit("CAL", self.selected, cal.wire())
             self.notice.set("等待 MCU 接受并回读标定；本操作不转动电机。")
         except ValueError as exc: messagebox.showerror("下发标定", str(exc))
@@ -155,6 +156,7 @@ class JointPanel:
                 raise ValueError("目标须位于标定点 A/B 的角度范围内")
             if not 500 <= timeout <= 60000:
                 raise ValueError("超时范围为 500～60000ms")
+            if not self.app.confirm_exclusive(): return
             self.app.worker.submit("JMOVE", self.selected, target, timeout)
             self.notice.set("已请求定位；到位依据真实 POT 反馈与所设容差判定。")
         except ValueError as exc: messagebox.showerror("角度定位", str(exc))

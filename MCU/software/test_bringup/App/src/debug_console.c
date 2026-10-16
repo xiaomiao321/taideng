@@ -9,6 +9,7 @@
 #include "bsp_adc.h"
 #include "bsp_key.h"
 #include "bsp_motor.h"
+#include "bsp_linux_uart.h"
 #include "main.h"
 #include "usart.h"
 #include <stdio.h>
@@ -26,7 +27,12 @@ static unsigned joint_focus;
 static uint16_t pot_cache[6];
 static uint32_t last_adc_ms;
 static bool pot_valid;
-static char line[80];
+static char line[192];
+static unsigned lamp_duty[7];
+static bool linux_ok;
+static volatile bool bridge_enabled, linux_rx_fault, linux_overflow;
+static uint8_t linux_byte, linux_ring[1024];
+static volatile uint32_t linux_head, linux_tail;
 static unsigned length;
 static uint32_t last_sample, last_home_count;
 static debug_control_t control;
@@ -44,12 +50,16 @@ static bool outputs_off(void)
         if (bsp_led_set((bsp_led_id_t)i, false) != BSP_OK) ok = false;
     if (light_ok) for (unsigned i = 0; i < BSP_LIGHT_COUNT; ++i)
         if (bsp_light_stop((bsp_light_id_t)i) != BSP_OK) ok = false;
+    memset(lamp_duty, 0, sizeof(lamp_duty));
     if (buzzer_ok && bsp_buzzer_stop() != BSP_OK) ok = false;
     if (power_ok && bsp_linux_power_release() != BSP_OK) ok = false;
     return ok;
 }
 static bool stop_all(void)
 {
+    bridge_enabled = false;
+    if (linux_ok) (void)HAL_UART_AbortReceive(&huart1);
+    linux_tail = linux_head;
     bool ok = joint_cancel(&joints);
     debug_board_cancel(&board);
     return outputs_off() && ok;
@@ -82,6 +92,103 @@ static const char *confirm_test(bool pass) { return debug_board_confirm(&board, 
 static bool run_motor(unsigned motor, int duty)
 {
     return bsp_motor_set_duty((bsp_motor_id_t)(motor - 1U), (int16_t)duty) == BSP_OK;
+}
+static bool manual_control(void)
+{
+    if (board.phase != BOARD_IDLE) debug_board_cancel(&board);
+    return joints.active < 0 || joint_cancel(&joints);
+}
+static int hex_digit(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+static const char *aux_command(const char *op, const char *const *args, unsigned count)
+{
+    if (!strcmp(op, "LSET")) {
+        unsigned values[7];
+        if (count != 7 || !light_ok) return "LIGHT_PARAM";
+        for (unsigned i = 0; i < 7; ++i) {
+            unsigned value = 0;
+            if (!*args[i] || strlen(args[i]) > 4) return "LIGHT_PARAM";
+            for (const char *p = args[i]; *p; ++p) {
+                if (*p < '0' || *p > '9') return "LIGHT_PARAM";
+                value = value * 10U + (unsigned)(*p - '0');
+            }
+            if (value > 1000) return "LIGHT_PARAM";
+            values[i] = value;
+        }
+        if (board.phase != BOARD_IDLE) return "BOARD_BUSY";
+        for (unsigned i = 0; i < 7; ++i) {
+            if (bsp_light_set_duty((bsp_light_id_t)i, (uint16_t)values[i]) != BSP_OK) {
+                debug_control_fault(&control, "EVENT HARDWARE\r\n"); return "HARDWARE";
+            }
+            lamp_duty[i] = values[i];
+        }
+        return NULL;
+    }
+    if (!linux_ok) return "LINUX_UNAVAILABLE";
+    if (!strcmp(op, "LMODE")) {
+        if (count != 1 || (strcmp(args[0], "0") && strcmp(args[0], "1"))) return "PARAM";
+        bridge_enabled = false;
+        if (HAL_UART_AbortReceive(&huart1) != HAL_OK) return "LINUX_RX_ERROR";
+        linux_tail = linux_head; linux_rx_fault = linux_overflow = false;
+        if (args[0][0] == '1') {
+            bridge_enabled = true;
+            if (HAL_UART_Receive_IT(&huart1, &linux_byte, 1U) != HAL_OK) {
+                bridge_enabled = false; return "LINUX_RX_ERROR";
+            }
+        }
+        return NULL;
+    }
+    if (!strcmp(op, "LTX")) {
+        uint8_t data[48];
+        if (!bridge_enabled) return "BRIDGE_OFF";
+        if (count != 1 || !strlen(args[0]) || strlen(args[0]) > sizeof(data)*2 || strlen(args[0]) % 2) return "HEX_PARAM";
+        unsigned size = (unsigned)strlen(args[0])/2;
+        for (unsigned i = 0; i < size; ++i) {
+            int a = hex_digit(args[0][i*2]), b = hex_digit(args[0][i*2+1]);
+            if (a < 0 || b < 0) return "HEX_PARAM";
+            data[i] = (uint8_t)((a << 4) | b);
+        }
+        return bsp_linux_uart_write(data, size, 10U) == BSP_OK ? NULL : "LINUX_TX_ERROR";
+    }
+    return "UNSUPPORTED";
+}
+void debug_console_linux_rx_from_isr(void)
+{
+    if (!initialized || !bridge_enabled) return;
+    uint32_t next = (linux_head + 1U) & 1023U;
+    if (next == linux_tail) linux_overflow = true;
+    else { linux_ring[linux_head] = linux_byte; __DMB(); linux_head = next; }
+    if (HAL_UART_Receive_IT(&huart1, &linux_byte, 1U) != HAL_OK) linux_rx_fault = true;
+}
+void debug_console_linux_error_from_isr(void)
+{
+    if (initialized && bridge_enabled) linux_rx_fault = true;
+}
+static void linux_update(void)
+{
+    if (!linux_ok || !bridge_enabled) return;
+    if (linux_rx_fault) {
+        linux_rx_fault = false;
+        if (HAL_UART_AbortReceive(&huart1) != HAL_OK ||
+            HAL_UART_Receive_IT(&huart1, &linux_byte, 1U) != HAL_OK) bridge_enabled = false;
+        send_line("LERR RX_ERROR\r\n");
+    }
+    if (linux_overflow) {
+        linux_overflow = false;
+        send_line("LERR RX_OVERFLOW\r\n");
+    }
+    static const char digits[] = "0123456789ABCDEF";
+    char out[72] = "LRX "; unsigned n = 4, budget = 32;
+    while (linux_tail != linux_head && budget--) {
+        uint8_t value = linux_ring[linux_tail]; __DMB(); linux_tail = (linux_tail+1U) & 1023U;
+        out[n++] = digits[value >> 4]; out[n++] = digits[value & 15];
+    }
+    if (n > 4) { out[n++] = '\r'; out[n++] = '\n'; out[n] = 0; send_line(out); }
 }
 static bool joint_drive(unsigned index, int duty)
 {
@@ -141,7 +248,9 @@ void debug_console_init(void)
     debug_board_init(&board, board_hw);
     joint_hw_t joint_hw = {joint_drive, send_line};
     joint_init(&joints, joint_hw);
-    debug_hw_t hw = {stop_all, run_motor, send_line, start_test, confirm_test, joint_command};
+    linux_ok = bsp_linux_uart_init() == BSP_OK;
+    debug_hw_t hw = {stop_all, run_motor, send_line, start_test, confirm_test, joint_command,
+                     manual_control, aux_command};
     debug_control_init(&control, hw);
     adc_ok = bsp_adc_init() == BSP_OK;
     initialized = true;
@@ -176,6 +285,7 @@ static void check_control(void)
 void debug_console_update(void)
 {
     check_control();
+    linux_update();
     if (rx_fault) {
         (void)HAL_UART_AbortReceive(&huart3);
         tail = head; length = 0; discard = true; rx_fault = false;
@@ -217,6 +327,10 @@ void debug_console_update(void)
         unsigned active_motor = control.motor;
         int active_duty = control.duty;
         bool pending_motor = control.pending;
+        for (unsigned i = 0; i < 8; ++i) {
+            if (control.multi_duty[i]) { active_motor = i+1; active_duty = control.multi_duty[i]; }
+        }
+        pending_motor = pending_motor || control.multi_pending != 0;
         if (board.kind == BOARD_MOTOR && board.phase == BOARD_DRIVE) {
             active_motor = board.index + 1U; active_duty = board.value;
         }
@@ -231,6 +345,27 @@ void debug_console_update(void)
             (unsigned)pending_motor, (unsigned)control.locked);
         send_line(out);
         check_control();
+        int duties[8]; uint32_t remaining[8];
+        for (unsigned i = 0; i < 8; ++i) {
+            duties[i] = control.multi_duty[i]; remaining[i] = 0;
+            if (duties[i] && control.multi_duration[i]) {
+                uint32_t elapsed = now - control.multi_start[i];
+                remaining[i] = elapsed < control.multi_duration[i] ? control.multi_duration[i]-elapsed : 0;
+            }
+        }
+        if (active_motor && active_motor <= 8) duties[active_motor-1] = active_duty;
+        char multi[192];
+        (void)snprintf(multi, sizeof(multi), "MSTATE %lu %d %d %d %d %d %d %d %d %lu %lu %lu %lu %lu %lu %lu %lu %u %u\r\n",
+            (unsigned long)now, duties[0], duties[1], duties[2], duties[3], duties[4], duties[5], duties[6], duties[7],
+            (unsigned long)remaining[0], (unsigned long)remaining[1], (unsigned long)remaining[2], (unsigned long)remaining[3],
+            (unsigned long)remaining[4], (unsigned long)remaining[5], (unsigned long)remaining[6], (unsigned long)remaining[7],
+            control.multi_pending, (unsigned)control.locked);
+        send_line(multi); check_control();
+        unsigned lights[7]; memcpy(lights, lamp_duty, sizeof(lights));
+        if (board.kind == BOARD_LAMP && board.phase == BOARD_DRIVE) lights[board.index] = (unsigned)board.value;
+        (void)snprintf(out, sizeof(out), "LSTATE %lu %u %u %u %u %u %u %u %u\r\n", (unsigned long)now,
+            lights[0], lights[1], lights[2], lights[3], lights[4], lights[5], lights[6], (unsigned)bridge_enabled);
+        send_line(out); check_control();
         (void)snprintf(out, sizeof(out), "BOARD %lu %s %s\r\n",
             (unsigned long)HAL_GetTick(), board.phase == BOARD_IDLE ? "-" : board.name,
             debug_board_phase(&board));

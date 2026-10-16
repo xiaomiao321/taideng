@@ -8,6 +8,27 @@ from motor_limits import validate_duty
 def command(kind, seq, motor=1, duty=800, duration=500):
     if not 0 <= seq <= 65535:
         raise ValueError("Invalid sequence")
+    if kind == "MOFF":
+        return f"MOFF {seq}\n"
+    if kind == "MSET":
+        if type(motor) is not int or not 1 <= motor <= 255 or len(duty) != 8 or len(duration) != 8:
+            raise ValueError("多电机参数不完整")
+        for i, value in enumerate(duty):
+            validate_duty(i+1, value, allow_stop=True)
+        if any(type(t) is not int or not 0 <= t <= 60000 for t in duration):
+            raise ValueError("运行时间须为 0～60000ms；0 表示连续")
+        return f"MSET {seq} {motor} " + " ".join(map(str, (*duty, *duration))) + "\n"
+    if kind == "LSET":
+        if len(duty) != 7 or any(type(v) is not int or not 0 <= v <= 1000 for v in duty):
+            raise ValueError("七路灯光亮度须为 0～100%")
+        return f"LSET {seq} " + " ".join(map(str, duty)) + "\n"
+    if kind == "LMODE":
+        if motor not in (0, 1): raise ValueError("转发模式参数错误")
+        return f"LMODE {seq} {motor}\n"
+    if kind == "LTX":
+        if not isinstance(duty, bytes) or not 1 <= len(duty) <= 48:
+            raise ValueError("每次转发须为 1～48 字节")
+        return f"LTX {seq} {duty.hex().upper()}\n"
     if kind in ("PING", "STOP", "INFO"):
         return f"{kind} {seq}" + (" ALL\n" if kind == "STOP" else "\n")
     if kind in ("CAL", "JMOVE", "JGET"):
@@ -41,6 +62,24 @@ def parse(line):
     if not p:
         return ("LOG", line)
     try:
+        if len(p) == 3 and p[0] == "CAPS" and p[1] in ("MULTI", "LIGHT", "LINUX") and p[2] == "1":
+            return "XCAPS", p[1]
+        if p[0] == "LRX" and len(p) == 2:
+            data = bytes.fromhex(p[1])
+            if not 1 <= len(data) <= 32: raise ValueError()
+            return "LRX", data
+        if p[0] == "LERR" and len(p) == 2:
+            return "LERR", p[1]
+        if p[0] == "LSTATE" and len(p) == 10:
+            values = tuple(map(int, p[2:9]))
+            if any(not 0 <= v <= 1000 for v in values) or p[9] not in ("0", "1"): raise ValueError()
+            return "LSTATE", int(p[1]), values, p[9] == "1"
+        if p[0] == "MSTATE" and len(p) == 20:
+            values = tuple(map(int, p[2:10])); remaining = tuple(map(int, p[10:18]))
+            if any(not -1000 <= v <= 1000 for v in values) or any(not 0 <= t <= 60000 for t in remaining): raise ValueError()
+            mask = int(p[18])
+            if not 0 <= mask <= 255 or p[19] not in ("0", "1"): raise ValueError()
+            return "MSTATE", int(p[1]), values, remaining, mask, p[19] == "1"
         if p == ["CAPS", "JOINT", "1"]:
             return "JCAPS", 1
         if p[0] in ("JSTATE", "JCAL", "JRESULT"):

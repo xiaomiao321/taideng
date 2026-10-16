@@ -12,7 +12,8 @@ from board_panel import BoardPanel
 from terminal_panel import TerminalPanel
 from joint_panel import JointPanel
 from joint_demo import DemoJoints
-from motor_limits import duty_limits
+from channel_panel import ChannelPanel
+from linux_panel import LinuxPanel
 
 COLORS = ("#2563eb", "#e45d32", "#159c72", "#995bd6", "#c49c12", "#d74386")
 
@@ -111,6 +112,16 @@ class SerialWorker(threading.Thread):
         self.events.put(("connected", "模拟模式（未连接硬件）"))
         self.emit("CAPS BOARD_TEST 2")
         self.emit("CAPS JOINT 1")
+        self.emit("CAPS MULTI 1")
+        self.emit("CAPS LIGHT 1")
+        self.emit("CAPS LINUX 1")
+        multi = [0]*8
+        targets = [0]*8
+        due = [0.]*8
+        waiting = [0.]*8
+        durations = [0]*8
+        lamps = [0]*7
+        bridge = False
         joints = DemoJoints(self.emit)
         motor, duty, end = 0, 0, 0
         board = None
@@ -132,6 +143,31 @@ class SerialWorker(threading.Thread):
                     if board:
                         finish("CANCELLED")
                     motor, duty = 0, 0
+                    multi[:] = [0]*8; targets[:] = [0]*8; waiting[:] = [0.]*8; lamps[:] = [0]*7
+                    bridge = False
+                if kind in ("MSET", "MOFF"):
+                    joints.cancel()
+                    if board: finish("CANCELLED")
+                    motor, duty = 0, 0
+                    mask = selected if kind == "MSET" else 255
+                    for i in range(8):
+                        if mask & (1 << i):
+                            multi[i] = 0
+                            targets[i] = speed[i] if kind == "MSET" else 0
+                            durations[i] = duration[i] if kind == "MSET" else 0
+                            waiting[i] = now+.1 if targets[i] else 0
+                elif kind == "LSET":
+                    if board:
+                        self.emit(f"ERR {self.seq} BOARD_BUSY")
+                        continue
+                    lamps[:] = speed
+                elif kind == "LMODE": bridge = bool(selected)
+                elif kind == "LTX":
+                    if not bridge:
+                        self.emit(f"ERR {self.seq} BRIDGE_OFF")
+                        continue
+                    self.emit("LRX "+speed[:32].hex())
+                    if len(speed) > 32: self.emit("LRX "+speed[32:].hex())
                 if kind in ("CAL", "JMOVE", "JGET"):
                     error = joints.request(kind, self.seq, selected, speed, duration, vals, int((now-start)*1000))
                     if error:
@@ -173,13 +209,29 @@ class SerialWorker(threading.Thread):
             if end and now >= end and motor and not board:
                 motor, duty = 0, 0
                 self.emit("EVENT DONE")
+            for i in range(8):
+                if waiting[i] and now >= waiting[i]:
+                    multi[i] = targets[i]; waiting[i] = 0
+                    due[i] = now+durations[i]/1000 if durations[i] else 0
+                if multi[i] and due[i] and now >= due[i]: multi[i] = targets[i] = 0
+                if i < 6 and multi[i]: vals[i] = min(4095, max(0, vals[i]+multi[i]*.04))
             if 1 <= motor <= 6:
                 i = motor - 1
                 vals[i] = min(4095, max(0, vals[i] + duty * 0.04))
             tick = int((now - start) * 1000)
             joint_motor, joint_duty = joints.step(vals, tick)
             self.emit("POT " + str(tick) + " " + " ".join(str(int(v)) for v in vals))
-            self.emit(f"STATE {tick} {joint_motor or motor} {joint_duty if joint_motor else duty} 0 0")
+            active = list(multi)
+            if joint_motor or motor: active[(joint_motor or motor)-1] = joint_duty if joint_motor else duty
+            focus = next((i+1 for i in range(8) if active[i]), 0)
+            pending_mask = sum(1 << i for i in range(8) if waiting[i])
+            self.emit(f"STATE {tick} {focus} {active[focus-1] if focus else 0} {int(bool(pending_mask))} 0")
+            remaining = [max(0, int((due[i]-now)*1000)) if multi[i] and due[i] else 0 for i in range(8)]
+            self.emit(f"MSTATE {tick} "+" ".join(map(str, active+remaining))+f" {pending_mask} 0")
+            light_values = list(lamps)
+            if board and board['phase'] == 'DRIVE' and board['name'].startswith('LAMP_'):
+                light_values[("UP1", "UP2", "UP3", "UP4", "DOWN1", "DOWN2", "DOWN3").index(board['name'][5:])] = board['value']
+            self.emit(f"LSTATE {tick} "+" ".join(map(str, light_values))+f" {int(bridge)}")
             self.emit(f"BOARD {tick} {board['name'] if board else '-'} {board['phase'] if board else 'IDLE'}")
             self.emit(f"KEY {tick} 0 0")
         self.events.put(("disconnected", ""))
@@ -195,8 +247,8 @@ class App:
         self.ready = False
         self.state_received = 0.
         root.title("全板调试上位机" + (" · 模拟模式" if demo else ""))
-        root.geometry("1050x790")
-        root.minsize(860, 700)
+        root.geometry(f"1180x{min(940, root.winfo_screenheight()-100)}")
+        root.minsize(1080, 740)
         root.protocol("WM_DELETE_WINDOW", self.close)
         style = ttk.Style()
         style.theme_use("clam")
@@ -216,6 +268,7 @@ class App:
         ttk.Label(connect, textvariable=self.connection).pack(side="left", padx=8)
 
         notebook = ttk.Notebook(outer)
+        self.notebook = notebook
         notebook.pack(fill="both", expand=True, pady=8)
         motor_page = ttk.Frame(notebook)
         board_page = ttk.Frame(notebook, padding=10)
@@ -228,47 +281,26 @@ class App:
         joint_page = ttk.Frame(notebook, padding=10)
         notebook.add(joint_page, text="关节标定与定位")
         self.joint_panel = JointPanel(joint_page, self)
-        controls = ttk.LabelFrame(motor_page, text="电机控制 · 默认单电机运行", padding=12)
-        controls.pack(fill="x", pady=12)
-        self.motor = tk.StringVar(value="M1")
-        ttk.Label(controls, text="电机").grid(row=0, column=0, padx=6)
-        motor_choice = ttk.Combobox(controls, textvariable=self.motor,
-                                   values=[f"M{i}" for i in range(1, 9)],
-                                   state="readonly", width=7)
-        motor_choice.grid(row=0, column=1)
-        motor_choice.bind("<<ComboboxSelected>>", self.motor_changed)
-        self.duty = tk.DoubleVar(value=80)
-        self.duty_range = tk.StringVar(value="小电机 50～100%")
-        ttk.Label(controls, textvariable=self.duty_range).grid(row=0, column=2, padx=12)
-        self.duty_scale = ttk.Scale(controls, from_=50, to=100, variable=self.duty, orient="horizontal",
-                  command=lambda _: self.duty_label.set(f"{self.duty.get():.0f}%"),
-                  length=170)
-        self.duty_scale.grid(row=0, column=3)
-        self.duty_label = tk.StringVar(value="80%")
-        ttk.Label(controls, textvariable=self.duty_label, width=6).grid(row=0, column=4)
-        ttk.Label(controls, text="点动时长 ms").grid(row=0, column=5, padx=8)
-        self.duration = tk.StringVar(value="500")
-        ttk.Spinbox(controls, from_=1, to=60000, increment=100, textvariable=self.duration,
-                    width=9).grid(row=0, column=6)
-        buttons = ttk.Frame(controls)
-        buttons.grid(row=1, column=0, columnspan=7, sticky="w", pady=(12, 0))
-        self.run_buttons = []
-        for text, direction, continuous in (("正转点动", 1, False), ("反转点动", -1, False),
-                                             ("持续正转", 1, True), ("持续反转", -1, True)):
-            b = ttk.Button(buttons, text=text, state="disabled",
-                           command=lambda d=direction, c=continuous: self.run_motor(d, c))
-            b.pack(side="left", padx=(0, 8))
-            self.run_buttons.append(b)
-        tk.Button(buttons, text="全部输出停止 / 解锁", bg="#c62828", fg="white", padx=14,
-                  pady=6, command=self.stop).pack(side="left")
+        self.motor_panel = ChannelPanel(motor_page, self, motors=True)
+        light_page = ttk.Frame(notebook, padding=10)
+        notebook.insert(1, light_page, text="灯光调试 · 7 路 PWM")
+        self.light_panel = ChannelPanel(light_page, self)
+        linux_page = ttk.Frame(notebook, padding=10)
+        notebook.add(linux_page, text="Linux 串口")
+        self.linux_panel = LinuxPanel(linux_page, self)
+        actions = ttk.Frame(connect)
+        actions.pack(side="right")
+        ttk.Button(actions, text="停全部电机", command=self.motor_panel.off).pack(side="left", padx=3)
+        ttk.Button(actions, text="全部关灯", command=self.light_panel.off).pack(side="left", padx=3)
+        tk.Button(actions, text="全部停止 / 解锁", bg="#c62828", fg="white", command=self.stop).pack(side="left", padx=3)
         root.bind("<Escape>", lambda _: self.stop())
         self.motion = tk.StringVar(value="等待 MCU 状态")
-        ttk.Label(controls, textvariable=self.motion).grid(row=2, column=0, columnspan=7,
-                                                        sticky="w", pady=(10, 0))
+        ttk.Label(motor_page, textvariable=self.motion).pack(anchor="w")
+        self.run_buttons = []
 
         pots = ttk.LabelFrame(motor_page, text="电位器 · ADC 原始值 0–4095", padding=10)
         pots.pack(fill="x")
-        self.raw_labels, self.delta_labels, self.visible = [], [], []
+        self.raw_labels, self.delta_labels, self.angle_labels, self.visible = [], [], [], []
         for i, color in enumerate(COLORS):
             pots.columnconfigure(i, weight=1)
             show = tk.BooleanVar(value=True)
@@ -280,17 +312,20 @@ class App:
             self.delta_labels.append(delta)
             tk.Label(pots, textvariable=raw, font=("Segoe UI", 20), fg=color).grid(row=1, column=i)
             ttk.Label(pots, textvariable=delta).grid(row=2, column=i)
+            angle = tk.StringVar(value="未标定")
+            self.angle_labels.append(angle)
+            ttk.Label(pots, textvariable=angle).grid(row=3, column=i)
         foot = ttk.Frame(motor_page)
         foot.pack(fill="x", pady=6)
         self.adc_status = tk.StringVar(value="等待采样")
         ttk.Label(foot, textvariable=self.adc_status).pack(side="left")
         ttk.Button(foot, text="以当前值作为基准", command=self.baseline).pack(side="right")
-        self.canvas = tk.Canvas(motor_page, bg="#ffffff", height=220, highlightthickness=1,
+        self.canvas = tk.Canvas(motor_page, bg="#ffffff", height=130, highlightthickness=1,
                                 highlightbackground="#d5dce4")
         self.canvas.pack(fill="both", expand=True, pady=5)
         self.canvas.bind("<Configure>", lambda _: self.draw())
         ttk.Label(motor_page, text="最近 30 秒 · 勾选 POT 显示曲线 · ESC 全部停止 · HOME 后点击全部停止解锁").pack(anchor="w")
-        self.log = tk.Text(outer, height=6, font=("Consolas", 10), state="disabled")
+        self.log = tk.Text(outer, height=3, font=("Consolas", 10), state="disabled")
         self.log.pack(fill="x", pady=(10, 0))
         def tab_changed(_):
             if notebook.select() == str(terminal_page):
@@ -326,6 +361,9 @@ class App:
         if not self.port.get():
             messagebox.showinfo("串口", "请选择串口")
             return
+        if self.linux_panel.worker and self.port.get().casefold() == self.linux_panel.worker.port.casefold():
+            messagebox.showerror("串口占用", "此 COM 口已用于 Linux 调试，请先断开或选择另一串口")
+            return
         self.pot = PotModel()
         self.history.clear()
         self.state_received = 0.
@@ -335,28 +373,20 @@ class App:
         self.worker = SerialWorker(self.port.get(), self.events, self.demo)
         self.worker.start()
 
-    def motor_changed(self, _=None):
-        self.stop()
-        low, high = duty_limits(int(self.motor.get()[1:]))
-        self.duty_scale.configure(from_=low/10, to=high/10)
-        self.duty.set(max(low/10, min(high/10, self.duty.get())))
-        self.duty_label.set(f"{self.duty.get():.0f}%")
-        self.duty_range.set(f"{'小电机' if high == 1000 else '大电机'} {low/10:g}～{high/10:g}%")
+    def confirm_manual(self):
+        if self.board_panel.phase != "IDLE":
+            return messagebox.askyesno("切换控制", "当前板级测试将取消，停止其输出后切换到手动电机控制，是否继续？")
+        joint = self.joint_panel
+        if any(record[1][9] in ("SETTLE", "MOVE") for record in joint.states.values()):
+            return messagebox.askyesno("切换控制", "当前关节定位将取消，是否切换到手动电机控制？")
+        return True
 
-    def run_motor(self, direction, continuous):
-        if not self.ready or not self.worker:
-            return
-        try:
-            duty = round(self.duty.get()) * 10 * direction
-            duration = 0 if continuous else int(self.duration.get())
-            if not continuous and duration < 1:
-                raise ValueError()
-            motor = int(self.motor.get()[1:])
-            command("RUN", 0, motor, duty, duration)
-        except ValueError as exc:
-            messagebox.showerror("参数", str(exc) + "；点动时长需为 1～60000ms")
-            return
-        self.worker.submit("RUN", motor, duty, duration)
+    def confirm_exclusive(self):
+        active = any(self.motor_panel.actual or ()) or any(self.light_panel.actual or ())
+        active = active or self.board_panel.phase != "IDLE"
+        active = active or any(record[1][9] in ("SETTLE", "MOVE") for record in self.joint_panel.states.values())
+        active = active or bool(getattr(self.motor_panel, "pending_mask", 0))
+        return not active or messagebox.askyesno("切换控制", "此操作会停止当前电机和灯光输出、取消正在进行的测试或定位，是否继续？")
 
     def stop(self):
         if self.worker:
@@ -393,12 +423,18 @@ class App:
                 self.board_panel.disconnect()
                 self.terminal.connection(False)
                 self.joint_panel.disconnect()
+                self.motor_panel.disconnect()
+                self.light_panel.disconnect()
+                self.linux_panel.mcu_disconnect()
                 self.connection.set("未连接")
                 self.motion.set("已断开；MCU 心跳超时后关闭全部测试输出")
                 self.connect_btn.configure(text="连接", state="normal")
             elif kind == "sent":
                 self.board_panel.sent(*value)
                 self.joint_panel.sent(*value)
+                self.motor_panel.sent(*value)
+                self.light_panel.sent(*value)
+                self.linux_panel.sent(*value)
             elif kind in ("error", "log"):
                 self.terminal.write(value, "error" if kind == "error" else None)
                 self.add_log(value)
@@ -406,10 +442,17 @@ class App:
                 msg = parse(value)
                 self.board_panel.receive(msg)
                 self.joint_panel.receive(msg)
+                self.motor_panel.receive(msg)
+                self.light_panel.receive(msg)
+                self.linux_panel.receive(msg)
                 self.terminal.receive(value, msg)
                 if msg[0] == "POT":
                     self.pot.update(msg[2], time.monotonic())
                     self.history.append((time.monotonic(), msg[2]))
+                elif msg[0] == "MSTATE":
+                    running = [f"M{i+1} {value/10:+g}%" for i, value in enumerate(msg[2]) if value]
+                    self.motion.set("已锁定停止：松开 HOME 后点击全部停止解锁" if msg[5] else
+                                    " · ".join(running) + (" · 有电机等待启动" if msg[4] else "") if running or msg[4] else "全部电机停止")
                 elif msg[0] == "STATE":
                     self.state_received = time.monotonic()
                     _, _, motor, duty, pending, locked = msg
@@ -421,7 +464,7 @@ class App:
                     self.pot.valid = False
                     self.adc_status.set(f"ADC 采样错误 {msg[2]}")
                     self.add_log(value)
-                else:
+                elif msg[0] not in ("MSTATE", "LSTATE", "LRX"):
                     self.add_log(value)
         now = time.monotonic()
         state_fresh = now - self.state_received < 0.5
@@ -434,13 +477,19 @@ class App:
             for raw, delta in zip(self.raw_labels, self.delta_labels):
                 raw.set("—")
                 delta.set("Δ —")
+            for label in self.angle_labels: label.set("角度 —")
         else:
             self.adc_status.set("采样正常 · 10Hz")
             for i, delta in enumerate(self.pot.deltas()):
                 self.raw_labels[i].set(str(self.pot.values[i]))
                 self.delta_labels[i].set(f"Δ {delta:+d}")
+                cal = self.joint_panel.device.get(i+1)
+                self.angle_labels[i].set(f"{cal.angle(self.pot.values[i])/1000:.1f}°（标定换算）" if cal and 0 < self.pot.values[i] < 4095 else "角度 — / 未标定")
         self.board_panel.refresh()
         self.joint_panel.refresh()
+        self.motor_panel.refresh()
+        self.light_panel.refresh()
+        self.linux_panel.refresh()
         self.draw()
         self.root.after(50, self.poll)
 
@@ -475,6 +524,7 @@ class App:
                 c.create_line(*segment, fill=color, width=2)
 
     def close(self):
+        self.linux_panel.close()
         if self.worker:
             self.worker.quit.set()
             self.worker.join(timeout=0.4)

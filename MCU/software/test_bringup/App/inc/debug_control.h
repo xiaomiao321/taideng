@@ -11,6 +11,8 @@ typedef struct {
     const char *(*confirm)(bool pass);
     const char *(*joint)(const char *op, unsigned seq, unsigned id,
                          const int32_t *values, unsigned count, uint32_t now);
+    bool (*manual)(void);
+    const char *(*aux)(const char *op, const char *const *args, unsigned count);
 } debug_hw_t;
 typedef struct {
     debug_hw_t hw;
@@ -18,6 +20,9 @@ typedef struct {
     unsigned motor, pending_motor;
     int duty, pending_duty;
     bool linked, locked, home, pending;
+    int multi_duty[8], multi_target[8];
+    uint32_t multi_start[8], multi_duration[8], multi_wait[8];
+    unsigned multi_pending;
 } debug_control_t;
 void debug_control_init(debug_control_t *c, debug_hw_t hw);
 void debug_control_line(debug_control_t *c, const char *line, uint32_t now);

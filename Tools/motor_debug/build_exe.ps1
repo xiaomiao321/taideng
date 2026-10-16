@@ -1,4 +1,4 @@
-param([string]$Name = 'BoardDebugJointLimits')
+param([string]$Name = 'BoardDebugMulti')
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 $previousUserBase = $env:PYTHONUSERBASE

@@ -7,6 +7,8 @@
 static unsigned running_motor, stops;
 static int running_duty;
 static bool stop_ok = true, run_ok = true;
+static int outputs[8];
+static unsigned manual_calls;
 static char reply[128];
 static unsigned test_calls, confirm_calls;
 static unsigned joint_calls;
@@ -25,8 +27,9 @@ static const char *hw_test(unsigned seq, const char *name, int value, uint32_t d
     ++test_calls; return NULL;
 }
 static const char *hw_confirm(bool pass) { assert(pass); ++confirm_calls; return NULL; }
-static bool hw_stop(void) { ++stops; running_motor = 0; running_duty = 0; return stop_ok; }
-static bool hw_run(unsigned motor, int duty) { running_motor = motor; running_duty = duty; return run_ok; }
+static bool hw_stop(void) { ++stops; running_motor = 0; running_duty = 0; memset(outputs, 0, sizeof(outputs)); return stop_ok; }
+static bool hw_run(unsigned motor, int duty) { running_motor = motor; running_duty = duty; outputs[motor-1] = duty; return run_ok; }
+static bool hw_manual(void) { ++manual_calls; return true; }
 static void hw_reply(const char *s) { snprintf(reply, sizeof(reply), "%s", s); }
 static debug_control_t fresh(uint32_t now)
 {
@@ -39,6 +42,37 @@ static debug_control_t fresh(uint32_t now)
 }
 int main(void)
 {
+    debug_control_t multi = fresh(0); multi.hw.manual = hw_manual;
+    debug_control_line(&multi, "MSET 10 255 500 -600 700 -800 900 -1000 800 -800 500 600 700 800 900 1000 0 0", 0);
+    assert(multi.multi_pending == 255 && manual_calls == 1);
+    debug_control_update(&multi, 99, false); assert(!outputs[0] && !outputs[7]);
+    debug_control_update(&multi, 100, false);
+    assert(outputs[0] == 500 && outputs[1] == -600 && outputs[5] == -1000 && outputs[7] == -800);
+    debug_control_line(&multi, "MSET 11 2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0", 200);
+    assert(outputs[0] == 500 && outputs[1] == 0 && outputs[7] == -800);
+    unsigned before = manual_calls;
+    debug_control_line(&multi, "MSET 12 1 499 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0", 210);
+    assert(strstr(reply, "DUTY_RANGE") && manual_calls == before && outputs[0] == 500);
+    debug_control_line(&multi, "MSET 12 1 -800 0 0 0 0 0 0 0 200 0 0 0 0 0 0 0", 220);
+    assert(!outputs[0] && outputs[2] == 700);
+    debug_control_update(&multi, 319, false); assert(!outputs[0]);
+    debug_control_update(&multi, 320, false); assert(outputs[0] == -800);
+    debug_control_update(&multi, 520, false); assert(!outputs[0] && outputs[2] == 700);
+    debug_control_update(&multi, 800, false); assert(!outputs[2] && outputs[3] == -800 && outputs[7] == -800);
+    debug_control_update(&multi, 1000, false); assert(multi.locked && !outputs[7] && !multi.multi_pending);
+    debug_control_line(&multi, "MOFF 13", 1001); assert(strstr(reply, "ACK") && multi.locked);
+    multi = fresh(UINT32_MAX-150); multi.hw.manual = hw_manual;
+    debug_control_line(&multi, "MSET 14 128 0 0 0 0 0 0 0 -800 0 0 0 0 0 0 0 200", UINT32_MAX-150);
+    debug_control_update(&multi, UINT32_MAX-50, false); assert(outputs[7] == -800);
+    debug_control_update(&multi, 149, false); assert(!outputs[7]);
+    multi = fresh(0); multi.hw.manual = hw_manual;
+    debug_control_line(&multi, "MSET 15 255 800 800 800 800 800 800 800 800 0 0 0 0 0 0 0 0", 0);
+    debug_control_update(&multi, 100, false); assert(outputs[0] && outputs[7]);
+    debug_control_update(&multi, 110, true); assert(!outputs[0] && !outputs[7] && multi.locked);
+    multi = fresh(0); multi.hw.manual = hw_manual;
+    debug_control_line(&multi, "MSET 15 255 800 800 800 800 800 800 800 800 0 0 0 0 0 0 0 0", 0);
+    run_ok = false;
+    debug_control_update(&multi, 100, false); assert(multi.locked && !outputs[0] && !outputs[7]);
     for (unsigned motor = 1; motor <= 8; ++motor) {
         int max = motor <= 6 ? 1000 : 800;
         assert(motor_duty_valid(motor, 0));

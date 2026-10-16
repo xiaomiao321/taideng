@@ -93,6 +93,7 @@ class BoardPanel:
         except ValueError as exc:
             messagebox.showerror("测试参数", str(exc))
             return
+        if not self.app.confirm_exclusive(): return
         self.app.worker.submit("TEST", name, value, duration)
 
     def confirm(self, result):

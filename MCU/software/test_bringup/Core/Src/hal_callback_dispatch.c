@@ -51,6 +51,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART3) debug_console_rx_from_isr();
+    if (huart->Instance == USART1) debug_console_linux_rx_from_isr();
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -59,6 +60,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     if (huart->Instance == USART1)
     {
         bsp_linux_uart_on_error_from_isr();
+        debug_console_linux_error_from_isr();
     }
 }
 

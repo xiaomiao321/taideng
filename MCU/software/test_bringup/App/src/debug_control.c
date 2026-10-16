@@ -15,6 +15,8 @@ static void answer(debug_control_t *c, unsigned seq, const char *kind, const cha
 static bool stop(debug_control_t *c)
 {
     c->motor = 0; c->duty = 0; c->pending = false;
+    memset(c->multi_duty, 0, sizeof(c->multi_duty));
+    memset(c->multi_target, 0, sizeof(c->multi_target)); c->multi_pending = 0;
     if (!c->hw.stop()) { c->locked = true; return false; }
     return true;
 }
@@ -42,12 +44,13 @@ static bool number(const char *s, long min, long max, long *v)
 }
 void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
 {
-    char buf[80]; char *tokens[12]; unsigned n = 0;
+    char buf[192]; char *tokens[24]; unsigned n = 0;
     long seq = 0, duty = 0, duration = 0;
     if (strlen(line) >= sizeof(buf)) { answer(c, 0, "ERR", "LINE_TOO_LONG"); return; }
     strcpy(buf, line);
     char *p = strtok(buf, " \t\r\n");
-    while (p && n < 12) { tokens[n++] = p; p = strtok(NULL, " \t\r\n"); }
+    while (p && n < 24) { tokens[n++] = p; p = strtok(NULL, " \t\r\n"); }
+    if (p) { answer(c, 0, "ERR", "FORMAT"); return; }
     if (n < 2 || !number(tokens[1], 0, 65535, &seq)) {
         answer(c, 0, "ERR", "FORMAT"); return;
     }
@@ -65,7 +68,50 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         answer(c, (unsigned)seq, "ACK", "INFO");
         if (c->hw.test) c->hw.reply("CAPS BOARD_TEST 2\r\n");
         if (c->hw.joint) c->hw.reply("CAPS JOINT 1\r\n");
+        if (c->hw.manual) c->hw.reply("CAPS MULTI 1\r\n");
+        if (c->hw.aux) c->hw.reply("CAPS LIGHT 1\r\nCAPS LINUX 1\r\n");
         return;
+    }
+    if (!strcmp(tokens[0], "MSET") || !strcmp(tokens[0], "MOFF") ||
+        !strcmp(tokens[0], "LSET") || !strcmp(tokens[0], "LMODE") || !strcmp(tokens[0], "LTX")) {
+        bool off = !strcmp(tokens[0], "MOFF");
+        if (!off && (!c->linked || (uint32_t)(now - c->heartbeat_ms) >= 1000U)) {
+            answer(c, (unsigned)seq, "ERR", "NO_HEARTBEAT"); return;
+        }
+        if (!off && (c->locked || c->home)) { answer(c, (unsigned)seq, "ERR", "LOCKED"); return; }
+        if (off || !strcmp(tokens[0], "MSET")) {
+            long mask = 255, values[8] = {0}, times[8] = {0};
+            if (!c->hw.manual || (off ? n != 2 : n != 19)) {
+                answer(c, (unsigned)seq, "ERR", "PARAM"); return;
+            }
+            if (!off) {
+                if (!number(tokens[2], 1, 255, &mask)) {
+                    answer(c, (unsigned)seq, "ERR", "PARAM"); return;
+                }
+                for (unsigned i = 0; i < 8; ++i) {
+                    if (!number(tokens[i+3], -1000, 1000, &values[i]) ||
+                        !motor_duty_valid(i+1, (int)values[i]) || !number(tokens[i+11], 0, 60000, &times[i])) {
+                        answer(c, (unsigned)seq, "ERR", "DUTY_RANGE"); return;
+                    }
+                }
+            }
+            if (!c->hw.manual()) { debug_control_fault(c, "EVENT HARDWARE\r\n"); return; }
+            /* Legacy RUN is exclusive. Manual arrays own outputs from here. */
+            if (c->motor || c->pending) {
+                if (c->motor && !c->hw.run(c->motor, 0)) { debug_control_fault(c, "EVENT HARDWARE\r\n"); return; }
+                c->motor = 0; c->duty = 0; c->pending = false;
+            }
+            for (unsigned i = 0; i < 8; ++i) if ((unsigned)mask & (1U << i)) {
+                if (!c->hw.run(i+1, 0)) { debug_control_fault(c, "EVENT HARDWARE\r\n"); return; }
+                c->multi_duty[i] = 0; c->multi_target[i] = (int)values[i];
+                c->multi_duration[i] = (uint32_t)times[i]; c->multi_wait[i] = now;
+                c->multi_pending &= ~(1U << i);
+                if (values[i]) c->multi_pending |= 1U << i;
+            }
+            answer(c, (unsigned)seq, "ACK", tokens[0]); return;
+        }
+        const char *err = c->hw.aux ? c->hw.aux(tokens[0], (const char *const *)&tokens[2], n-2) : "UNSUPPORTED";
+        answer(c, (unsigned)seq, err ? "ERR" : "ACK", err ? err : tokens[0]); return;
     }
     if (!strcmp(tokens[0], "CAL") || !strcmp(tokens[0], "JMOVE") || !strcmp(tokens[0], "JGET")) {
         bool read = !strcmp(tokens[0], "JGET");
@@ -140,6 +186,17 @@ void debug_control_update(debug_control_t *c, uint32_t now, bool home)
     if (home_edge) debug_control_fault(c, "EVENT HOME\r\n");
     if (c->linked && (uint32_t)(now - c->heartbeat_ms) >= 1000U) {
         c->linked = false; debug_control_fault(c, "EVENT TIMEOUT\r\n");
+    }
+    if (!c->locked && !home) for (unsigned i = 0; i < 8; ++i) {
+        if ((c->multi_pending & (1U << i)) && (uint32_t)(now - c->multi_wait[i]) >= 100U) {
+            if (!c->hw.run(i+1, c->multi_target[i])) { debug_control_fault(c, "EVENT HARDWARE\r\n"); return; }
+            c->multi_pending &= ~(1U << i); c->multi_duty[i] = c->multi_target[i]; c->multi_start[i] = now;
+        }
+        if (c->multi_duty[i] && c->multi_duration[i] &&
+            (uint32_t)(now - c->multi_start[i]) >= c->multi_duration[i]) {
+            if (!c->hw.run(i+1, 0)) { debug_control_fault(c, "EVENT HARDWARE\r\n"); return; }
+            c->multi_duty[i] = c->multi_target[i] = 0;
+        }
     }
     if (c->pending && !c->locked && !home && (uint32_t)(now - c->pending_ms) >= 100U) {
         c->pending = false;
