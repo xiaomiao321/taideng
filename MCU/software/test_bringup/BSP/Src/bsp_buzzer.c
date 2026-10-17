@@ -34,7 +34,12 @@ bsp_status_t bsp_buzzer_start(uint32_t frequency_hz)
         return BSP_ERR_NOT_INITIALIZED;
     }
 
-    uint32_t timer_clock_hz = HAL_RCC_GetPCLK1Freq() * 2U;
+    /* APB1 分频不为 1 时，APB1 定时器时钟是 PCLK1 的两倍（RM0090 RCC 章节）。 */
+    uint32_t timer_clock_hz = HAL_RCC_GetPCLK1Freq();
+    if ((RCC->CFGR & RCC_CFGR_PPRE1) != RCC_CFGR_PPRE1_DIV1)
+    {
+        timer_clock_hz *= 2U;
+    }
     uint32_t prescaler = htim13.Init.Prescaler + 1U;
     uint32_t timer_counter_hz = timer_clock_hz / prescaler;
     uint32_t period_counts = timer_counter_hz / frequency_hz;

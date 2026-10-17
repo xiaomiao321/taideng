@@ -20,7 +20,7 @@
 #include "main.h"
 
 #include "bsp_adc.h"
-#include "debug_console.h"
+#include "bsp_debug_uart.h"
 #include "bsp_key.h"
 #include "bsp_linux_uart.h"
 
@@ -52,11 +52,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART3)
     {
-        debug_console_rx_from_isr();
+        bsp_debug_uart_on_rx_cplt_from_isr();
     }
-    if (huart->Instance == USART1)
+    else if (huart->Instance == USART1)
     {
-        debug_console_linux_rx_from_isr();
+        bsp_linux_uart_on_rx_cplt_from_isr();
     }
 }
 
@@ -64,12 +64,11 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART3)
     {
-        debug_console_error_from_isr();
+        bsp_debug_uart_on_error_from_isr();
     }
-    if (huart->Instance == USART1)
+    else if (huart->Instance == USART1)
     {
         bsp_linux_uart_on_error_from_isr();
-        debug_console_linux_error_from_isr();
     }
 }
 

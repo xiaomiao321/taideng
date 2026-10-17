@@ -42,7 +42,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# Add sources to executable
+# FreeRTOS kernel (vendor code, built with the toolchain's default warnings)
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/tasks.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/queue.c
@@ -52,6 +52,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/stream_buffer.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/heap_4.c
+)
+
+# Hand-written sources: HAL callback dispatch, BSP, protocol, application, tests
+set(AITAID_SOURCES
     # HAL 弱回调的唯一实现位置（集成层，非 CubeMX 管理）
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/hal_callback_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_common.c
@@ -67,6 +71,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_linux_uart.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_adc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_watchdog.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_uart_stream.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_debug_uart.c
     # 协议层与命令层：不依赖 HAL，可在 PC 上用 HostTest/run.ps1 单测
     ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Src/mcu_protocol.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Src/mcu_command.c
@@ -79,6 +85,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_cases.c
 )
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${AITAID_SOURCES})
+# 只对手写代码加严警告；CubeMX、HAL 和 FreeRTOS 保持厂商原样，不加。
+set_source_files_properties(${AITAID_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wextra")
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE

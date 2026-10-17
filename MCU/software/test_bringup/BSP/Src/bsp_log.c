@@ -1,21 +1,22 @@
 #include "bsp_log.h"
 
-#include <stdarg.h> // va_list、va_start、va_end
+#include <stdarg.h>
 #include <stdbool.h>
-#include <stdio.h> // vsnprintf
+#include <stdio.h>
 #include <string.h>
 
 #include "main.h"
 #include "usart.h"
 
-#define BSP_LOG_UART_TIMEOUT_MS (1000U) // 发送超时，单位为毫秒
+/** @brief 单次发送超时，单位为毫秒。 */
+#define BSP_LOG_UART_TIMEOUT_MS (1000U)
 static const char *const s_level_names[] = {"NONE", "ERROR", "WARN", "INFO",
                                             "DEBUG"};
 static bool s_is_log_initialized = false;
 bsp_status_t bsp_log_init(void)
 {
     s_is_log_initialized = false;
-    // 确保句柄指向 USART3 且已经初始化
+    /* 确保句柄指向 USART3 且已经初始化 */
     if ((huart3.Instance != USART3) ||
         (HAL_UART_GetState(&huart3) == HAL_UART_STATE_RESET))
     {
@@ -36,7 +37,7 @@ bsp_status_t bsp_log_write(const uint8_t *data, size_t length)
     {
         return BSP_ERR_PARAM;
     }
-    write_status = HAL_UART_Transmit(&huart3, (uint8_t *)data, (uint16_t)length,
+    write_status = HAL_UART_Transmit(&huart3, data, (uint16_t)length,
                                      BSP_LOG_UART_TIMEOUT_MS);
     if (write_status == HAL_OK)
     {
@@ -99,7 +100,7 @@ bsp_status_t bsp_log_printf(const char *format, ...)
     }
     if (length == 0)
     {
-        return BSP_OK; // 格式化结果为空，不发送
+        return BSP_OK; /* 格式化结果为空，不发送 */
     }
 
     /* 发送字符串 */
@@ -129,7 +130,7 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
     /* 等级过滤 */
     if (level > AITAID_LOG_LEVEL)
     {
-        return BSP_OK; // 等级被过滤，返回成功
+        return BSP_OK; /* 等级被过滤，返回成功 */
     }
     /* 把前缀加入格式化字符串 */
     char buffer[BSP_LOG_BUFFER_SIZE];
@@ -148,7 +149,7 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
 
     size_t used_length = (size_t)prefix_length;
     size_t remaining_length =
-        sizeof(buffer) - used_length - 2U; // 留出 CRLF 和空字符
+        sizeof(buffer) - used_length - 2U; /* 留出 CRLF 和空字符 */
     va_list args;
     va_start(args, format);
     int formatted_length =
@@ -167,7 +168,7 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
     /* 添加 CRLF */
     buffer[used_length++] = '\r';
     buffer[used_length++] = '\n';
-    buffer[used_length] = '\0'; // 确保空字符
+    buffer[used_length] = '\0'; /* 确保空字符 */
 
     /* 发送字符串 */
     return bsp_log_write((const uint8_t *)buffer, used_length);

@@ -1,6 +1,13 @@
 /**
  * @file bsp_linux_uart.h
- * @brief USART1 原始字节阻塞发送及中断变长接收接口。
+ * @brief USART1 原始字节阻塞发送，及两种互斥的接收方式。
+ *
+ * - 报文模式：start_receive()/receive_update()，中断变长接收（IDLE 结束），
+ *   供 Android 二进制协议使用；
+ * - 字节流模式：stream_start()/stream_read()，单字节中断加环形缓冲，
+ *   供调试终端把 USART1 原样透传到上位机。
+ *
+ * 两种模式不能同时启用，启用一种时另一种的启动接口返回 BSP_BUSY。
  *
  * 当前版本只负责传输字节，不进行格式化、字符串处理或协议解析。
  * 模块固定使用 huart1，115200 bit/s、8N1、无硬件流控。
@@ -15,6 +22,7 @@
 
 #include "bsp_common.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,7 +40,7 @@
  * @note 检查 huart1.Instance 为 USART1、配置为 115200 bit/s、8N1、无硬件流控，
  *       且发送和接收状态均为 READY。
  * @note 本函数不重新配置 UART，不发送数据，也不清除接收数据。
- * @note 接收进行中调用返回 BUSY，不改变当前接收；其他情况下重新检查 UART。
+ * @note 任一模式接收进行中调用返回 BUSY，不改变当前接收；其他情况下重新检查 UART。
  * @note 成功后清除软件接收状态，初始结果为 IDLE。不用于中途复位接收。
  */
 bsp_status_t bsp_linux_uart_init(void);
@@ -72,8 +80,8 @@ bsp_status_t bsp_linux_uart_write(const uint8_t *data, size_t length,
  * @retval BSP_OK 已启动接收，不表示数据已经到达。
  * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化，不修改缓冲区。
  * @retval BSP_ERR_PARAM 参数无效，不修改缓冲区。
- * @retval BSP_BUSY 上次接收尚未处理完，或 HAL 接收状态忙。
- * @retval BSP_ERR_HAL 启动失败或此前终止接收失败。
+ * @retval BSP_BUSY 上次接收尚未处理完、字节流模式正在使用，或 HAL 接收状态忙。
+ * @retval BSP_ERR_HAL 启动失败，或此前终止接收失败且重试仍失败。
  *
  * @note 使用 HAL_UARTEx_ReceiveToIdle_IT()。缓冲区由调用者持有，HAL 会保存指针；
  *       直到 receive_update 返回终态前，缓冲区必须有效，不得由调用者读写。
@@ -104,7 +112,8 @@ bsp_status_t bsp_linux_uart_start_receive(uint8_t *buffer, size_t buffer_size,
  *
  * @note 不等待数据；错误优先于完成，完成优先于超时。终态保留至下次启动。
  * @note 只有 OK 时才允许读取本次缓冲区；读取完后可以启动下一次接收。
- * @note 超时或出错在主循环调用 HAL_UART_AbortReceive()，清理失败后禁止再次启动。
+ * @note 超时或出错在主循环调用 HAL_UART_AbortReceive()。清理失败时记下标志，
+ *       下次 start_receive() 先重试终止，成功后才允许重新启动。
  * @warning 必须周期调用本函数才能处理软件超时；ISR 内不打印、不比较数据。
  */
 bsp_status_t bsp_linux_uart_receive_update(size_t *received_length);
@@ -121,10 +130,62 @@ bsp_status_t bsp_linux_uart_receive_update(size_t *received_length);
 void bsp_linux_uart_on_rx_event_from_isr(uint16_t size);
 
 /**
+ * @brief 启动字节流（透传）模式接收。
+ *
+ * @retval BSP_OK 已启动，或本来就在运行。
+ * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化。
+ * @retval BSP_BUSY 报文模式接收正在进行。
+ * @retval BSP_ERR_HAL HAL 启动接收失败。
+ */
+bsp_status_t bsp_linux_uart_stream_start(void);
+
+/**
+ * @brief 停止字节流模式接收并丢弃缓冲中的字节；未启动时什么都不做。
+ *
+ * @retval BSP_OK 已停止。
+ * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化。
+ * @retval BSP_ERR_HAL HAL 终止接收失败；模块仍视为已停止。
+ */
+bsp_status_t bsp_linux_uart_stream_stop(void);
+
+/** @brief 字节流模式是否已启动。 */
+bool bsp_linux_uart_stream_is_active(void);
+
+/**
+ * @brief 取出一个字节流模式收到的字节。
+ *
+ * @retval true 已取出，写入 byte。
+ * @retval false 没有新字节、未启动或模块未初始化。
+ */
+bool bsp_linux_uart_stream_read(uint8_t *byte);
+
+/**
+ * @brief 主循环周期调用：字节流模式下从接收错误中恢复。
+ *
+ * @retval BSP_OK 正常、未启动，或错误已恢复。
+ * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化。
+ * @retval BSP_ERR_HAL 无法重新启动接收，下次调用再试。
+ */
+bsp_status_t bsp_linux_uart_stream_update(void);
+
+/** @brief 字节流模式接收错误累计次数。 */
+uint32_t bsp_linux_uart_stream_error_count(void);
+
+/** @brief 字节流模式缓冲满而丢弃的字节累计数。 */
+uint32_t bsp_linux_uart_stream_overflow_count(void);
+
+/**
+ * @brief USART1 单字节接收完成（字节流模式），由 HAL_UART_RxCpltCallback() 转发。
+ *
+ * @warning 只能在中断上下文调用，且调用前已确认实例为 USART1。
+ */
+void bsp_linux_uart_on_rx_cplt_from_isr(void);
+
+/**
  * @brief 记录一次 USART1 错误事件，由 HAL 回调在集成层转发。
  *
- * @note 只在初始化且接收进行中时记录错误通知，否则忽略。
- *       具体清理由 bsp_linux_uart_receive_update() 在主循环执行。
+ * @note 报文模式下记录错误通知，由 bsp_linux_uart_receive_update() 清理；
+ *       字节流模式下由 bsp_linux_uart_stream_update() 恢复。其他情况忽略。
  * @warning 只能在中断上下文调用，且调用前已确认对应外设为 USART1。
  */
 void bsp_linux_uart_on_error_from_isr(void);

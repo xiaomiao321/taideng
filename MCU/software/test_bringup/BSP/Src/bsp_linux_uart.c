@@ -2,7 +2,11 @@
 
 #include <stdbool.h>
 
+#include "bsp_uart_stream.h"
 #include "usart.h"
+
+/** @brief 字节流（透传）模式的接收环形缓冲容量，必须是 2 的幂。 */
+#define BSP_LINUX_UART_STREAM_RING_SIZE (1024U)
 
 static bool s_is_initialized = false;
 static volatile bool s_is_rx_active = false;
@@ -14,6 +18,8 @@ static uint32_t s_rx_start_ms = 0U;
 static uint32_t s_rx_timeout_ms = 0U;
 static bool s_has_cleanup_failed = false;
 static bsp_status_t s_rx_result = BSP_IDLE;
+static uint8_t s_stream_ring[BSP_LINUX_UART_STREAM_RING_SIZE];
+static bsp_uart_stream_t s_stream;
 
 static bsp_status_t convert_hal_status(HAL_StatusTypeDef status)
 {
@@ -48,7 +54,8 @@ static bsp_status_t abort_receive(bsp_status_t result)
 
 bsp_status_t bsp_linux_uart_init(void)
 {
-    if (s_is_rx_active)
+    if (s_is_rx_active ||
+        (s_is_initialized && bsp_uart_stream_is_active(&s_stream)))
     {
         return BSP_BUSY;
     }
@@ -80,6 +87,12 @@ bsp_status_t bsp_linux_uart_init(void)
     s_rx_timeout_ms = 0U;
     s_has_cleanup_failed = false;
     s_rx_result = BSP_IDLE;
+    bsp_status_t status = bsp_uart_stream_init(
+        &s_stream, &huart1, s_stream_ring, sizeof(s_stream_ring));
+    if (status != BSP_OK)
+    {
+        return status;
+    }
     s_is_initialized = true;
     return BSP_OK;
 }
@@ -120,7 +133,16 @@ bsp_status_t bsp_linux_uart_start_receive(uint8_t *buffer, size_t buffer_size,
     }
     if (s_has_cleanup_failed)
     {
-        return BSP_ERR_HAL;
+        /* 上次终止接收失败：重试一次，成功即可恢复，不必复位整机。 */
+        if (HAL_UART_AbortReceive(&huart1) != HAL_OK)
+        {
+            return BSP_ERR_HAL;
+        }
+        s_has_cleanup_failed = false;
+    }
+    if (bsp_uart_stream_is_active(&s_stream))
+    {
+        return BSP_BUSY;
     }
     if (s_is_rx_active || huart1.RxState != HAL_UART_STATE_READY)
     {
@@ -206,8 +228,76 @@ void bsp_linux_uart_on_rx_event_from_isr(uint16_t size)
 
 void bsp_linux_uart_on_error_from_isr(void)
 {
-    if (s_is_initialized && s_is_rx_active)
+    if (!s_is_initialized)
+    {
+        return;
+    }
+    if (s_is_rx_active)
     {
         s_has_rx_error = true;
+    }
+    bsp_uart_stream_on_error_from_isr(&s_stream);
+}
+
+bsp_status_t bsp_linux_uart_stream_start(void)
+{
+    if (!s_is_initialized)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+    if (s_is_rx_active)
+    {
+        return BSP_BUSY;
+    }
+    return bsp_uart_stream_start(&s_stream);
+}
+
+bsp_status_t bsp_linux_uart_stream_stop(void)
+{
+    if (!s_is_initialized)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+    return bsp_uart_stream_stop(&s_stream);
+}
+
+bool bsp_linux_uart_stream_is_active(void)
+{
+    return s_is_initialized && bsp_uart_stream_is_active(&s_stream);
+}
+
+bool bsp_linux_uart_stream_read(uint8_t *byte)
+{
+    if (!s_is_initialized || (byte == NULL))
+    {
+        return false;
+    }
+    return bsp_uart_stream_read(&s_stream, byte);
+}
+
+bsp_status_t bsp_linux_uart_stream_update(void)
+{
+    if (!s_is_initialized)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+    return bsp_uart_stream_update(&s_stream);
+}
+
+uint32_t bsp_linux_uart_stream_error_count(void)
+{
+    return bsp_uart_stream_error_count(&s_stream);
+}
+
+uint32_t bsp_linux_uart_stream_overflow_count(void)
+{
+    return bsp_uart_stream_overflow_count(&s_stream);
+}
+
+void bsp_linux_uart_on_rx_cplt_from_isr(void)
+{
+    if (s_is_initialized)
+    {
+        bsp_uart_stream_on_rx_cplt_from_isr(&s_stream);
     }
 }

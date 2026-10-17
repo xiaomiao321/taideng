@@ -51,7 +51,7 @@ static test_result_t test_log(void)
     return TEST_PASS;
 }
 
-test_result_t test_adc(void)
+static test_result_t test_adc(void)
 {
     bsp_status_t status = bsp_adc_init();
     if (status != BSP_OK)

@@ -4,12 +4,12 @@
         {
             "label": "test_bringup: Configure Debug",
             "type": "process",
-            "command": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/CMake/bin/cmake.exe",
+            "command": "${env:STM32CLT_PATH}/CMake/bin/cmake.exe",
             "args": ["--preset", "Debug"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
-                    "PATH": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin;D:/STM32CubeCLT/STM32CubeCLT_1.18.0/Ninja/bin;${env:PATH}"
+                    "PATH": "${env:STM32CLT_PATH}/GNU-tools-for-STM32/bin;${env:STM32CLT_PATH}/Ninja/bin;${env:PATH}"
                 }
             },
             "problemMatcher": []
@@ -17,12 +17,12 @@
         {
             "label": "test_bringup: Build Debug",
             "type": "process",
-            "command": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/CMake/bin/cmake.exe",
+            "command": "${env:STM32CLT_PATH}/CMake/bin/cmake.exe",
             "args": ["--build", "--preset", "Debug", "--parallel"],
             "options": {
                 "cwd": "${workspaceFolder}",
                 "env": {
-                    "PATH": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin;D:/STM32CubeCLT/STM32CubeCLT_1.18.0/Ninja/bin;${env:PATH}"
+                    "PATH": "${env:STM32CLT_PATH}/GNU-tools-for-STM32/bin;${env:STM32CLT_PATH}/Ninja/bin;${env:PATH}"
                 }
             },
             "dependsOn": "test_bringup: Configure Debug",

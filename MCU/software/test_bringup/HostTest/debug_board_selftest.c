@@ -37,8 +37,8 @@ static debug_board_t fresh(void)
 int main(void)
 {
     debug_board_t b;
-    /* All 29 table entries must be recognized and runnable with defaults. */
-    for (unsigned i = 0; i < 29; ++i)
+    /* Every table entry must be recognized and runnable with defaults. */
+    for (unsigned i = 0; i < DEBUG_BOARD_TEST_COUNT; ++i)
     {
         b = fresh();
         for (unsigned j = 0; j < i; ++j)

@@ -12,9 +12,9 @@
       "device": "STM32F407VG",
       "interface": "swd",
       "runToEntryPoint": "main",
-      "armToolchainPath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin",
+      "armToolchainPath": "${env:STM32CLT_PATH}/GNU-tools-for-STM32/bin",
       "serverpath": "D:/xpack-openocd-0.12.0-7/bin/openocd.exe",
-      "svdFile": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
+      "svdFile": "${env:STM32CLT_PATH}/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
       "liveWatch": {
         "enabled": true,
         "samplesPerSecond": 4
@@ -35,9 +35,9 @@
       "servertype": "openocd",
       "device": "STM32F407VG",
       "interface": "swd",
-      "armToolchainPath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin",
+      "armToolchainPath": "${env:STM32CLT_PATH}/GNU-tools-for-STM32/bin",
       "serverpath": "D:/xpack-openocd-0.12.0-7/bin/openocd.exe",
-      "svdFile": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
+      "svdFile": "${env:STM32CLT_PATH}/STMicroelectronics_CMSIS_SVD/STM32F407.svd",
       "liveWatch": {
         "enabled": true,
         "samplesPerSecond": 4

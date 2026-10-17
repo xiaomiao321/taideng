@@ -7,7 +7,7 @@
 static unsigned running_motor, stops;
 static int running_duty;
 static bool stop_ok = true, run_ok = true;
-static int outputs[8];
+static int outputs[MOTOR_COUNT];
 static unsigned manual_calls;
 static char reply[128];
 static unsigned test_calls, confirm_calls;
@@ -56,11 +56,13 @@ static bool hw_stop(void)
     memset(outputs, 0, sizeof(outputs));
     return stop_ok;
 }
-static bool hw_run(unsigned motor, int duty)
+/* run() 收到的是 0 起的下标；running_motor 记成 M 编号，0 表示没有电机在转。 */
+static bool hw_run(unsigned index, int duty)
 {
-    running_motor = motor;
+    assert(index < MOTOR_COUNT);
+    running_motor = index + 1U;
     running_duty = duty;
-    outputs[motor - 1] = duty;
+    outputs[index] = duty;
     return run_ok;
 }
 static bool hw_manual(void)
@@ -145,16 +147,17 @@ int main(void)
     run_ok = false;
     debug_control_update(&multi, 100, false);
     assert(multi.locked && !outputs[0] && !outputs[7]);
-    for (unsigned motor = 1; motor <= 8; ++motor)
+    for (unsigned index = 0; index < MOTOR_COUNT; ++index)
     {
-        int max = motor <= 6 ? 1000 : 800;
-        assert(motor_duty_valid(motor, 0));
-        assert(motor_duty_valid(motor, 500) && motor_duty_valid(motor, -500));
-        assert(motor_duty_valid(motor, max) && motor_duty_valid(motor, -max));
-        assert(!motor_duty_valid(motor, 499) && !motor_duty_valid(motor, -499));
-        assert(!motor_duty_valid(motor, max + 1) &&
-               !motor_duty_valid(motor, -max - 1));
+        int max = index < 6U ? 1000 : 800;
+        assert(motor_duty_valid(index, 0));
+        assert(motor_duty_valid(index, 500) && motor_duty_valid(index, -500));
+        assert(motor_duty_valid(index, max) && motor_duty_valid(index, -max));
+        assert(!motor_duty_valid(index, 499) && !motor_duty_valid(index, -499));
+        assert(!motor_duty_valid(index, max + 1) &&
+               !motor_duty_valid(index, -max - 1));
     }
+    assert(!motor_duty_valid(MOTOR_COUNT, 0));
     debug_control_t c = fresh(0);
     debug_control_line(&c, "RUN 2 M1 800 500", 0);
     assert(c.pending && running_motor == 0);

@@ -5,6 +5,9 @@
 
 #include "tim.h"
 
+_Static_assert(BSP_MOTOR_COUNT == MOTOR_COUNT,
+               "motor_limits.h and bsp_motor.h disagree on the motor count");
+
 /* 逻辑电机号 → 定时器 FI/BI 通道映射；换板时只改这张表。
  * M6 的 FI/BI 与引脚自然顺序相反，不要按 PC8/PC9 的顺序写。
  * 放在文件作用域，急停时可以不经过 bsp_motor_init() 直接使用。 */
@@ -64,7 +67,7 @@ bsp_status_t bsp_motor_set_duty(bsp_motor_id_t motor_id, int16_t duty_permille)
     {
         return BSP_ERR_PARAM;
     }
-    if (!motor_duty_valid((unsigned)motor_id + 1U, duty_permille))
+    if (!motor_duty_valid((unsigned)motor_id, duty_permille))
     {
         return BSP_ERR_PARAM;
     }

@@ -1,9 +1,9 @@
 {
     "cmake.sourceDirectory": "${workspaceFolder}",
-    "cmake.cmakePath": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/CMake/bin/cmake.exe",
+    "cmake.cmakePath": "${env:STM32CLT_PATH}/CMake/bin/cmake.exe",
     "cmake.useCMakePresets": "always",
     "cmake.environment": {
-        "PATH": "D:/STM32CubeCLT/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin;D:/STM32CubeCLT/STM32CubeCLT_1.18.0/Ninja/bin;${env:PATH}"
+        "PATH": "${env:STM32CLT_PATH}/GNU-tools-for-STM32/bin;${env:STM32CLT_PATH}/Ninja/bin;${env:PATH}"
     },
     "cortex-debug.variableUseNaturalFormat": true,
     "livewatch.elfPath": "D:/files/26_Summer/taideng/MCU/software/test_bringup/build/Debug/test_bringup.elf",

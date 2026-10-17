@@ -1,15 +1,39 @@
 #include "debug_control.h"
-#include "motor_limits.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief 一行命令最多的空白分隔字段数。 */
+#define MAX_TOKENS (24U)
+
+/** @brief 一条回复的最大长度。 */
+#define REPLY_MAX (96U)
+
+/** @brief RUN、MSET 的电机持续时间与 TEST 的测试时长上限，单位毫秒。 */
+#define MAX_DURATION_MS (60000L)
+
+/** @brief TEST 命令 value 参数的上限（蜂鸣器频率最高 20kHz）。 */
+#define MAX_TEST_VALUE (20000L)
+
+/** @brief 关节命令角度参数的绝对值上限，单位毫度。 */
+#define MAX_JOINT_VALUE (360000L)
+
+/** @brief 文本协议能寻址的关节数（M1～M6）。 */
+#define JOINT_MOTOR_COUNT (6U)
+
+/** @brief MSET 命令的字段数：命令、序号、掩码，再加每路电机各一个占空比和时长。 */
+#define MSET_TOKEN_COUNT (3U + 2U * MOTOR_COUNT)
+
+/** @brief 多路电机掩码：全部电机。 */
+#define ALL_MOTORS_MASK ((1L << MOTOR_COUNT) - 1L)
+
 static void answer(debug_control_t *c, unsigned seq, const char *kind,
                    const char *text)
 {
-    char out[96];
+    char out[REPLY_MAX];
     (void)snprintf(out, sizeof(out), "%s %u %s\r\n", kind, seq, text);
     c->hw.reply(out);
 }
@@ -40,6 +64,28 @@ void debug_control_init(debug_control_t *c, debug_hw_t hw)
     c->hw = hw;
     c->locked = !stop(c);
 }
+/** @brief 心跳是否有效。 */
+static bool has_heartbeat(const debug_control_t *c, uint32_t now)
+{
+    return c->linked && ((uint32_t)(now - c->heartbeat_ms) <
+                         DEBUG_CONTROL_HEARTBEAT_TIMEOUT_MS);
+}
+
+/**
+ * @brief 解析文本协议里的电机名 "M1"～"M<count>"。
+ *
+ * @return 0 起的电机下标；格式不对或超出范围时返回 count。
+ */
+static unsigned parse_motor_name(const char *token, unsigned count)
+{
+    if ((strlen(token) != 2U) || (token[0] != 'M') || (token[1] < '1') ||
+        (token[1] > (char)('0' + count)))
+    {
+        return count;
+    }
+    return (unsigned)(token[1] - '1');
+}
+
 static bool number(const char *s, long min, long max, long *v)
 {
     const char *p = s;
@@ -70,8 +116,8 @@ static bool number(const char *s, long min, long max, long *v)
 }
 void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
 {
-    char buf[192];
-    char *tokens[24];
+    char buf[DEBUG_CONTROL_LINE_MAX];
+    char *tokens[MAX_TOKENS];
     unsigned n = 0;
     long seq = 0, duty = 0, duration = 0;
     if (strlen(line) >= sizeof(buf))
@@ -81,7 +127,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
     }
     strcpy(buf, line);
     char *p = strtok(buf, " \t\r\n");
-    while (p && n < 24)
+    while (p && n < MAX_TOKENS)
     {
         tokens[n++] = p;
         p = strtok(NULL, " \t\r\n");
@@ -144,7 +190,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         !strcmp(tokens[0], "LTX"))
     {
         bool off = !strcmp(tokens[0], "MOFF");
-        if (!off && (!c->linked || (uint32_t)(now - c->heartbeat_ms) >= 1000U))
+        if (!off && !has_heartbeat(c, now))
         {
             answer(c, (unsigned)seq, "ERR", "NO_HEARTBEAT");
             return;
@@ -156,24 +202,28 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         if (off || !strcmp(tokens[0], "MSET"))
         {
-            long mask = 255, values[8] = {0}, times[8] = {0};
-            if (!c->hw.manual || (off ? n != 2 : n != 19))
+            long mask = ALL_MOTORS_MASK;
+            long values[MOTOR_COUNT] = {0};
+            long times[MOTOR_COUNT] = {0};
+            if (!c->hw.manual || (off ? n != 2 : n != MSET_TOKEN_COUNT))
             {
                 answer(c, (unsigned)seq, "ERR", "PARAM");
                 return;
             }
             if (!off)
             {
-                if (!number(tokens[2], 1, 255, &mask))
+                if (!number(tokens[2], 1, ALL_MOTORS_MASK, &mask))
                 {
                     answer(c, (unsigned)seq, "ERR", "PARAM");
                     return;
                 }
-                for (unsigned i = 0; i < 8; ++i)
+                for (unsigned i = 0; i < MOTOR_COUNT; ++i)
                 {
-                    if (!number(tokens[i + 3], -1000, 1000, &values[i]) ||
-                        !motor_duty_valid(i + 1, (int)values[i]) ||
-                        !number(tokens[i + 11], 0, 60000, &times[i]))
+                    if (!number(tokens[i + 3U], -MOTOR_DUTY_SMALL_MAX,
+                                MOTOR_DUTY_SMALL_MAX, &values[i]) ||
+                        !motor_duty_valid(i, (int)values[i]) ||
+                        !number(tokens[i + 3U + MOTOR_COUNT], 0,
+                                MAX_DURATION_MS, &times[i]))
                     {
                         answer(c, (unsigned)seq, "ERR", "DUTY_RANGE");
                         return;
@@ -188,7 +238,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
             /* Legacy RUN is exclusive. Manual arrays own outputs from here. */
             if (c->motor || c->pending)
             {
-                if (c->motor && !c->hw.run(c->motor, 0))
+                if (c->motor && !c->hw.run(c->motor - 1U, 0))
                 {
                     debug_control_fault(c, "EVENT HARDWARE\r\n");
                     return;
@@ -197,11 +247,11 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
                 c->duty = 0;
                 c->pending = false;
             }
-            for (unsigned i = 0; i < 8; ++i)
+            for (unsigned i = 0; i < MOTOR_COUNT; ++i)
             {
                 if ((unsigned)mask & (1U << i))
                 {
-                    if (!c->hw.run(i + 1, 0))
+                    if (!c->hw.run(i, 0))
                     {
                         debug_control_fault(c, "EVENT HARDWARE\r\n");
                         return;
@@ -232,8 +282,8 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
     {
         bool read = !strcmp(tokens[0], "JGET");
         unsigned count = read ? 0U : !strcmp(tokens[0], "CAL") ? 7U : 2U;
-        if (!c->hw.joint || n != count + 3U || strlen(tokens[2]) != 2 ||
-            tokens[2][0] != 'M' || tokens[2][1] < '1' || tokens[2][1] > '6')
+        unsigned joint = parse_motor_name(tokens[2], JOINT_MOTOR_COUNT);
+        if (!c->hw.joint || n != count + 3U || joint >= JOINT_MOTOR_COUNT)
         {
             answer(c, (unsigned)seq, "ERR", "JOINT_PARAM");
             return;
@@ -242,7 +292,8 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         long value;
         for (unsigned i = 0; i < count; ++i)
         {
-            if (!number(tokens[i + 3U], -360000, 360000, &value))
+            if (!number(tokens[i + 3U], -MAX_JOINT_VALUE, MAX_JOINT_VALUE,
+                        &value))
             {
                 answer(c, (unsigned)seq, "ERR", "JOINT_PARAM");
                 return;
@@ -251,7 +302,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         if (!read)
         {
-            if (!c->linked || (uint32_t)(now - c->heartbeat_ms) >= 1000U)
+            if (!has_heartbeat(c, now))
             {
                 answer(c, (unsigned)seq, "ERR", "NO_HEARTBEAT");
                 return;
@@ -268,15 +319,14 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
             }
         }
         const char *err =
-            c->hw.joint(tokens[0], (unsigned)seq,
-                        (unsigned)(tokens[2][1] - '1'), values, count, now);
+            c->hw.joint(tokens[0], (unsigned)seq, joint, values, count, now);
         answer(c, (unsigned)seq, err ? "ERR" : "ACK", err ? err : tokens[0]);
         return;
     }
     if ((n == 3 && !strcmp(tokens[0], "CONFIRM")) ||
         (n == 5 && !strcmp(tokens[0], "TEST")))
     {
-        if (!c->linked || (uint32_t)(now - c->heartbeat_ms) >= 1000U)
+        if (!has_heartbeat(c, now))
         {
             answer(c, (unsigned)seq, "ERR", "NO_HEARTBEAT");
             return;
@@ -299,8 +349,8 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         else
         {
-            if (!c->hw.test || !number(tokens[3], 0, 20000, &duty) ||
-                !number(tokens[4], 1, 60000, &duration))
+            if (!c->hw.test || !number(tokens[3], 0, MAX_TEST_VALUE, &duty) ||
+                !number(tokens[4], 1, MAX_DURATION_MS, &duration))
             {
                 answer(c, (unsigned)seq, "ERR", "PARAM");
                 return;
@@ -316,20 +366,22 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         answer(c, (unsigned)seq, err ? "ERR" : "ACK", err ? err : tokens[0]);
         return;
     }
-    if (n != 5 || strcmp(tokens[0], "RUN") || strlen(tokens[2]) != 2 ||
-        tokens[2][0] != 'M' || tokens[2][1] < '1' || tokens[2][1] > '8' ||
-        !number(tokens[3], -1000, 1000, &duty) || duty == 0 ||
-        !number(tokens[4], 0, 60000, &duration))
+    unsigned motor =
+        (n == 5) ? parse_motor_name(tokens[2], MOTOR_COUNT) : MOTOR_COUNT;
+    if (n != 5 || strcmp(tokens[0], "RUN") || motor >= MOTOR_COUNT ||
+        !number(tokens[3], -MOTOR_DUTY_SMALL_MAX, MOTOR_DUTY_SMALL_MAX,
+                &duty) ||
+        duty == 0 || !number(tokens[4], 0, MAX_DURATION_MS, &duration))
     {
         answer(c, (unsigned)seq, "ERR", "PARAM");
         return;
     }
-    if (!motor_duty_valid((unsigned)(tokens[2][1] - '0'), (int)duty))
+    if (!motor_duty_valid(motor, (int)duty))
     {
         answer(c, (unsigned)seq, "ERR", "DUTY_RANGE");
         return;
     }
-    if (!c->linked || (uint32_t)(now - c->heartbeat_ms) >= 1000U)
+    if (!has_heartbeat(c, now))
     {
         answer(c, (unsigned)seq, "ERR", "NO_HEARTBEAT");
         return;
@@ -344,7 +396,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         answer(c, (unsigned)seq, "ERR", "HARDWARE");
         return;
     }
-    c->pending_motor = (unsigned)(tokens[2][1] - '0');
+    c->pending_motor = motor + 1U;
     c->pending_duty = (int)duty;
     c->duration_ms = (uint32_t)duration;
     c->pending_ms = now;
@@ -359,19 +411,19 @@ void debug_control_update(debug_control_t *c, uint32_t now, bool home)
     {
         debug_control_fault(c, "EVENT HOME\r\n");
     }
-    if (c->linked && (uint32_t)(now - c->heartbeat_ms) >= 1000U)
+    if (c->linked && !has_heartbeat(c, now))
     {
         c->linked = false;
         debug_control_fault(c, "EVENT TIMEOUT\r\n");
     }
     if (!c->locked && !home)
     {
-        for (unsigned i = 0; i < 8; ++i)
+        for (unsigned i = 0; i < MOTOR_COUNT; ++i)
         {
             if ((c->multi_pending & (1U << i)) &&
-                (uint32_t)(now - c->multi_wait[i]) >= 100U)
+                (uint32_t)(now - c->multi_wait[i]) >= DEBUG_CONTROL_SETTLE_MS)
             {
-                if (!c->hw.run(i + 1, c->multi_target[i]))
+                if (!c->hw.run(i, c->multi_target[i]))
                 {
                     debug_control_fault(c, "EVENT HARDWARE\r\n");
                     return;
@@ -383,7 +435,7 @@ void debug_control_update(debug_control_t *c, uint32_t now, bool home)
             if (c->multi_duty[i] && c->multi_duration[i] &&
                 (uint32_t)(now - c->multi_start[i]) >= c->multi_duration[i])
             {
-                if (!c->hw.run(i + 1, 0))
+                if (!c->hw.run(i, 0))
                 {
                     debug_control_fault(c, "EVENT HARDWARE\r\n");
                     return;
@@ -393,10 +445,10 @@ void debug_control_update(debug_control_t *c, uint32_t now, bool home)
         }
     }
     if (c->pending && !c->locked && !home &&
-        (uint32_t)(now - c->pending_ms) >= 100U)
+        (uint32_t)(now - c->pending_ms) >= DEBUG_CONTROL_SETTLE_MS)
     {
         c->pending = false;
-        if (!c->hw.run(c->pending_motor, c->pending_duty))
+        if (!c->hw.run(c->pending_motor - 1U, c->pending_duty))
         {
             debug_control_fault(c, "EVENT HARDWARE\r\n");
             return;

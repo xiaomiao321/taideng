@@ -30,6 +30,9 @@ typedef enum
  * @retval BSP_OK 初始化成功；当前无硬件校验，始终返回成功。
  *
  * @note 调用本函数前必须已经执行 MX_GPIO_Init()。
+ * @note 与其他 BSP 模块不同，本模块没有"未初始化"状态：bsp_led_set() 等
+ *       接口在 bsp_led_init() 之前也可调用，这样 Error_Handler() 在任何阶段
+ *       都能点亮错误灯。bsp_led_init() 只负责把全部 LED 置为熄灭。
  */
 bsp_status_t bsp_led_init(void);
 
