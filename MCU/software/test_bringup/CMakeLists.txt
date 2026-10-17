@@ -68,8 +68,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_adc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_watchdog.c
     # 协议层与命令层：不依赖 HAL，可在 PC 上用 HostTest/run.ps1 单测
-    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/mcu_protocol.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/mcu_command.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Src/mcu_protocol.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Src/mcu_command.c
     # 应用层：串口收发与协议接线
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/app_main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_console.c
@@ -85,6 +85,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/App/inc
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Inc
 )
 
