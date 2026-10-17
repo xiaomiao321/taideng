@@ -12,6 +12,8 @@
  * @note 调用前必须完成 MX_*_Init() 和 bsp_log_init()。
  * @note 电机、按键或 USART3 初始化失败时进入 Error_Handler()；
  *       灯板、蜂鸣器、Linux 电源与 ADC 失败时只禁用相应命令。
+ * @note 会从 Flash 恢复上次保存的关节标定，需要擦除备用扇区时阻塞约 2 秒，
+ *       因此必须在看门狗启动之前调用。
  */
 void debug_console_init(void);
 

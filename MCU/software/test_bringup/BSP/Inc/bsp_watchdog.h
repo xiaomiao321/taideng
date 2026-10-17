@@ -19,8 +19,8 @@
 
 #include "bsp_common.h"
 
-/** @brief 允许设定的最大超时，单位为毫秒（标称值）。 */
-#define BSP_WATCHDOG_MAX_TIMEOUT_MS (4096U)
+/** @brief 允许设定的最大超时，单位为毫秒（标称值，预分频 /256 时的上限）。 */
+#define BSP_WATCHDOG_MAX_TIMEOUT_MS (32768U)
 
 /**
  * @brief 启动看门狗。
@@ -35,6 +35,22 @@
  * @note 启动后必须周期调用 bsp_watchdog_feed()，间隔小于 timeout_ms 的 0.68 倍。
  */
 bsp_status_t bsp_watchdog_start(uint32_t timeout_ms);
+
+/**
+ * @brief 修改运行中看门狗的超时，并立即喂狗。
+ *
+ * 供已知会长时间阻塞的操作（如擦除 Flash 扇区）临时放宽超时，结束后再用
+ * bsp_watchdog_timeout() 记下的原值恢复。
+ *
+ * @retval BSP_OK 已修改。
+ * @retval BSP_IDLE 看门狗没有启动，什么都不做。
+ * @retval BSP_ERR_PARAM 超时超出范围。
+ * @retval BSP_ERR_TIMEOUT 新值未在限定时间内生效。
+ */
+bsp_status_t bsp_watchdog_set_timeout(uint32_t timeout_ms);
+
+/** @brief 当前设定的标称超时；看门狗未启动时返回 0。 */
+uint32_t bsp_watchdog_timeout(void);
 
 /**
  * @brief 喂狗，重新开始超时计数。

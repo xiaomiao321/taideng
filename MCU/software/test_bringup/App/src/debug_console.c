@@ -22,6 +22,7 @@
 #include "bsp_linux_power.h"
 #include "bsp_linux_uart.h"
 #include "bsp_motor.h"
+#include "bsp_param_flash.h"
 #include "debug_board.h"
 #include "debug_control.h"
 #include "joint_control.h"
@@ -71,6 +72,8 @@ static bool s_is_light_ok = false;
 static bool s_is_buzzer_ok = false;
 static bool s_is_power_ok = false;
 static bool s_is_linux_ok = false;
+/** @brief 标定参数的 Flash 存储是否可用。 */
+static bool s_is_cal_store_ok = false;
 
 static debug_control_t s_control;
 static debug_board_t s_board;
@@ -427,6 +430,48 @@ static void joint_report(uint32_t now, bool config)
     (void)send_line(out);
 }
 
+/** @brief 把全部关节的当前标定写入 Flash；返回是否成功。 */
+static bool save_calibration(void)
+{
+    uint8_t blob[JOINT_CAL_BLOB_SIZE];
+    joint_cal_export(&s_joints, blob);
+    return s_is_cal_store_ok && bsp_param_flash_save(blob) == BSP_OK;
+}
+
+/**
+ * @brief 初始化 Flash 参数存储并恢复上次保存的标定。
+ *
+ * @return 恢复的关节数。
+ * @note 需要擦除备用扇区时会阻塞约 2 秒，只在初始化阶段调用。
+ */
+static unsigned load_calibration(void)
+{
+    bsp_status_t status = bsp_param_flash_init(JOINT_CAL_BLOB_SIZE);
+    s_is_cal_store_ok = (status == BSP_OK);
+    /* 备用扇区擦除失败（ERR_HAL）时已有记录仍可读，只是之后保存可能失败。 */
+    uint8_t blob[JOINT_CAL_BLOB_SIZE];
+    if (((status != BSP_OK) && (status != BSP_ERR_HAL)) ||
+        (bsp_param_flash_load(blob) != BSP_OK))
+    {
+        return 0U;
+    }
+    return joint_cal_import(&s_joints, blob);
+}
+
+/** @brief 上报全部已标定关节的参数和状态，供上位机同步。 */
+static void report_calibrations(void)
+{
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        if (s_joints.states[i].calibrated)
+        {
+            s_joint_focus = i;
+            joint_report(HAL_GetTick(), true);
+        }
+    }
+    s_joint_focus = 0U;
+}
+
 /** @brief CAL 参数顺序：raw_a angle_a raw_b angle_b direction duty tolerance。 */
 static const char *calibrate_joint(unsigned index, const int32_t *v,
                                    uint32_t now)
@@ -449,6 +494,11 @@ static const char *calibrate_joint(unsigned index, const int32_t *v,
     const char *err = joint_calibrate(&s_joints, index, cal);
     if (!err)
     {
+        /* 标定已在 RAM 生效，ACK 照常回复；保存失败另行报告，下次上电会丢失。 */
+        if (!save_calibration())
+        {
+            (void)send_line("EVENT CAL_SAVE_ERROR\r\n");
+        }
         joint_report(now, true);
     }
     return err;
@@ -792,6 +842,8 @@ void debug_console_init(void)
     debug_board_init(&s_board, board_hw);
     joint_hw_t joint_hw = {joint_drive, reply_line};
     joint_init(&s_joints, joint_hw);
+    /* 在串口开始接收、看门狗启动之前加载：可能要擦除备用扇区，阻塞约 2 秒。 */
+    unsigned restored = load_calibration();
     s_is_linux_ok = bsp_linux_uart_init() == BSP_OK;
     debug_hw_t hw = {
         .stop = stop_all,
@@ -812,6 +864,14 @@ void debug_console_init(void)
     }
     s_is_initialized = true;
     (void)send_line("READY BOARD_DEBUG 2\r\n");
+    if (!s_is_cal_store_ok)
+    {
+        (void)send_line("EVENT CAL_STORE_ERROR\r\n");
+    }
+    if (restored > 0U)
+    {
+        report_calibrations();
+    }
 }
 
 void debug_console_update(void)

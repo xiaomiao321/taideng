@@ -53,6 +53,13 @@ $suites = @(
         )
     }
     @{
+        Name = 'flash_journal'
+        Sources = @(
+            (Join-Path $projectDir 'BSP\Src\flash_journal.c')
+            (Join-Path $projectDir 'HostTest\flash_journal_selftest.c')
+        )
+    }
+    @{
         Name = 'protocol'
         Sources = @(
             (Join-Path $projectDir 'Protocol\Src\mcu_protocol.c')

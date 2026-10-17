@@ -22,6 +22,15 @@
 /** @brief 电位器读数距上次采样超过该时间即视为失效，单位毫秒。 */
 #define JOINT_SENSOR_STALE_MS (50U)
 
+/** @brief 标定数据序列化格式的版本；格式变化时加一，旧数据不再加载。 */
+#define JOINT_CAL_BLOB_VERSION (1U)
+
+/** @brief 序列化后每个关节占用的字节数。 */
+#define JOINT_CAL_BLOB_ENTRY_SIZE (20U)
+
+/** @brief 序列化后的总字节数：4 字节头加每个关节一项，是 4 的倍数。 */
+#define JOINT_CAL_BLOB_SIZE (4U + JOINT_COUNT * JOINT_CAL_BLOB_ENTRY_SIZE)
+
 /** @brief 一个关节的标定参数。 */
 typedef struct
 {
@@ -127,5 +136,28 @@ bool joint_cancel(joint_control_t *j);
 
 /** @brief 阶段的短名称，用于状态上报。 */
 const char *joint_phase_name(joint_phase_t phase);
+
+/**
+ * @brief 把全部关节的标定导出为定长字节串，用于断电保存。
+ *
+ * 格式（多字节均为小端）：
+ *   头：版本 u8、关节数 u8、保留 u16；
+ *   每个关节：已标定 u8、方向 i8、占空比 u16、raw_a u16、raw_b u16、
+ *            angle_a i32、angle_b i32、容差 u32。
+ */
+void joint_cal_export(const joint_control_t *j,
+                      uint8_t blob[JOINT_CAL_BLOB_SIZE]);
+
+/**
+ * @brief 从 joint_cal_export() 的结果恢复标定。
+ *
+ * 版本或关节数不符时什么都不做；每个关节的参数仍经 joint_calibrate() 校验，
+ * 不合法的项被跳过，未标记已标定的关节保持原状。
+ *
+ * @return 成功恢复的关节数。
+ * @note 只应在没有关节运动时调用（如初始化阶段）。
+ */
+unsigned joint_cal_import(joint_control_t *j,
+                          const uint8_t blob[JOINT_CAL_BLOB_SIZE]);
 
 #endif /* AITAID_JOINT_CONTROL_H */

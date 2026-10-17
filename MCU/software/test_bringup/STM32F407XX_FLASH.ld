@@ -57,7 +57,10 @@ MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
 CCMRAM (xrw)      : ORIGIN = 0x10000000, LENGTH = 64K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 1024K
+/* Flash 最后两个 128KB 扇区（10、11：0x080C0000～0x080FFFFF）保留给
+ * bsp_param_flash 存放标定参数，不分配给程序。CubeMX 若重新生成本文件，
+ * 需再次把 LENGTH 改为 768K；bsp_param_flash_init() 也会检查并拒绝擦写。 */
+FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 768K
 }
 
 /* Highest address of the user mode stack */

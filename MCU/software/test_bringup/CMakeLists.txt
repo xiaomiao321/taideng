@@ -73,6 +73,8 @@ set(AITAID_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_watchdog.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_uart_stream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_debug_uart.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/flash_journal.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Src/bsp_param_flash.c
     # 协议层与命令层：不依赖 HAL，可在 PC 上用 HostTest/run.ps1 单测
     ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Src/mcu_protocol.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Src/mcu_command.c

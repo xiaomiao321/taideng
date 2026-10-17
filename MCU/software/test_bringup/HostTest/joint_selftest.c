@@ -165,8 +165,40 @@ int main(void)
         assert(joint_tick(&j, UINT32_MAX - 100 + t));
     }
     assert(j.states[0].phase == JOINT_DONE);
+
+    /* 标定导出/导入：两个关节（含负角度、反向）往返后参数逐项相同。 */
+    joint_control_t source = fresh(cal);
+    joint_cal_t other = {3900, 200, -45000, 30000, -1, 650, 1500};
+    assert(!joint_calibrate(&source, 4, other));
+    uint8_t blob[JOINT_CAL_BLOB_SIZE];
+    joint_cal_export(&source, blob);
+    joint_control_t restored = fresh(normal());
+    restored.states[0].calibrated = false;
+    assert(joint_cal_import(&restored, blob) == 2U);
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        assert(restored.states[i].calibrated == source.states[i].calibrated);
+        if (source.states[i].calibrated)
+        {
+            assert(!memcmp(&restored.states[i].cal, &source.states[i].cal,
+                           sizeof(joint_cal_t)));
+        }
+    }
+    /* 版本不符：什么都不加载。 */
+    joint_control_t untouched = fresh(normal());
+    untouched.states[0].calibrated = false;
+    blob[0] = (uint8_t)(JOINT_CAL_BLOB_VERSION + 1U);
+    assert(joint_cal_import(&untouched, blob) == 0U);
+    assert(!untouched.states[0].calibrated && !untouched.states[4].calibrated);
+    /* 数据损坏成非法参数（占空比 0）：该项被跳过，其余照常恢复。 */
+    blob[0] = (uint8_t)JOINT_CAL_BLOB_VERSION;
+    blob[4U + 4U * JOINT_CAL_BLOB_ENTRY_SIZE + 2U] = 0U;
+    blob[4U + 4U * JOINT_CAL_BLOB_ENTRY_SIZE + 3U] = 0U;
+    assert(joint_cal_import(&untouched, blob) == 1U);
+    assert(untouched.states[0].calibrated && !untouched.states[4].calibrated);
+
     puts("joint control: calibration, inverse sensor, simulated plant, "
-         "arrival, stale ADC, limits, direction, stall, timeout, cancellation "
-         "and rollover passed");
+         "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
+         "rollover and calibration export/import passed");
     return 0;
 }

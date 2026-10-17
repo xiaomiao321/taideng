@@ -324,3 +324,82 @@ const char *joint_phase_name(joint_phase_t phase)
         "IDLE", "SETTLE", "MOVE", "DONE", "FAULT"};
     return ((unsigned)phase < JOINT_PHASE_COUNT) ? names[phase] : "?";
 }
+
+static void put_u16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void put_u32(uint8_t *p, uint32_t v)
+{
+    put_u16(p, (uint16_t)v);
+    put_u16(&p[2], (uint16_t)(v >> 16));
+}
+
+static uint16_t get_u16(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+static uint32_t get_u32(const uint8_t *p)
+{
+    return (uint32_t)get_u16(p) | ((uint32_t)get_u16(&p[2]) << 16);
+}
+
+void joint_cal_export(const joint_control_t *j,
+                      uint8_t blob[JOINT_CAL_BLOB_SIZE])
+{
+    memset(blob, 0, JOINT_CAL_BLOB_SIZE);
+    blob[0] = (uint8_t)JOINT_CAL_BLOB_VERSION;
+    blob[1] = (uint8_t)JOINT_COUNT;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        const joint_state_t *s = &j->states[i];
+        uint8_t *p = &blob[4U + i * JOINT_CAL_BLOB_ENTRY_SIZE];
+        if (!s->calibrated)
+        {
+            continue;
+        }
+        p[0] = 1U;
+        p[1] = (uint8_t)(int8_t)s->cal.direction;
+        put_u16(&p[2], (uint16_t)s->cal.duty);
+        put_u16(&p[4], s->cal.raw_a);
+        put_u16(&p[6], s->cal.raw_b);
+        put_u32(&p[8], (uint32_t)s->cal.angle_a);
+        put_u32(&p[12], (uint32_t)s->cal.angle_b);
+        put_u32(&p[16], (uint32_t)s->cal.tolerance);
+    }
+}
+
+unsigned joint_cal_import(joint_control_t *j,
+                          const uint8_t blob[JOINT_CAL_BLOB_SIZE])
+{
+    if (blob[0] != JOINT_CAL_BLOB_VERSION || blob[1] != JOINT_COUNT)
+    {
+        return 0U;
+    }
+    unsigned restored = 0U;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        const uint8_t *p = &blob[4U + i * JOINT_CAL_BLOB_ENTRY_SIZE];
+        if (p[0] != 1U)
+        {
+            continue;
+        }
+        joint_cal_t cal = {
+            .raw_a = get_u16(&p[4]),
+            .raw_b = get_u16(&p[6]),
+            .angle_a = (int32_t)get_u32(&p[8]),
+            .angle_b = (int32_t)get_u32(&p[12]),
+            .direction = (int8_t)p[1],
+            .duty = get_u16(&p[2]),
+            .tolerance = get_u32(&p[16]),
+        };
+        if (joint_calibrate(j, i, cal) == NULL)
+        {
+            ++restored;
+        }
+    }
+    return restored;
+}
