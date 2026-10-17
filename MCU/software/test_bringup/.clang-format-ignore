@@ -1,0 +1,8 @@
+# CubeMX-generated and vendor code keeps its upstream style.
+Core/Inc/*
+Core/Src/*
+Drivers/**
+FreeRTOS/**
+Ref/**
+# Archived main.c snapshots are byte-for-byte copies; never reformat them.
+Tests/main_snapshots/**

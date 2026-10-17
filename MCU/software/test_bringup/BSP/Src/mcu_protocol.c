@@ -302,7 +302,8 @@ size_t mcu_protocol_encode(const mcu_frame_t *frame, uint8_t *out,
     memcpy(&out[8], frame->payload, frame->payload_length);
 
     /* CRC 覆盖 VERSION 到 PAYLOAD 末字节，即帧头之后、CRC 之前的部分。 */
-    uint16_t crc = mcu_protocol_crc16(&out[2], 6U + (size_t)frame->payload_length);
+    uint16_t crc =
+        mcu_protocol_crc16(&out[2], 6U + (size_t)frame->payload_length);
     out[frame_size - 2U] = (uint8_t)(crc & 0xFFU);
     out[frame_size - 1U] = (uint8_t)((crc >> 8) & 0xFFU);
 

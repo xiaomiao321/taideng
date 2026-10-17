@@ -21,14 +21,14 @@
  */
 typedef enum
 {
-    BSP_MOTOR_M1 = 0,   /**< PA2/PA3，TIM2_CH3/CH4。 */
-    BSP_MOTOR_M2,       /**< PA0/PA1，TIM2_CH1/CH2。 */
-    BSP_MOTOR_M3,       /**< PE5/PE6，TIM9_CH1/CH2。 */
-    BSP_MOTOR_M4,       /**< PB14/PB15，TIM12_CH1/CH2。 */
-    BSP_MOTOR_M5,       /**< PC6/PC7，TIM8_CH1/CH2。 */
-    BSP_MOTOR_M6,       /**< PC9/PC8，TIM8_CH4/CH3（FI/BI 与引脚顺序相反）。 */
-    BSP_MOTOR_M7,       /**< PB6/PB7，TIM4_CH1/CH2。 */
-    BSP_MOTOR_M8,       /**< PB8/PB9，TIM4_CH3/CH4。 */
+    BSP_MOTOR_M1 = 0, /**< PA2/PA3，TIM2_CH3/CH4。 */
+    BSP_MOTOR_M2,     /**< PA0/PA1，TIM2_CH1/CH2。 */
+    BSP_MOTOR_M3,     /**< PE5/PE6，TIM9_CH1/CH2。 */
+    BSP_MOTOR_M4,     /**< PB14/PB15，TIM12_CH1/CH2。 */
+    BSP_MOTOR_M5,     /**< PC6/PC7，TIM8_CH1/CH2。 */
+    BSP_MOTOR_M6,     /**< PC9/PC8，TIM8_CH4/CH3（FI/BI 与引脚顺序相反）。 */
+    BSP_MOTOR_M7,     /**< PB6/PB7，TIM4_CH1/CH2。 */
+    BSP_MOTOR_M8,     /**< PB8/PB9，TIM4_CH3/CH4。 */
     BSP_MOTOR_COUNT
 } bsp_motor_id_t;
 

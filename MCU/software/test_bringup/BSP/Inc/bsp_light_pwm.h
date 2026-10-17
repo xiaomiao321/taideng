@@ -37,11 +37,11 @@
  */
 typedef struct
 {
-    TIM_HandleTypeDef *htim;    /**< 绑定的定时器实例。 */
-    uint32_t channel;           /**< TIM_CHANNEL_x。 */
-    uint32_t arr;               /**< 初始化时缓存的 ARR，用于 CCR 换算。 */
-    bool is_initialized;        /**< 本实例是否已初始化。 */
-    bool is_started;            /**< 本通道是否已启动 PWM 输出。 */
+    TIM_HandleTypeDef *htim; /**< 绑定的定时器实例。 */
+    uint32_t channel;        /**< TIM_CHANNEL_x。 */
+    uint32_t arr;            /**< 初始化时缓存的 ARR，用于 CCR 换算。 */
+    bool is_initialized;     /**< 本实例是否已初始化。 */
+    bool is_started;         /**< 本通道是否已启动 PWM 输出。 */
 } bsp_light_pwm_t;
 
 /**
@@ -61,8 +61,7 @@ typedef struct
  *       16 位比较寄存器。运行期间不得再修改该定时器的 PSC 或 ARR。
  * @note 本函数不写 CCR、不启动通道；重复调用会重新绑定。
  */
-bsp_status_t bsp_light_pwm_init(bsp_light_pwm_t *self,
-                                TIM_HandleTypeDef *htim,
+bsp_status_t bsp_light_pwm_init(bsp_light_pwm_t *self, TIM_HandleTypeDef *htim,
                                 uint32_t channel);
 
 /**

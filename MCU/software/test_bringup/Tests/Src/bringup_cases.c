@@ -259,8 +259,8 @@ static test_result_t test_motor_one(bsp_motor_id_t id, const char *label,
     HAL_Delay(500U);
     bringup_confirm_arm();
 
-    status = bsp_motor_set_duty(
-        id, forward ? JOG_DUTY_PERMILLE : -JOG_DUTY_PERMILLE);
+    status = bsp_motor_set_duty(id, forward ? JOG_DUTY_PERMILLE
+                                            : -JOG_DUTY_PERMILLE);
     if (status != BSP_OK)
     {
         LOG_ERROR("MOTOR", "%s set failed: %s", label, bsp_status_str(status));
@@ -268,9 +268,11 @@ static test_result_t test_motor_one(bsp_motor_id_t id, const char *label,
         return TEST_FAIL_COMM;
     }
 
-    LOG_INFO("MOTOR", "%s %s at %d permille for 500ms; dPOT1..6 every %ums; HOME to stop",
-             label, forward ? "FI" : "BI", (int)JOG_DUTY_PERMILLE,
-             (unsigned int)JOG_POT_PERIOD_MS);
+    LOG_INFO(
+        "MOTOR",
+        "%s %s at %d permille for 500ms; dPOT1..6 every %ums; HOME to stop",
+        label, forward ? "FI" : "BI", (int)JOG_DUTY_PERMILLE,
+        (unsigned int)JOG_POT_PERIOD_MS);
 
     uint32_t start_ms = HAL_GetTick();
     uint32_t last_pot_ms = start_ms;

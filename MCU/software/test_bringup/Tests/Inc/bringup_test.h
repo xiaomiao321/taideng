@@ -33,10 +33,10 @@ typedef enum
 {
     TEST_PASS = 0,         /**< 通过。 */
     TEST_FAIL_NO_RESPONSE, /**< 硬件无响应：无波形/无输出，或操作员未在超时内确认。 */
-    TEST_FAIL_CONFIG,      /**< 配置与驱动预期不符（句柄、外设模式）。 */
-    TEST_FAIL_COMM,        /**< 与 HAL/外设交互失败。 */
-    TEST_FAIL_DATA,        /**< 有数据但内容异常。 */
-    TEST_SKIP              /**< 依赖未满足，本次未执行。 */
+    TEST_FAIL_CONFIG, /**< 配置与驱动预期不符（句柄、外设模式）。 */
+    TEST_FAIL_COMM,   /**< 与 HAL/外设交互失败。 */
+    TEST_FAIL_DATA,   /**< 有数据但内容异常。 */
+    TEST_SKIP         /**< 依赖未满足，本次未执行。 */
 } test_result_t;
 
 /** @brief 单个测试的实现函数，返回本项结果。 */

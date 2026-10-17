@@ -38,7 +38,7 @@
 #define MCU_PROTOCOL_FIXED_SIZE (10U)
 
 /** @brief 一条完整报文的最大字节数。 */
-#define MCU_PROTOCOL_MAX_FRAME_SIZE \
+#define MCU_PROTOCOL_MAX_FRAME_SIZE                                            \
     (MCU_PROTOCOL_FIXED_SIZE + MCU_PROTOCOL_MAX_PAYLOAD)
 
 /** @brief 已解析报文的排队深度。 */
@@ -144,11 +144,12 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t version;        /**< 协议版本，正常为 0x02。 */
-    uint8_t flags;          /**< 标志位：bit0 响应、bit1 要求 ACK、bit2 错误。 */
-    uint8_t seq;            /**< 序号；响应必须沿用请求的序号。 */
-    uint8_t cmd;            /**< 命令字。 */
-    uint8_t payload_length; /**< PAYLOAD 实际字节数，0～MCU_PROTOCOL_MAX_PAYLOAD。 */
+    uint8_t version; /**< 协议版本，正常为 0x02。 */
+    uint8_t flags;   /**< 标志位：bit0 响应、bit1 要求 ACK、bit2 错误。 */
+    uint8_t seq;     /**< 序号；响应必须沿用请求的序号。 */
+    uint8_t cmd;     /**< 命令字。 */
+    uint8_t
+        payload_length; /**< PAYLOAD 实际字节数，0～MCU_PROTOCOL_MAX_PAYLOAD。 */
     uint8_t payload[MCU_PROTOCOL_MAX_PAYLOAD]; /**< PAYLOAD 内容。 */
 } mcu_frame_t;
 

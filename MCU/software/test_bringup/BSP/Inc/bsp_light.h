@@ -18,13 +18,13 @@
  */
 typedef enum
 {
-    BSP_LIGHT_UP1 = 0,   /**< 上灯板 1，PE9，TIM1_CH1。 */
-    BSP_LIGHT_UP2,       /**< 上灯板 2，PE11，TIM1_CH2。 */
-    BSP_LIGHT_UP3,       /**< 上灯板 3，PE14，TIM1_CH4。 */
-    BSP_LIGHT_UP4,       /**< 上灯板 4，PE13，TIM1_CH3。 */
-    BSP_LIGHT_DOWN1,     /**< 下灯板 1，PB0，TIM3_CH3。 */
-    BSP_LIGHT_DOWN2,     /**< 下灯板 2，PB1，TIM3_CH4。 */
-    BSP_LIGHT_DOWN3,     /**< 下灯板 3，PB4，TIM3_CH1。 */
+    BSP_LIGHT_UP1 = 0, /**< 上灯板 1，PE9，TIM1_CH1。 */
+    BSP_LIGHT_UP2,     /**< 上灯板 2，PE11，TIM1_CH2。 */
+    BSP_LIGHT_UP3,     /**< 上灯板 3，PE14，TIM1_CH4。 */
+    BSP_LIGHT_UP4,     /**< 上灯板 4，PE13，TIM1_CH3。 */
+    BSP_LIGHT_DOWN1,   /**< 下灯板 1，PB0，TIM3_CH3。 */
+    BSP_LIGHT_DOWN2,   /**< 下灯板 2，PB1，TIM3_CH4。 */
+    BSP_LIGHT_DOWN3,   /**< 下灯板 3，PB4，TIM3_CH1。 */
     BSP_LIGHT_COUNT
 } bsp_light_id_t;
 
@@ -50,7 +50,8 @@ bsp_status_t bsp_light_init(void);
  * @retval BSP_ERR_PARAM 灯号或占空比超出范围。
  * @retval BSP_ERR_HAL 首次启动 PWM 失败。
  */
-bsp_status_t bsp_light_set_duty(bsp_light_id_t light_id, uint16_t duty_permille);
+bsp_status_t bsp_light_set_duty(bsp_light_id_t light_id,
+                                uint16_t duty_permille);
 
 /**
  * @brief 将一盏灯的占空比设为零。

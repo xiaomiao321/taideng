@@ -6,7 +6,6 @@
 #include "main.h"
 #include "stm32f407xx.h"
 
-
 static bool s_is_initialized = false;
 static uint32_t s_start_tick_ms = 0U;
 static uint32_t s_duration_ms = 0U;

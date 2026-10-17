@@ -3,7 +3,6 @@
 #include "main.h"
 #include "stm32f4xx_hal.h"
 
-
 bsp_status_t bsp_led_init(void)
 {
     HAL_GPIO_WritePin(LED_STATE_GPIO_Port, LED_STATE_Pin, GPIO_PIN_SET);

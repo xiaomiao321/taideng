@@ -1,0 +1,22 @@
+# Code style for hand-written sources (App, BSP, Protocol, Tests, HostTest).
+# CubeMX-generated Core/ and vendor Drivers/, FreeRTOS/ are not formatted.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 80
+UseTab: Never
+BreakBeforeBraces: Allman
+IndentCaseLabels: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+InsertBraces: true
+PointerAlignment: Right
+SortIncludes: Never
+AlignConsecutiveMacros: false
+AlignTrailingComments: true
+SpacesBeforeTrailingComments: 1
+ReflowComments: false
+MaxEmptyLinesToKeep: 1

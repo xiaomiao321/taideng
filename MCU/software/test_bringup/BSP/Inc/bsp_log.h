@@ -15,10 +15,10 @@
 #define BSP_LOG_BUFFER_SIZE (256U)
 
 /* 使用宏定义等级，供预处理器 #if 判断。数值越大，输出越详细。 */
-#define LOG_LEVEL_NONE  (0U)
+#define LOG_LEVEL_NONE (0U)
 #define LOG_LEVEL_ERROR (1U)
-#define LOG_LEVEL_WARN  (2U)
-#define LOG_LEVEL_INFO  (3U)
+#define LOG_LEVEL_WARN (2U)
+#define LOG_LEVEL_INFO (3U)
 #define LOG_LEVEL_DEBUG (4U)
 
 /* 构建系统可以通过 -DAITAID_LOG_LEVEL=4 等方式覆盖默认等级。 */
@@ -26,8 +26,7 @@
 #define AITAID_LOG_LEVEL LOG_LEVEL_INFO
 #endif
 
-#if (AITAID_LOG_LEVEL < LOG_LEVEL_NONE) || \
-    (AITAID_LOG_LEVEL > LOG_LEVEL_DEBUG)
+#if (AITAID_LOG_LEVEL < LOG_LEVEL_NONE) || (AITAID_LOG_LEVEL > LOG_LEVEL_DEBUG)
 #error "AITAID_LOG_LEVEL must be between 0 and 4"
 #endif
 
@@ -125,9 +124,8 @@ bsp_status_t bsp_log_printf(const char *format, ...);
  * @warning 本函数为阻塞接口，不能从中断服务程序调用。
  * @warning 当前版本不保证多任务并发调用安全。
  */
-bsp_status_t bsp_log_print(uint32_t level,
-                           const char *tag,
-                           const char *format, ...);
+bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
+                           ...);
 
 /*
  * 应用层使用 LOG_*(tag, format, ...) 宏。
@@ -135,40 +133,40 @@ bsp_status_t bsp_log_print(uint32_t level,
  * 关闭的宏不求值任何参数，日志参数中不得包含业务必需的副作用。
  */
 #if AITAID_LOG_LEVEL >= LOG_LEVEL_ERROR
-#define LOG_ERROR(...) \
-    do \
-    { \
-        (void)bsp_log_print(LOG_LEVEL_ERROR, __VA_ARGS__); \
+#define LOG_ERROR(...)                                                         \
+    do                                                                         \
+    {                                                                          \
+        (void)bsp_log_print(LOG_LEVEL_ERROR, __VA_ARGS__);                     \
     } while (0)
 #else
 #define LOG_ERROR(...) ((void)0)
 #endif
 
 #if AITAID_LOG_LEVEL >= LOG_LEVEL_WARN
-#define LOG_WARN(...) \
-    do \
-    { \
-        (void)bsp_log_print(LOG_LEVEL_WARN, __VA_ARGS__); \
+#define LOG_WARN(...)                                                          \
+    do                                                                         \
+    {                                                                          \
+        (void)bsp_log_print(LOG_LEVEL_WARN, __VA_ARGS__);                      \
     } while (0)
 #else
 #define LOG_WARN(...) ((void)0)
 #endif
 
 #if AITAID_LOG_LEVEL >= LOG_LEVEL_INFO
-#define LOG_INFO(...) \
-    do \
-    { \
-        (void)bsp_log_print(LOG_LEVEL_INFO, __VA_ARGS__); \
+#define LOG_INFO(...)                                                          \
+    do                                                                         \
+    {                                                                          \
+        (void)bsp_log_print(LOG_LEVEL_INFO, __VA_ARGS__);                      \
     } while (0)
 #else
 #define LOG_INFO(...) ((void)0)
 #endif
 
 #if AITAID_LOG_LEVEL >= LOG_LEVEL_DEBUG
-#define LOG_DEBUG(...) \
-    do \
-    { \
-        (void)bsp_log_print(LOG_LEVEL_DEBUG, __VA_ARGS__); \
+#define LOG_DEBUG(...)                                                         \
+    do                                                                         \
+    {                                                                          \
+        (void)bsp_log_print(LOG_LEVEL_DEBUG, __VA_ARGS__);                     \
     } while (0)
 #else
 #define LOG_DEBUG(...) ((void)0)

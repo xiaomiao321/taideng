@@ -36,8 +36,8 @@ bsp_status_t bsp_light_init(void)
 
     for (uint32_t i = 0U; i < (uint32_t)BSP_LIGHT_COUNT; ++i)
     {
-        bsp_status_t status =
-            bsp_light_pwm_init(&s_lights[i], mapping[i].htim, mapping[i].channel);
+        bsp_status_t status = bsp_light_pwm_init(&s_lights[i], mapping[i].htim,
+                                                 mapping[i].channel);
         if (status != BSP_OK)
         {
             return status;

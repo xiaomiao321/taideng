@@ -134,8 +134,9 @@ static void fake_reset(void)
 /* 小工具：拼一条请求                                                          */
 /* -------------------------------------------------------------------------- */
 
-static mcu_frame_t make_request(uint8_t seq, uint8_t cmd, const uint8_t *payload,
-                                uint8_t payload_length, uint8_t flags)
+static mcu_frame_t make_request(uint8_t seq, uint8_t cmd,
+                                const uint8_t *payload, uint8_t payload_length,
+                                uint8_t flags)
 {
     mcu_frame_t frame = {0};
 
@@ -170,7 +171,8 @@ static void test_get_status_reply(void)
     fake_reset();
     mcu_command_init(&k_fake_hw, 1000U);
 
-    check(mcu_command_handle(&request, &reply, 1000U), "get_status: has a reply");
+    check(mcu_command_handle(&request, &reply, 1000U),
+          "get_status: has a reply");
     check((reply.cmd == MCU_PROTOCOL_CMD_STATUS) && (reply.seq == 0x11U) &&
               (reply.flags == MCU_PROTOCOL_FLAG_RESPONSE) &&
               (reply.payload_length == MCU_PROTOCOL_STATUS_PAYLOAD_SIZE),
@@ -227,8 +229,9 @@ static void test_ping(void)
 static void test_stop(void)
 {
     const uint8_t payload[4] = {MCU_PROTOCOL_MOTION_STOP, 0U, 0U, 0U};
-    mcu_frame_t request = make_request(0x14U, MCU_PROTOCOL_CMD_SET_MOTION,
-                                       payload, 4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t request =
+        make_request(0x14U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     mcu_frame_t reply = {0};
 
     fake_reset();
@@ -247,8 +250,9 @@ static void test_stop(void)
 static void test_unimplemented_motion_is_rejected(void)
 {
     const uint8_t payload[4] = {MCU_PROTOCOL_MOTION_FORWARD, 100U, 0U, 0U};
-    mcu_frame_t request = make_request(0x15U, MCU_PROTOCOL_CMD_SET_MOTION,
-                                       payload, 4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t request =
+        make_request(0x15U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     mcu_frame_t reply = {0};
 
     fake_reset();
@@ -274,8 +278,9 @@ static void test_motion_parameter_errors(void)
     payload[1] = 50U; /* STOP 的速度必须是 0 */
     payload[2] = 0U;
     payload[3] = 0U;
-    mcu_frame_t request = make_request(0x16U, MCU_PROTOCOL_CMD_SET_MOTION,
-                                       payload, 4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t request =
+        make_request(0x16U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     (void)mcu_command_handle(&request, &reply, 10U);
     check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_MOTION,
                  MCU_PROTOCOL_RESULT_INVALID_VALUE),
@@ -314,8 +319,8 @@ static void test_length_errors(void)
     fake_reset();
     mcu_command_init(&k_fake_hw, 0U);
 
-    mcu_frame_t request = make_request(0x19U, MCU_PROTOCOL_CMD_GET_STATUS,
-                                       one_byte, 1U, 0U);
+    mcu_frame_t request =
+        make_request(0x19U, MCU_PROTOCOL_CMD_GET_STATUS, one_byte, 1U, 0U);
     (void)mcu_command_handle(&request, &reply, 10U);
     check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_STATUS,
                  MCU_PROTOCOL_RESULT_INVALID_LENGTH),
@@ -337,8 +342,8 @@ static void test_unknown_command(void)
     fake_reset();
     mcu_command_init(&k_fake_hw, 0U);
 
-    mcu_frame_t request = make_request(0x1BU, 0x55U, NULL, 0U,
-                                       MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t request =
+        make_request(0x1BU, 0x55U, NULL, 0U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     check(mcu_command_handle(&request, &reply, 10U), "unknown: ACK required");
     check(ack_is(&reply, 0x55U, MCU_PROTOCOL_RESULT_INVALID_COMMAND),
           "unknown: ACK says invalid command");
@@ -348,8 +353,8 @@ static void test_unknown_command(void)
           "unknown: silently dropped without ACK_REQUIRED");
 
     /* 扩展命令 0x31 尚未实现，同样按未知命令处理。 */
-    request = make_request(0x1DU, 0x31U, NULL, 0U,
-                           MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    request =
+        make_request(0x1DU, 0x31U, NULL, 0U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     check(mcu_command_handle(&request, &reply, 30U), "extension: has a reply");
     check(ack_is(&reply, 0x31U, MCU_PROTOCOL_RESULT_INVALID_COMMAND),
           "extension: not implemented yet");
@@ -385,16 +390,16 @@ static void test_wrong_version(void)
     check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_STATUS,
                  MCU_PROTOCOL_RESULT_INVALID_COMMAND),
           "version: rejected without touching hardware");
-    check(s_fake.read_status_calls == 0U,
-          "version: status was not even read");
+    check(s_fake.read_status_calls == 0U, "version: status was not even read");
 }
 
 /** @brief 重复的 (SEQ, CMD) 只重发 ACK，不重复执行。 */
 static void test_duplicate_request(void)
 {
     const uint8_t payload[4] = {MCU_PROTOCOL_MOTION_STOP, 0U, 0U, 0U};
-    mcu_frame_t request = make_request(0x20U, MCU_PROTOCOL_CMD_SET_MOTION,
-                                       payload, 4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t request =
+        make_request(0x20U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     mcu_frame_t first = {0};
     mcu_frame_t second = {0};
 
@@ -534,8 +539,8 @@ static void test_set_light_off_keeps_brightness(void)
 {
     const uint8_t on[4] = {0x01U, 50U, 0U, 0U};
     const uint8_t off[4] = {0x00U, 50U, 0U, 0U};
-    mcu_frame_t request = make_request(0x42U, MCU_PROTOCOL_CMD_SET_LIGHT, on, 4U,
-                                       MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t request = make_request(0x42U, MCU_PROTOCOL_CMD_SET_LIGHT, on,
+                                       4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     mcu_frame_t reply = {0};
 
     fake_reset();

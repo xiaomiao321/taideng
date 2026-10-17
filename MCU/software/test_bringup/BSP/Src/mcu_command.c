@@ -185,7 +185,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
         case MCU_PROTOCOL_CMD_GET_STATUS:
             if (request->payload_length != 0U)
             {
-                build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_LENGTH);
+                build_error_ack(reply, request,
+                                MCU_PROTOCOL_RESULT_INVALID_LENGTH);
                 break;
             }
             build_status(reply, request->seq, now_ms);
@@ -195,7 +196,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
         {
             if (request->payload_length != 4U)
             {
-                build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_LENGTH);
+                build_error_ack(reply, request,
+                                MCU_PROTOCOL_RESULT_INVALID_LENGTH);
                 break;
             }
 
@@ -207,7 +209,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
             if (((light_flags & 0xFEU) != 0U) || (brightness > 100U) ||
                 (reserved_flags != 0U) || (reserved != 0U))
             {
-                build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_VALUE);
+                build_error_ack(reply, request,
+                                MCU_PROTOCOL_RESULT_INVALID_VALUE);
                 break;
             }
 
@@ -226,7 +229,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
         {
             if (request->payload_length != 4U)
             {
-                build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_LENGTH);
+                build_error_ack(reply, request,
+                                MCU_PROTOCOL_RESULT_INVALID_LENGTH);
                 break;
             }
 
@@ -239,7 +243,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
                 (control_flags != 0U) || (reserved != 0U) ||
                 ((motion == MCU_PROTOCOL_MOTION_STOP) && (speed != 0U)))
             {
-                build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_VALUE);
+                build_error_ack(reply, request,
+                                MCU_PROTOCOL_RESULT_INVALID_VALUE);
                 break;
             }
 
@@ -268,7 +273,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
             {
                 return false;
             }
-            build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_COMMAND);
+            build_error_ack(reply, request,
+                            MCU_PROTOCOL_RESULT_INVALID_COMMAND);
             break;
     }
 

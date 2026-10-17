@@ -3,18 +3,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     bool (*stop)(void);
     bool (*run)(unsigned motor, int duty);
     void (*reply)(const char *line);
-    const char *(*test)(unsigned seq, const char *name, int value, uint32_t duration);
+    const char *(*test)(unsigned seq, const char *name, int value,
+                        uint32_t duration);
     const char *(*confirm)(bool pass);
     const char *(*joint)(const char *op, unsigned seq, unsigned id,
                          const int32_t *values, unsigned count, uint32_t now);
     bool (*manual)(void);
     const char *(*aux)(const char *op, const char *const *args, unsigned count);
 } debug_hw_t;
-typedef struct {
+typedef struct
+{
     debug_hw_t hw;
     uint32_t heartbeat_ms, start_ms, duration_ms, pending_ms;
     unsigned motor, pending_motor;

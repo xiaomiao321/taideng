@@ -1,14 +1,14 @@
 #include "bsp_log.h"
 
-#include <stdarg.h>  // va_list、va_start、va_end
+#include <stdarg.h> // va_list、va_start、va_end
 #include <stdbool.h>
-#include <stdio.h>  // vsnprintf
+#include <stdio.h> // vsnprintf
 #include <string.h>
 
 #include "main.h"
 #include "usart.h"
 
-#define BSP_LOG_UART_TIMEOUT_MS (1000U)  // 发送超时，单位为毫秒
+#define BSP_LOG_UART_TIMEOUT_MS (1000U) // 发送超时，单位为毫秒
 static const char *const s_level_names[] = {"NONE", "ERROR", "WARN", "INFO",
                                             "DEBUG"};
 static bool s_is_log_initialized = false;
@@ -99,15 +99,15 @@ bsp_status_t bsp_log_printf(const char *format, ...)
     }
     if (length == 0)
     {
-        return BSP_OK;  // 格式化结果为空，不发送
+        return BSP_OK; // 格式化结果为空，不发送
     }
 
     /* 发送字符串 */
     return bsp_log_write((const uint8_t *)buffer, (size_t)length);
 }
 
-bsp_status_t bsp_log_print(uint32_t level, const char *tag,
-                           const char *format, ...)
+bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
+                           ...)
 {
     if (s_is_log_initialized == false)
     {
@@ -129,7 +129,7 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag,
     /* 等级过滤 */
     if (level > AITAID_LOG_LEVEL)
     {
-        return BSP_OK;  // 等级被过滤，返回成功
+        return BSP_OK; // 等级被过滤，返回成功
     }
     /* 把前缀加入格式化字符串 */
     char buffer[BSP_LOG_BUFFER_SIZE];
@@ -148,7 +148,7 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag,
 
     size_t used_length = (size_t)prefix_length;
     size_t remaining_length =
-        sizeof(buffer) - used_length - 2U;  // 留出 CRLF 和空字符
+        sizeof(buffer) - used_length - 2U; // 留出 CRLF 和空字符
     va_list args;
     va_start(args, format);
     int formatted_length =
@@ -167,7 +167,7 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag,
     /* 添加 CRLF */
     buffer[used_length++] = '\r';
     buffer[used_length++] = '\n';
-    buffer[used_length] = '\0';  // 确保空字符
+    buffer[used_length] = '\0'; // 确保空字符
 
     /* 发送字符串 */
     return bsp_log_write((const uint8_t *)buffer, used_length);

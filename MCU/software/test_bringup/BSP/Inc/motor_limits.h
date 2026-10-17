@@ -7,9 +7,16 @@
 #define MOTOR_DUTY_LARGE_MAX 800
 static inline bool motor_duty_valid(unsigned motor, int duty)
 {
-    if (motor < 1U || motor > 8U) return false;
-    if (duty == 0) return true; /* coast/stop is always available */
+    if (motor < 1U || motor > 8U)
+    {
+        return false;
+    }
+    if (duty == 0)
+    {
+        return true; /* coast/stop is always available */
+    }
     int max = motor <= 6U ? MOTOR_DUTY_SMALL_MAX : MOTOR_DUTY_LARGE_MAX;
-    return (duty >= MOTOR_DUTY_MIN && duty <= max) || (duty <= -MOTOR_DUTY_MIN && duty >= -max);
+    return (duty >= MOTOR_DUTY_MIN && duty <= max) ||
+           (duty <= -MOTOR_DUTY_MIN && duty >= -max);
 }
 #endif

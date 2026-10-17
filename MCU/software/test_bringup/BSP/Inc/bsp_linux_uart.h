@@ -86,8 +86,7 @@ bsp_status_t bsp_linux_uart_write(const uint8_t *data, size_t length,
  * @warning 先启动接收，再发送，可在阻塞发送期间通过中断接收即时回传数据。
  * @warning 单缓冲区一次接收结束后不会自动重启，打印和重新启动之间仍有接收空窗。
  */
-bsp_status_t bsp_linux_uart_start_receive(uint8_t *buffer,
-                                          size_t buffer_size,
+bsp_status_t bsp_linux_uart_start_receive(uint8_t *buffer, size_t buffer_size,
                                           uint32_t timeout_ms);
 
 /**

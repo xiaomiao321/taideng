@@ -53,7 +53,8 @@ bsp_status_t bsp_linux_uart_init(void)
         return BSP_BUSY;
     }
     s_is_initialized = false;
-    if ((huart1.Instance != USART1) || (huart1.gState == HAL_UART_STATE_RESET) ||
+    if ((huart1.Instance != USART1) ||
+        (huart1.gState == HAL_UART_STATE_RESET) ||
         (huart1.RxState == HAL_UART_STATE_RESET))
     {
         return BSP_ERR_CONFIG;
@@ -90,8 +91,8 @@ bsp_status_t bsp_linux_uart_write(const uint8_t *data, size_t length,
     {
         return BSP_ERR_NOT_INITIALIZED;
     }
-    if (data == NULL || length == 0U || length > UINT16_MAX || timeout_ms == 0U ||
-        timeout_ms == UINT32_MAX)
+    if (data == NULL || length == 0U || length > UINT16_MAX ||
+        timeout_ms == 0U || timeout_ms == UINT32_MAX)
     {
         return BSP_ERR_PARAM;
     }
@@ -104,8 +105,7 @@ bsp_status_t bsp_linux_uart_write(const uint8_t *data, size_t length,
     return convert_hal_status(status);
 }
 
-bsp_status_t bsp_linux_uart_start_receive(uint8_t *buffer,
-                                          size_t buffer_size,
+bsp_status_t bsp_linux_uart_start_receive(uint8_t *buffer, size_t buffer_size,
                                           uint32_t timeout_ms)
 {
     if (s_is_initialized == false)

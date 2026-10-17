@@ -41,12 +41,12 @@
  */
 typedef struct
 {
-    TIM_HandleTypeDef *htim;    /**< 绑定的定时器实例。 */
-    uint32_t channel_fi;        /**< 正转 PWM 通道（TIM_CHANNEL_x）。 */
-    uint32_t channel_bi;        /**< 反转 PWM 通道（TIM_CHANNEL_x）。 */
-    uint32_t arr;               /**< 初始化时缓存的 ARR，用于 CCR 换算。 */
-    int16_t duty_permille;      /**< 最近一次设定的有符号占空比。 */
-    bool is_initialized;        /**< 本实例是否已初始化。 */
+    TIM_HandleTypeDef *htim; /**< 绑定的定时器实例。 */
+    uint32_t channel_fi;     /**< 正转 PWM 通道（TIM_CHANNEL_x）。 */
+    uint32_t channel_bi;     /**< 反转 PWM 通道（TIM_CHANNEL_x）。 */
+    uint32_t arr;            /**< 初始化时缓存的 ARR，用于 CCR 换算。 */
+    int16_t duty_permille;   /**< 最近一次设定的有符号占空比。 */
+    bool is_initialized;     /**< 本实例是否已初始化。 */
 } bsp_motor_hbridge_t;
 
 /**
@@ -69,8 +69,7 @@ typedef struct
  */
 bsp_status_t bsp_motor_hbridge_init(bsp_motor_hbridge_t *self,
                                     TIM_HandleTypeDef *htim,
-                                    uint32_t channel_fi,
-                                    uint32_t channel_bi);
+                                    uint32_t channel_fi, uint32_t channel_bi);
 
 /**
  * @brief 设置 H 桥的有符号占空比。

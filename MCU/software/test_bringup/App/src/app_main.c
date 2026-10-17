@@ -99,7 +99,8 @@ static bool hw_apply_light(uint8_t light_flags, uint8_t brightness)
 
     if (s_light_enabled != 0U)
     {
-        duty = (uint16_t)(((uint32_t)brightness * BSP_LIGHT_PWM_DUTY_MAX) / 100U);
+        duty =
+            (uint16_t)(((uint32_t)brightness * BSP_LIGHT_PWM_DUTY_MAX) / 100U);
     }
 
     for (uint32_t i = 0U; i < (uint32_t)BSP_LIGHT_COUNT; ++i)
@@ -321,8 +322,7 @@ void app_run_once(void)
 {
     uint32_t now_ms = HAL_GetTick();
 
-    if (!s_is_receive_started &&
-        ((int32_t)(now_ms - s_rearm_retry_ms) >= 0))
+    if (!s_is_receive_started && ((int32_t)(now_ms - s_rearm_retry_ms) >= 0))
     {
         arm_receive(now_ms);
     }

@@ -6,8 +6,8 @@ static bool is_valid_channel(uint32_t channel)
            (channel == TIM_CHANNEL_3) || (channel == TIM_CHANNEL_4);
 }
 
-bsp_status_t bsp_light_pwm_init(bsp_light_pwm_t *self,
-                                TIM_HandleTypeDef *htim, uint32_t channel)
+bsp_status_t bsp_light_pwm_init(bsp_light_pwm_t *self, TIM_HandleTypeDef *htim,
+                                uint32_t channel)
 {
     if ((self == NULL) || (htim == NULL))
     {

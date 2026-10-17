@@ -113,7 +113,7 @@ void bringup_run_all(void)
                  test_result_str(result));
     }
 
-    LOG_INFO("TEST", "==== %u PASS / %u FAIL / %u SKIP ====",
-             (unsigned int)pass_count, (unsigned int)fail_count,
-             (unsigned int)skip_count);
+    LOG_INFO("TEST",
+             "==== %u PASS / %u FAIL / %u SKIP ====", (unsigned int)pass_count,
+             (unsigned int)fail_count, (unsigned int)skip_count);
 }
