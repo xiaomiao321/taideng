@@ -213,6 +213,60 @@ static void test_two_frames_one_chunk(void)
     check(!mcu_protocol_pop_frame(&frame), "two-in-one: no third frame");
 }
 
+/**
+ * @brief 一次收到的报文多于队列容量时，多出的字节不能被丢掉。
+ *
+ * feed() 应在队列满时停下并返回已取走的字节数；调用者取走报文后
+ * 从断点继续喂，全部报文按顺序到达，错误计数保持为 0。
+ */
+static void test_queue_full_keeps_bytes(void)
+{
+    enum
+    {
+        FRAME_COUNT = 12
+    };
+    uint8_t stream[FRAME_COUNT * MCU_PROTOCOL_FIXED_SIZE];
+    size_t stream_length = 0U;
+    mcu_frame_t frame = {0};
+
+    for (uint8_t seq = 0U; seq < FRAME_COUNT; ++seq)
+    {
+        mcu_frame_t request = {0};
+        request.version = MCU_PROTOCOL_VERSION;
+        request.seq = seq;
+        request.cmd = MCU_PROTOCOL_CMD_GET_STATUS;
+        stream_length += mcu_protocol_encode(&request, &stream[stream_length],
+                                             sizeof(stream) - stream_length);
+    }
+
+    mcu_protocol_reset();
+    size_t offset = mcu_protocol_feed(stream, stream_length);
+    check(offset < stream_length, "queue-full: feed stops early");
+
+    bool in_order = true;
+    uint8_t expected_seq = 0U;
+    for (unsigned round = 0U; round <= FRAME_COUNT; ++round)
+    {
+        bool popped = false;
+        while (mcu_protocol_pop_frame(&frame))
+        {
+            popped = true;
+            in_order = in_order && (frame.seq == expected_seq);
+            ++expected_seq;
+        }
+        if (!popped && (offset >= stream_length))
+        {
+            break;
+        }
+        /* 字节喂完以后仍要空喂，切出缓冲里因队列满而留下的完整报文。 */
+        offset += mcu_protocol_feed(&stream[offset], stream_length - offset);
+    }
+
+    check(in_order && (expected_seq == FRAME_COUNT),
+          "queue-full: all frames arrive in order");
+    check(mcu_protocol_error_count() == 0U, "queue-full: no error counted");
+}
+
 /** @brief 帧头前面有噪声字节，应能跳过噪声找到真正的帧。 */
 static void test_noise_prefix(void)
 {
@@ -468,6 +522,7 @@ int main(void)
     test_fragmented_frame();
     test_byte_by_byte();
     test_two_frames_one_chunk();
+    test_queue_full_keeps_bytes();
     test_noise_prefix();
     test_bad_crc_resync();
     test_length_too_large();

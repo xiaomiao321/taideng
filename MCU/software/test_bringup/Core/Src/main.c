@@ -34,6 +34,7 @@
 #include "bsp_led.h"
 #include "bsp_log.h"
 #include "bsp_motor.h"
+#include "bsp_watchdog.h"
 #include "debug_console.h"
 
 
@@ -58,6 +59,11 @@
 #if (APP_MODE != APP_MODE_DEBUG) && (APP_MODE != APP_MODE_BOARD) && (APP_MODE != APP_MODE_ANDROID)
 #error "Invalid APP_MODE: use APP_MODE_DEBUG, APP_MODE_BOARD or APP_MODE_ANDROID"
 #endif
+
+/* 看门狗标称超时。主循环单次最长阻塞约 100ms（串口限时发送），
+ * LSI 最快时实际超时约为标称值的 0.68 倍，仍有充足余量。
+ * BOARD 模式的测试用例会阻塞等待人工确认，不启用看门狗。 */
+#define APP_WATCHDOG_TIMEOUT_MS (1000U)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -131,6 +137,10 @@ int main(void)
         (void)bsp_led_set(BSP_LED_ID_ERROR, true);
         Error_Handler();
     }
+    if (bsp_watchdog_take_reset_flag())
+    {
+        LOG_WARN("MAIN", "last reset was caused by the watchdog");
+    }
 #if APP_MODE == APP_MODE_BOARD
     if ((bsp_key_init() != BSP_OK) || (bsp_motor_init() != BSP_OK))
     {
@@ -142,6 +152,13 @@ int main(void)
     app_init();
 #else
     debug_console_init();
+#endif
+#if APP_MODE != APP_MODE_BOARD
+    /* 初始化完成后再启动，初始化过程中的阻塞不计入看门狗超时。 */
+    if (bsp_watchdog_start(APP_WATCHDOG_TIMEOUT_MS) != BSP_OK)
+    {
+        Error_Handler();
+    }
 #endif
 
     /* USER CODE END 2 */
@@ -164,8 +181,10 @@ int main(void)
         LOG_INFO("TEST", "round finished; motors stopped");
 #elif APP_MODE == APP_MODE_ANDROID
         app_run_once();
+        bsp_watchdog_feed();
 #else
         debug_console_update();
+        bsp_watchdog_feed();
 #endif
         /* USER CODE END WHILE */
 
@@ -252,8 +271,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
     /* USER CODE BEGIN Error_Handler_Debug */
-    (void)bsp_motor_stop_all();
-    bsp_led_set(BSP_LED_ID_ERROR, true);
+    /* 不用 bsp_motor_stop_all()：它要求驱动已初始化，而这里可能在任何阶段进入。 */
+    bsp_motor_emergency_stop();
+    (void)bsp_led_set(BSP_LED_ID_ERROR, true);
     /* User can add his own implementation to report the HAL error return state
      */
     __disable_irq();

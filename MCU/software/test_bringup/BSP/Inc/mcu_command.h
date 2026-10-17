@@ -94,8 +94,9 @@ void mcu_command_init(const mcu_command_hw_t *hw, uint32_t now_ms);
  * @retval false 本条报文按协议不需要回复，reply 内容未定义。
  *
  * @note 收到任何合法请求都会刷新失联计时，重复帧也算。
- * @note 只有会改变硬件状态的命令（SET_LIGHT、SET_MOTION）按 (SEQ, CMD) 去重；
- *       重复的控制帧不会重复执行，但会重发上一次的 ACK。
+ * @note 只有会改变硬件状态的命令（SET_LIGHT、SET_MOTION）参与去重：与上一条
+ *       控制帧的 SEQ、CMD、VERSION、FLAGS 和 PAYLOAD 全部相同才算重发，
+ *       重发帧不会重复执行，但会重发上一次的 ACK。
  * @note 查询类命令（PING、GET_STATUS）不去重，每次查询都返回当前状态，
  *       否则重复查询会一直读到缓存的旧状态、运行秒数看起来不涨。
  */

@@ -8,6 +8,8 @@
 
 #include "mcu_command.h"
 
+#include <string.h>
+
 /* -------------------------------------------------------------------------- */
 /* 内部状态                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -22,11 +24,10 @@ static uint32_t s_last_rx_ms = 0U;
 static bool s_has_link = false;
 /** @brief 本次失联是否已经执行过安全停止，避免重复停。 */
 static bool s_has_stopped = true;
-/** @brief 是否记有上一次请求，用于 (SEQ, CMD) 去重。 */
+/** @brief 是否记有上一次请求，用于去重。 */
 static bool s_has_last = false;
-/** @brief 上一次请求的序号与命令字。 */
-static uint8_t s_last_seq = 0U;
-static uint8_t s_last_cmd = 0U;
+/** @brief 上一次有副作用的请求原文，用于识别主机的原样重发。 */
+static mcu_frame_t s_last_request;
 /** @brief 上一次请求对应的回复，重复请求时原样重发。 */
 static mcu_frame_t s_last_reply;
 
@@ -47,7 +48,7 @@ static bool is_valid_motion(uint8_t motion)
 /**
  * @brief 该命令是否会改变硬件状态。
  *
- * @note 只有这类命令才需要按 (SEQ, CMD) 去重：协议要求重复帧不能重复产生
+ * @note 只有这类命令才需要去重：协议要求重复帧不能重复产生
  *       非幂等副作用。查询类命令（PING、GET_STATUS）没有副作用，必须每次都
  *       重新处理，否则重复查询会一直返回缓存的旧状态、运行秒数看起来不涨。
  */
@@ -55,6 +56,24 @@ static bool has_side_effect(uint8_t cmd)
 {
     return (cmd == MCU_PROTOCOL_CMD_SET_LIGHT) ||
            (cmd == MCU_PROTOCOL_CMD_SET_MOTION);
+}
+
+/**
+ * @brief 判断请求是否是上一次控制帧的原样重发。
+ *
+ * @note 只比 (SEQ, CMD) 不够：主机重启后 SEQ 从头开始，新命令可能恰好和
+ *       MCU 记住的上一条撞上 SEQ 与 CMD，被误当成重发而不执行。原样重发的
+ *       报文逐字节相同，所以把版本、标志和 PAYLOAD 一起比较。
+ */
+static bool is_retransmission(const mcu_frame_t *request)
+{
+    return s_has_last && (request->seq == s_last_request.seq) &&
+           (request->cmd == s_last_request.cmd) &&
+           (request->version == s_last_request.version) &&
+           (request->flags == s_last_request.flags) &&
+           (request->payload_length == s_last_request.payload_length) &&
+           (memcmp(request->payload, s_last_request.payload,
+                   request->payload_length) == 0);
 }
 
 /** @brief 组装一条 STATUS 回复。 */
@@ -98,8 +117,7 @@ static void remember_request(const mcu_frame_t *request,
         return;
     }
 
-    s_last_seq = request->seq;
-    s_last_cmd = request->cmd;
+    s_last_request = *request;
     s_last_reply = *reply;
     s_has_last = true;
 }
@@ -123,8 +141,6 @@ void mcu_command_init(const mcu_command_hw_t *hw, uint32_t now_ms)
     s_has_link = false;
     s_has_stopped = true;
     s_has_last = false;
-    s_last_seq = 0U;
-    s_last_cmd = 0U;
 }
 
 bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
@@ -143,8 +159,7 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
 
     /* 重复的控制帧：只重发上次的回复，绝不重复执行副作用。
      * 注意这里也要刷新链路计时，否则主机一直重发同一条帧会被误判成失联。 */
-    if (s_has_last && has_side_effect(request->cmd) &&
-        (request->seq == s_last_seq) && (request->cmd == s_last_cmd))
+    if (has_side_effect(request->cmd) && is_retransmission(request))
     {
         note_link_activity(now_ms);
         *reply = s_last_reply;

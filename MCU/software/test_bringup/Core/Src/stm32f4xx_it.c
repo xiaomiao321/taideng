@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usart.h"
+#include "bsp_motor.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -74,7 +75,8 @@ extern TIM_HandleTypeDef htim6;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
+  /* 先停电机：卡在下面的死循环里时 PWM 仍会保持最后的占空比。 */
+  bsp_motor_emergency_stop();
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
@@ -89,7 +91,8 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  /* 先停电机：卡在下面的死循环里时 PWM 仍会保持最后的占空比。 */
+  bsp_motor_emergency_stop();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -104,7 +107,8 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+  /* 先停电机：卡在下面的死循环里时 PWM 仍会保持最后的占空比。 */
+  bsp_motor_emergency_stop();
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -119,7 +123,8 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  /* 先停电机：卡在下面的死循环里时 PWM 仍会保持最后的占空比。 */
+  bsp_motor_emergency_stop();
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -134,7 +139,8 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+  /* 先停电机：卡在下面的死循环里时 PWM 仍会保持最后的占空比。 */
+  bsp_motor_emergency_stop();
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {

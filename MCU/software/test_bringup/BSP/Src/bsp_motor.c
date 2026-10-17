@@ -5,6 +5,25 @@
 
 #include "tim.h"
 
+/* 逻辑电机号 → 定时器 FI/BI 通道映射；换板时只改这张表。
+ * M6 的 FI/BI 与引脚自然顺序相反，不要按 PC8/PC9 的顺序写。
+ * 放在文件作用域，急停时可以不经过 bsp_motor_init() 直接使用。 */
+static const struct
+{
+    TIM_HandleTypeDef *htim;
+    uint32_t channel_fi;
+    uint32_t channel_bi;
+} k_mapping[BSP_MOTOR_COUNT] = {
+    {&htim2, TIM_CHANNEL_3, TIM_CHANNEL_4},  /* M1 PA2/PA3   */
+    {&htim2, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M2 PA0/PA1   */
+    {&htim9, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M3 PE5/PE6   */
+    {&htim12, TIM_CHANNEL_1, TIM_CHANNEL_2}, /* M4 PB14/PB15 */
+    {&htim8, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M5 PC6/PC7   */
+    {&htim8, TIM_CHANNEL_4, TIM_CHANNEL_3},  /* M6 PC9/PC8   */
+    {&htim4, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M7 PB6/PB7   */
+    {&htim4, TIM_CHANNEL_3, TIM_CHANNEL_4},  /* M8 PB8/PB9   */
+};
+
 static bsp_motor_hbridge_t s_motors[BSP_MOTOR_COUNT];
 static bool s_is_initialized = false;
 
@@ -20,29 +39,11 @@ bsp_status_t bsp_motor_init(void)
         return BSP_OK;
     }
 
-    /* 逻辑电机号 → 定时器 FI/BI 通道映射；换板时只改这张表。
-     * M6 的 FI/BI 与引脚自然顺序相反，不要按 PC8/PC9 的顺序写。 */
-    static const struct
-    {
-        TIM_HandleTypeDef *htim;
-        uint32_t channel_fi;
-        uint32_t channel_bi;
-    } mapping[BSP_MOTOR_COUNT] = {
-        {&htim2, TIM_CHANNEL_3, TIM_CHANNEL_4},  /* M1 PA2/PA3   */
-        {&htim2, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M2 PA0/PA1   */
-        {&htim9, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M3 PE5/PE6   */
-        {&htim12, TIM_CHANNEL_1, TIM_CHANNEL_2}, /* M4 PB14/PB15 */
-        {&htim8, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M5 PC6/PC7   */
-        {&htim8, TIM_CHANNEL_4, TIM_CHANNEL_3},  /* M6 PC9/PC8   */
-        {&htim4, TIM_CHANNEL_1, TIM_CHANNEL_2},  /* M7 PB6/PB7   */
-        {&htim4, TIM_CHANNEL_3, TIM_CHANNEL_4},  /* M8 PB8/PB9   */
-    };
-
     for (uint32_t i = 0U; i < (uint32_t)BSP_MOTOR_COUNT; ++i)
     {
         bsp_status_t status = bsp_motor_hbridge_init(
-            &s_motors[i], mapping[i].htim, mapping[i].channel_fi,
-            mapping[i].channel_bi);
+            &s_motors[i], k_mapping[i].htim, k_mapping[i].channel_fi,
+            k_mapping[i].channel_bi);
         if (status != BSP_OK)
         {
             return status;
@@ -110,6 +111,20 @@ bsp_status_t bsp_motor_stop_all(void)
         }
     }
     return first_error;
+}
+
+void bsp_motor_emergency_stop(void)
+{
+    for (uint32_t i = 0U; i < (uint32_t)BSP_MOTOR_COUNT; ++i)
+    {
+        TIM_HandleTypeDef *htim = k_mapping[i].htim;
+        if (htim->Instance == NULL)
+        {
+            continue; /* MX_TIMx_Init() 尚未执行，PWM 也还没输出 */
+        }
+        __HAL_TIM_SET_COMPARE(htim, k_mapping[i].channel_fi, 0U);
+        __HAL_TIM_SET_COMPARE(htim, k_mapping[i].channel_bi, 0U);
+    }
 }
 
 bsp_motor_hbridge_t *bsp_motor_handle(bsp_motor_id_t motor_id)

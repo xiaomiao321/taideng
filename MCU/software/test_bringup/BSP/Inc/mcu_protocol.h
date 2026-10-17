@@ -177,8 +177,13 @@ void mcu_protocol_reset(void);
 /**
  * @brief 把主循环收到的原始字节喂给解析器，累积并切出完整报文。
  *
- * @param[in] data 收到的字节首地址；data 为 NULL 或 length 为 0 时什么都不做。
+ * @param[in] data 收到的字节首地址；data 为 NULL 或 length 为 0 时不取新字节，
+ *                 只尝试切出缓冲中已经完整的报文。
  * @param[in] length 本次收到的字节数，可以是任意大小。
+ *
+ * @return 实际取走的字节数，0～length。小于 length 说明报文队列已满，
+ *         调用者应先用 mcu_protocol_pop_frame() 取走报文，再从
+ *         data + 返回值 处继续喂剩下的字节；未取走的字节不会被丢弃或计错。
  *
  * @note 一次收到的数据可能是半条报文、恰好一条，或者好几条粘在一起，
  *       也可能前面带着噪声；解析器必须跨调用保留状态。
@@ -186,7 +191,7 @@ void mcu_protocol_reset(void);
  * @note 本函数只负责切帧，不执行命令、不发送任何数据。
  * @warning 不在中断里调用；由主循环串行调用，不可重入。
  */
-void mcu_protocol_feed(const uint8_t *data, size_t length);
+size_t mcu_protocol_feed(const uint8_t *data, size_t length);
 
 /**
  * @brief 取出队列中最早的一条完整报文。

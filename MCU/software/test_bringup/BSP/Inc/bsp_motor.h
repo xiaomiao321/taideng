@@ -93,6 +93,18 @@ bsp_status_t bsp_motor_brake(bsp_motor_id_t motor_id);
 bsp_status_t bsp_motor_stop_all(void);
 
 /**
+ * @brief 急停：直接把八路电机的两路比较值清零，使其滑行。
+ *
+ * @note 供 Error_Handler() 和 HardFault 等异常处理函数使用：不检查初始化状态，
+ *       不调用 HAL 函数，不改变驱动内部记录的占空比；可在任何上下文调用，
+ *       包括 MX_TIMx_Init() 之前（此时什么都不做）。
+ * @note 比较寄存器开启了预装载时，新值在下一个 PWM 周期生效（20kHz 下不超过
+ *       50us）。
+ * @note 只清比较值，不停止定时器，引脚保持确定的低电平而不是浮空。
+ */
+void bsp_motor_emergency_stop(void);
+
+/**
  * @brief 取得某一路的底层 H 桥句柄，供需要直接操作时使用。
  *
  * @param[in] motor_id 电机逻辑编号。

@@ -160,11 +160,14 @@ void mcu_protocol_reset(void)
     s_error_count = 0U;
 }
 
-void mcu_protocol_feed(const uint8_t *data, size_t length)
+size_t mcu_protocol_feed(const uint8_t *data, size_t length)
 {
+    /* 上次因队列满而留在缓冲里的完整报文，在调用者取走报文后先切出来。 */
+    try_extract_frames();
+
     if ((data == NULL) || (length == 0U))
     {
-        return;
+        return 0U;
     }
 
     size_t offset = 0U;
@@ -174,9 +177,9 @@ void mcu_protocol_feed(const uint8_t *data, size_t length)
         size_t space = MCU_PROTOCOL_MAX_FRAME_SIZE - s_used;
         if (space == 0U)
         {
-            /* 缓冲满了却切不出帧，里面必然是噪声：丢掉最早的一个字节。 */
-            drop_leading_byte();
-            space = 1U;
+            /* 队列未满时缓冲里不可能剩下一整帧还切不出来，所以缓冲满只会是
+             * 队列满了。此时不能丢字节，停下来让调用者先取走报文。 */
+            break;
         }
 
         size_t chunk = length - offset;
@@ -190,6 +193,7 @@ void mcu_protocol_feed(const uint8_t *data, size_t length)
 
         try_extract_frames();
     }
+    return offset;
 }
 
 bool mcu_protocol_pop_frame(mcu_frame_t *frame)

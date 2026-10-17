@@ -628,6 +628,34 @@ static void test_duplicate_set_light(void)
           "light duplicate: applied only once, ACK resent");
 }
 
+/**
+ * @brief SEQ 与 CMD 相同但 PAYLOAD 不同，是新命令，必须执行。
+ *
+ * 主机重启后 SEQ 从头开始，可能撞上 MCU 记住的上一条控制帧。
+ */
+static void test_same_seq_new_payload_executes(void)
+{
+    const uint8_t first_payload[4] = {0x01U, 80U, 0U, 0U};
+    const uint8_t second_payload[4] = {0x01U, 20U, 0U, 0U};
+    mcu_frame_t request =
+        make_request(0x00U, MCU_PROTOCOL_CMD_SET_LIGHT, first_payload, 4U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_fake_hw, 0U);
+
+    (void)mcu_command_handle(&request, &reply, 10U);
+    request = make_request(0x00U, MCU_PROTOCOL_CMD_SET_LIGHT, second_payload,
+                           4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 20U);
+
+    check((s_fake.apply_light_calls == 2U) && (s_fake.last_brightness == 20U),
+          "light same SEQ, new payload: executed");
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_LIGHT, MCU_PROTOCOL_RESULT_OK),
+          "light same SEQ, new payload: ACK ok");
+}
+
 int main(void)
 {
     test_get_status_reply();
@@ -650,6 +678,7 @@ int main(void)
     test_set_light_parameter_errors();
     test_set_light_length_error();
     test_duplicate_set_light();
+    test_same_seq_new_payload_executes();
 
     printf("\n%u passed, %u failed\n", (unsigned int)s_passed,
            (unsigned int)s_failed);

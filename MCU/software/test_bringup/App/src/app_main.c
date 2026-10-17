@@ -28,16 +28,32 @@
 /** @brief 通信指示灯每次闪烁的持续时间，单位毫秒。 */
 #define APP_COMM_LED_PULSE_MS (50U)
 
+/** @brief 重新启动接收失败后，下一次重试前的等待时间，单位毫秒。 */
+#define APP_UART_REARM_RETRY_MS (100U)
+
 /* -------------------------------------------------------------------------- */
 /* 内部状态                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** @brief USART1 接收缓冲，容量沿用 BSP 允许的最大值。 */
-static uint8_t s_rx_buffer[BSP_LINUX_UART_RX_MAX_SIZE];
+/**
+ * @brief USART1 双接收缓冲，容量沿用 BSP 允许的最大值。
+ *
+ * 一块交给 UART 接收下一批字节，另一块留给主循环慢慢解析；
+ * 解析过程中可能要多次发送回复，期间不能让新数据覆盖还没喂完的字节。
+ */
+static uint8_t s_rx_buffers[2][BSP_LINUX_UART_RX_MAX_SIZE];
+/** @brief 当前交给 UART 接收的缓冲下标，0 或 1。 */
+static uint8_t s_rx_index = 0U;
 /** @brief 发送缓冲，最大一帧即可。 */
 static uint8_t s_tx_buffer[MCU_PROTOCOL_MAX_FRAME_SIZE];
 /** @brief 当前是否有一次接收正在进行。 */
 static bool s_is_receive_started = false;
+/** @brief 上一次启动接收是否失败；用于只在状态变化时打一次日志。 */
+static bool s_is_rearm_failing = false;
+/** @brief 启动接收失败后，允许下一次重试的时刻。 */
+static uint32_t s_rearm_retry_ms = 0U;
+/** @brief USART1 收发错误累计数，只用于日志排查。 */
+static uint32_t s_uart_error_count = 0U;
 /** @brief 灯光实际开关，bit0 有效。 */
 static uint8_t s_light_enabled = 0U;
 /** @brief 最近一次设定的亮度 0～100；关灯时保留，下次开灯继续用。 */
@@ -134,22 +150,11 @@ static const mcu_command_hw_t g_mcu_hw = {hw_read_status, hw_apply_light,
 /* 内部工具                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** @brief 报告一个不可恢复的初始化或收发错误。 */
+/** @brief 报告一个不可恢复的初始化错误。 */
 static void fail_hard(void)
 {
     (void)bsp_led_set(BSP_LED_ID_ERROR, true);
     Error_Handler();
-}
-
-/** @brief 启动一次 USART1 接收。 */
-static void arm_receive(void)
-{
-    if (bsp_linux_uart_start_receive(s_rx_buffer, sizeof(s_rx_buffer),
-                                     APP_UART_RX_TIMEOUT_MS) != BSP_OK)
-    {
-        fail_hard();
-    }
-    s_is_receive_started = true;
 }
 
 /**
@@ -177,6 +182,116 @@ static void update_comm_led(uint32_t now_ms)
     }
 }
 
+/**
+ * @brief 在当前接收缓冲上启动一次 USART1 接收。
+ *
+ * @param[in] now_ms 当前时刻。
+ *
+ * @note 失败不进 Error_Handler：串口出错是现场常态（插拔线、上电毛刺），
+ *       整机停死只能靠复位恢复。这里记录错误，APP_UART_REARM_RETRY_MS
+ *       后由 app_run_once() 重试；一直收不到报文时由命令层的失联保护停电机。
+ */
+static void arm_receive(uint32_t now_ms)
+{
+    bsp_status_t status = bsp_linux_uart_start_receive(
+        s_rx_buffers[s_rx_index], sizeof(s_rx_buffers[s_rx_index]),
+        APP_UART_RX_TIMEOUT_MS);
+    if (status != BSP_OK)
+    {
+        if (!s_is_rearm_failing)
+        {
+            LOG_WARN("APP", "uart1 rx start failed: %s",
+                     bsp_status_str(status));
+        }
+        s_is_rearm_failing = true;
+        s_rearm_retry_ms = now_ms + APP_UART_REARM_RETRY_MS;
+        return;
+    }
+    if (s_is_rearm_failing)
+    {
+        LOG_INFO("APP", "uart1 rx restarted");
+    }
+    s_is_rearm_failing = false;
+    s_is_receive_started = true;
+}
+
+/**
+ * @brief 取出并处理解析器队列里的全部请求，需要时发送回复。
+ *
+ * @retval true 至少处理了一条请求。
+ * @retval false 队列为空。
+ *
+ * @note 发送失败只计数和打日志，不停机：主机会因收不到 ACK 而重发。
+ */
+static bool handle_pending_frames(void)
+{
+    mcu_frame_t request;
+    mcu_frame_t reply;
+    bool has_handled = false;
+
+    while (mcu_protocol_pop_frame(&request))
+    {
+        has_handled = true;
+
+        /* 通信指示灯：每收到一条合法报文闪一下，链路一断就不闪了。 */
+        pulse_comm_led(HAL_GetTick());
+
+        /* DEBUG 级日志只在 Debug 构建里编译进去，正式跑不影响时序。 */
+        LOG_DEBUG("PROTO", "rx seq=%u cmd=0x%02X len=%u",
+                  (unsigned int)request.seq, (unsigned int)request.cmd,
+                  (unsigned int)request.payload_length);
+
+        if (mcu_command_handle(&request, &reply, HAL_GetTick()) == false)
+        {
+            continue;
+        }
+
+        size_t tx_length =
+            mcu_protocol_encode(&reply, s_tx_buffer, sizeof(s_tx_buffer));
+        if (tx_length == 0U)
+        {
+            continue;
+        }
+        LOG_DEBUG("PROTO", "tx seq=%u cmd=0x%02X len=%u",
+                  (unsigned int)reply.seq, (unsigned int)reply.cmd,
+                  (unsigned int)tx_length);
+        bsp_status_t status = bsp_linux_uart_write(s_tx_buffer, tx_length,
+                                                   APP_UART_TX_TIMEOUT_MS);
+        if (status != BSP_OK)
+        {
+            ++s_uart_error_count;
+            LOG_WARN("APP", "uart1 tx failed: %s (errors=%lu)",
+                     bsp_status_str(status), (unsigned long)s_uart_error_count);
+        }
+    }
+    return has_handled;
+}
+
+/**
+ * @brief 把一批收到的字节全部喂给解析器，并处理切出的请求。
+ *
+ * @param[in] data 收到的字节。
+ * @param[in] length 字节数。
+ *
+ * @note 解析队列容量有限，一批字节里报文多于队列容量时 feed() 会提前返回；
+ *       这里先处理已切出的请求腾出队列，再从断点继续喂，直到全部喂完、
+ *       缓冲里也没有剩下完整报文为止。
+ */
+static void process_received(const uint8_t *data, size_t length)
+{
+    size_t offset = 0U;
+    bool has_progress = true;
+
+    while (has_progress)
+    {
+        size_t consumed = mcu_protocol_feed(&data[offset], length - offset);
+        offset += consumed;
+        bool has_handled = handle_pending_frames();
+        /* 既没取走字节也没处理请求就停下，避免任何意外情况下死循环。 */
+        has_progress = (consumed > 0U) || has_handled;
+    }
+}
+
 /* -------------------------------------------------------------------------- */
 /* 对外接口                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -198,63 +313,45 @@ void app_init(void)
 
     mcu_protocol_reset();
     mcu_command_init(&g_mcu_hw, HAL_GetTick());
-    arm_receive();
+    arm_receive(HAL_GetTick());
     LOG_INFO("APP", "protocol ready");
 }
 
 void app_run_once(void)
 {
-    size_t received_length = 0U;
-    mcu_frame_t request;
-    mcu_frame_t reply;
+    uint32_t now_ms = HAL_GetTick();
 
-    if (!s_is_receive_started)
+    if (!s_is_receive_started &&
+        ((int32_t)(now_ms - s_rearm_retry_ms) >= 0))
     {
-        arm_receive();
+        arm_receive(now_ms);
     }
 
-    bsp_status_t status = bsp_linux_uart_receive_update(&received_length);
-    if (status != BSP_BUSY)
+    if (s_is_receive_started)
     {
-        s_is_receive_started = false;
-        if ((status != BSP_OK) && (status != BSP_ERR_TIMEOUT))
+        size_t received_length = 0U;
+        bsp_status_t status = bsp_linux_uart_receive_update(&received_length);
+        if (status != BSP_BUSY)
         {
-            fail_hard();
-        }
-        if ((status == BSP_OK) && (received_length > 0U))
-        {
-            mcu_protocol_feed(s_rx_buffer, received_length);
-        }
-        /* 先重新武装接收再发送回复：发送期间不会漏掉主机下一帧的开头。 */
-        arm_receive();
-    }
+            s_is_receive_started = false;
+            const uint8_t *received = s_rx_buffers[s_rx_index];
+            s_rx_index ^= 1U;
 
-    while (mcu_protocol_pop_frame(&request))
-    {
-        /* 通信指示灯：每收到一条合法报文闪一下，链路一断就不闪了。 */
-        pulse_comm_led(HAL_GetTick());
-
-        /* DEBUG 级日志只在 Debug 构建里编译进去，正式跑不影响时序。 */
-        LOG_DEBUG("PROTO", "rx seq=%u cmd=0x%02X len=%u",
-                  (unsigned int)request.seq, (unsigned int)request.cmd,
-                  (unsigned int)request.payload_length);
-
-        if (mcu_command_handle(&request, &reply, HAL_GetTick()) == false)
-        {
-            continue;
-        }
-
-        size_t tx_length =
-            mcu_protocol_encode(&reply, s_tx_buffer, sizeof(s_tx_buffer));
-        if (tx_length > 0U)
-        {
-            LOG_DEBUG("PROTO", "tx seq=%u cmd=0x%02X len=%u",
-                      (unsigned int)reply.seq, (unsigned int)reply.cmd,
-                      (unsigned int)tx_length);
-            if (bsp_linux_uart_write(s_tx_buffer, tx_length,
-                                     APP_UART_TX_TIMEOUT_MS) != BSP_OK)
+            if ((status != BSP_OK) && (status != BSP_ERR_TIMEOUT))
             {
-                fail_hard();
+                /* 帧错误、噪声、溢出等：丢掉这一批，重新接收即可。 */
+                ++s_uart_error_count;
+                LOG_WARN("APP", "uart1 rx failed: %s (errors=%lu)",
+                         bsp_status_str(status),
+                         (unsigned long)s_uart_error_count);
+            }
+
+            /* 先在另一块缓冲上重新接收再处理：处理和回复期间不漏主机下一帧。 */
+            arm_receive(now_ms);
+
+            if ((status == BSP_OK) && (received_length > 0U))
+            {
+                process_received(received, received_length);
             }
         }
     }
