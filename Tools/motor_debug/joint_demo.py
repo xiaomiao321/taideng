@@ -1,6 +1,6 @@
 """Synthetic UI feedback, not a model of a real mechanism."""
 import time
-from joint_model import Calibration
+from joint_model import Calibration, Nominal
 
 class DemoJoints:
     def __init__(self, emit):
@@ -15,19 +15,30 @@ class DemoJoints:
 
     def request(self, kind, seq, joint, value, duration, vals, tick):
         self.focus = joint
-        if kind == "CAL":
-            self.configs[joint] = Calibration(*value).validate()
-            self.targets[joint] = int(self.configs[joint].angle(vals[joint-1]))
+        if kind in ("CAL", "JNOM"):
+            try:
+                cal = (Calibration(*value) if kind == "CAL" else Nominal(*value).calibration()).validate()
+            except ValueError:
+                return "CAL_PARAM"
+            self.configs[joint] = cal
+            self.targets[joint] = int(cal.angle(vals[joint-1]))
             self.phases[joint] = "IDLE"
+        if kind == "JLIM":
+            cal = self.configs.get(joint)
+            if not cal: return "NOT_CALIBRATED"
+            try: self.configs[joint] = cal.with_limits(*value).validate()
+            except ValueError: return "LIMIT_PARAM"
         if kind == "JMOVE":
             cal = self.configs.get(joint)
             if not cal: return "NOT_CALIBRATED"
-            if not cal.angle_a <= value <= cal.angle_b: return "TARGET_RANGE"
+            if not cal.limits[0] <= value <= cal.limits[1]: return "TARGET_RANGE"
             self.targets[joint] = value; self.active = joint; self.seq = seq
             self.started = time.monotonic(); self.timeout = duration/1000; self.stable = None
             self.phases[joint] = "SETTLE"
-        if kind in ("CAL", "JGET") and joint in self.configs:
-            self.emit(f"JCAL {tick} M{joint} " + " ".join(map(str, self.configs[joint].wire())))
+        if kind in ("CAL", "JGET", "JNOM", "JLIM") and joint in self.configs:
+            cal = self.configs[joint]
+            self.emit(f"JCAL {tick} M{joint} " + " ".join(map(str, cal.wire())))
+            self.emit(f"JLIM {tick} M{joint} {cal.limits[0]} {cal.limits[1]}")
         return None
 
     def step(self, vals, tick):

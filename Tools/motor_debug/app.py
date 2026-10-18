@@ -112,6 +112,7 @@ class SerialWorker(threading.Thread):
         self.events.put(("connected", "模拟模式（未连接硬件）"))
         self.emit("CAPS BOARD_TEST 2")
         self.emit("CAPS JOINT 1")
+        self.emit("CAPS JOINT_NOMINAL 1")
         self.emit("CAPS MULTI 1")
         self.emit("CAPS LIGHT 1")
         self.emit("CAPS LINUX 1")
@@ -138,7 +139,7 @@ class SerialWorker(threading.Thread):
                 kind, selected, speed, duration = self.commands.get_nowait()
                 self.seq = (self.seq + 1) & 65535
                 self.events.put(("sent", (kind, self.seq, (selected, speed, duration))))
-                if kind in ("STOP", "RUN", "TEST", "CAL", "JMOVE"):
+                if kind in ("STOP", "RUN", "TEST", "CAL", "JMOVE", "JNOM", "JLIM"):
                     joints.cancel()
                     if board:
                         finish("CANCELLED")
@@ -168,7 +169,7 @@ class SerialWorker(threading.Thread):
                         continue
                     self.emit("LRX "+speed[:32].hex())
                     if len(speed) > 32: self.emit("LRX "+speed[32:].hex())
-                if kind in ("CAL", "JMOVE", "JGET"):
+                if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"):
                     error = joints.request(kind, self.seq, selected, speed, duration, vals, int((now-start)*1000))
                     if error:
                         self.emit(f"ERR {self.seq} {error}")

@@ -1,5 +1,5 @@
 import unittest
-from joint_model import Calibration, millidegrees, encode_profile, decode_profile
+from joint_model import Calibration, Nominal, millidegrees, encode_profile, decode_profile
 from protocol import command, parse
 from shell_commands import parse_shell
 
@@ -39,5 +39,49 @@ class JointTests(unittest.TestCase):
         self.assertEqual(parse_shell("angle M1 45").request, ("JMOVE", 1, 45000, 10000))
         self.assertEqual(parse_shell("joint M6").request[0:2], ("JGET", 6))
         with self.assertRaises(ValueError): parse_shell("angle M7 45")
+
+    def test_nominal_matches_firmware(self):
+        # 与 HostTest/joint_selftest.c 相同的输入，结果必须逐位一致。
+        nominal = Nominal(2048, 90000, -1, 1, 800, 2000, 10000, 170000, 47000)
+        cal = nominal.calibration()
+        self.assertEqual((cal.raw_a, cal.raw_b, cal.angle_a, cal.angle_b), (3212, 884, 10000, 170000))
+        self.assertEqual(cal.limits, (10000, 170000))
+        self.assertEqual(nominal.endpoints(), (84, 4011))
+        self.assertEqual(Nominal(2048, 90000, -1, 1).endpoints(), (87, 4008))  # 45kΩ 标称值
+        self.assertTrue(89900 < cal.firmware_angle(2048) < 90100)
+        for bad in (Nominal(2048, 90000, -1, 1, 800, 2000, 10000, 260000, 47000),   # 超出电气行程
+                    Nominal(20, 90000, -1, 1, 800, 2000, 10000, 170000, 47000),     # 参考点低于端点
+                    Nominal(2048, 90000, 0, 1, 800, 2000, 10000, 170000, 47000),    # 方向无效
+                    Nominal(2048, 90000, -1, 1, 800, 2000, 10000, 170000, 500)):    # 阻值过小
+            with self.assertRaises(ValueError): bad.calibration()
+
+    def test_limits_separate_from_calibration(self):
+        cal = Calibration(1000, 0, 3000, 180000, 1)
+        self.assertEqual(cal.limits, (0, 180000))
+        narrowed = cal.with_limits(20000, 160000).validate()
+        self.assertEqual(narrowed.limits, (20000, 160000))
+        self.assertEqual(narrowed.wire(), cal.wire())
+        with self.assertRaises(ValueError): cal.with_limits(-100000, 100000).validate()  # 读数 1 约为 -89.9°
+        with self.assertRaises(ValueError): cal.with_limits(50000, 50000).validate()
+        # 旧的标定文件没有 limit 字段，仍能载入。
+        old = '{"version":1,"joints":{"1":{"raw_a":600,"angle_a":-30000,"raw_b":3400,"angle_b":90000,"direction":1}}}'
+        self.assertEqual(decode_profile(old)[1].limits, (-30000, 90000))
+
+    def test_nominal_and_limit_wire(self):
+        values = Nominal(2048, 90000, -1, 1, 800, 2000, 10000, 170000, 47000).wire()
+        self.assertEqual(command("JNOM", 22, 1, values),
+                         "JNOM 22 M1 2048 90000 -1 1 800 2000 10000 170000 47000\n")
+        self.assertEqual(command("JLIM", 23, 2, (-5000, 120000)), "JLIM 23 M2 -5000 120000\n")
+        with self.assertRaises(ValueError): command("JLIM", 24, 1, (120000, -5000))
+        with self.assertRaises(ValueError): command("JNOM", 25, 7, values)
+        self.assertEqual(parse("JLIM 100 M3 10000 170000"), ("JLIM", 100, 3, 10000, 170000))
+        self.assertEqual(parse("JLIM 100 M3 170000 10000")[0], "BAD")
+        self.assertEqual(parse_shell("jlim M2 -5 120").request, ("JLIM", 2, (-5000, 120000), 500))
+        self.assertEqual(parse_shell("jnom M1 2048 90 down + 80 2 10 170 47").request[1:3], (1, values))
+        self.assertEqual(parse_shell("jnom M1 2048 90 down + 80 2 10 170").request[2][-1], 0)
+        for text in ("jnom M1 2048 90 sideways + 80 2 10 170", "jnom M1 2048 90 down + 80 2 10 260 47",
+                     "jlim M7 0 90", "jnom M1 2048 90 down + 80 2 10 170 -3"):
+            with self.assertRaises(ValueError): parse_shell(text)
+
 
 if __name__ == "__main__": unittest.main()

@@ -21,6 +21,12 @@
 /** @brief 关节命令角度参数的绝对值上限，单位毫度。 */
 #define MAX_JOINT_VALUE (360000L)
 
+/** @brief JNOM 最后一个参数（电位器阻值，欧姆）的上限；0 表示用标称值。 */
+#define MAX_POT_OHMS (1000000L)
+
+/** @brief 关节命令的最大参数个数（JNOM）。 */
+#define MAX_JOINT_ARGS (9U)
+
 /** @brief 文本协议能寻址的关节数（M1～M6）。 */
 #define JOINT_MOTOR_COUNT (6U)
 
@@ -173,7 +179,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         if (c->hw.joint)
         {
-            c->hw.reply("CAPS JOINT 1\r\n");
+            c->hw.reply("CAPS JOINT 1\r\nCAPS JOINT_NOMINAL 1\r\n");
         }
         if (c->hw.manual)
         {
@@ -278,22 +284,30 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         return;
     }
     if (!strcmp(tokens[0], "CAL") || !strcmp(tokens[0], "JMOVE") ||
-        !strcmp(tokens[0], "JGET"))
+        !strcmp(tokens[0], "JGET") || !strcmp(tokens[0], "JNOM") ||
+        !strcmp(tokens[0], "JLIM"))
     {
         bool read = !strcmp(tokens[0], "JGET");
-        unsigned count = read ? 0U : !strcmp(tokens[0], "CAL") ? 7U : 2U;
-        unsigned joint = parse_motor_name(tokens[2], JOINT_MOTOR_COUNT);
+        bool nominal = !strcmp(tokens[0], "JNOM");
+        unsigned count = read                        ? 0U
+                         : !strcmp(tokens[0], "CAL") ? 7U
+                         : nominal                   ? MAX_JOINT_ARGS
+                                                     : 2U;
+        unsigned joint = (n >= 3U)
+                             ? parse_motor_name(tokens[2], JOINT_MOTOR_COUNT)
+                             : JOINT_MOTOR_COUNT;
         if (!c->hw.joint || n != count + 3U || joint >= JOINT_MOTOR_COUNT)
         {
             answer(c, (unsigned)seq, "ERR", "JOINT_PARAM");
             return;
         }
-        int32_t values[7];
+        int32_t values[MAX_JOINT_ARGS];
         long value;
         for (unsigned i = 0; i < count; ++i)
         {
-            if (!number(tokens[i + 3U], -MAX_JOINT_VALUE, MAX_JOINT_VALUE,
-                        &value))
+            bool is_ohms = nominal && (i == MAX_JOINT_ARGS - 1U);
+            if (!number(tokens[i + 3U], is_ohms ? 0L : -MAX_JOINT_VALUE,
+                        is_ohms ? MAX_POT_OHMS : MAX_JOINT_VALUE, &value))
             {
                 answer(c, (unsigned)seq, "ERR", "JOINT_PARAM");
                 return;

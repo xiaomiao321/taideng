@@ -3,10 +3,11 @@ from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from joint_model import Calibration, millidegrees, encode_profile, decode_profile
-from shell_commands import percent
+from joint_model import Calibration, Nominal, millidegrees, encode_profile, decode_profile
+from shell_commands import percent, kilohms
 
 DIRECTIONS = {"正转使角度增大": 1, "正转使角度减小": -1}
+SENSOR_DIRECTIONS = {"角度增大时 ADC 增大": 1, "角度增大时 ADC 减小": -1}
 FAULTS = {"NONE": "无", "SENSOR": "采样失败/过期", "LIMIT": "超出标定范围", "STALL": "运动无进展",
           "DIRECTION": "方向错误/误差增大", "TIMEOUT": "定位超时", "HARDWARE": "驱动失败"}
 
@@ -16,11 +17,12 @@ class JointPanel:
         self.capable = False
         self.selected = 1
         self.forms, self.device, self.states = {}, {}, {}
+        self.limits = {}  # MCU 回报的允许范围（JLIM），键为关节号
         self.motion = None
         self.pending = {}
         self.history = deque(maxlen=150)
         self.last_query = 0.
-        self.notice = tk.StringVar(value="先记录两个已知角度的位置，再手动下发标定；M7/M8 为履带，不做角度控制。")
+        self.notice = tk.StringVar(value="两点标定或理论标定任选其一，标定会保存在 MCU 中；M7/M8 为履带，不做角度控制。")
         head = ttk.Frame(parent)
         head.pack(fill="x", pady=(0, 8))
         ttk.Label(head, text="关节 / 电位器").pack(side="left")
@@ -63,6 +65,40 @@ class JointPanel:
         self.cal_status = tk.StringVar(value="尚未标定")
         ttk.Label(actions, textvariable=self.cal_status).pack(side="left", padx=12)
 
+        theory = ttk.LabelFrame(parent, text="理论标定 · 电位器 1:1 装在关节轴上，270° 行程；正转方向、占空比、容差沿用上方设置",
+                                padding=10)
+        theory.pack(fill="x", pady=(8, 0))
+        self.nominal = {key: tk.StringVar() for key in
+                        ("angle_ref", "raw_ref", "sensor", "ohms", "limit_min", "limit_max")}
+        self.nominal["ohms"].set("45")
+        ttk.Label(theory, text="参考位置").grid(row=0, column=0, padx=5, pady=4)
+        ttk.Label(theory, text="已知角度 °").grid(row=0, column=1)
+        ttk.Entry(theory, textvariable=self.nominal["angle_ref"], width=11).grid(row=0, column=2, padx=8)
+        ttk.Label(theory, text="ADC").grid(row=0, column=3)
+        ttk.Entry(theory, textvariable=self.nominal["raw_ref"], width=9, state="readonly").grid(row=0, column=4, padx=8)
+        ttk.Button(theory, text="记录当前位置为参考点", command=self.capture_reference).grid(row=0, column=5, padx=8)
+        ttk.Label(theory, text="电位器方向").grid(row=1, column=0, pady=5)
+        ttk.Combobox(theory, textvariable=self.nominal["sensor"], values=list(SENSOR_DIRECTIONS), state="readonly",
+                     width=20).grid(row=1, column=1, columnspan=2, sticky="w")
+        ttk.Label(theory, text="阻值 kΩ").grid(row=1, column=3)
+        ttk.Entry(theory, textvariable=self.nominal["ohms"], width=9).grid(row=1, column=4, padx=8)
+        ttk.Label(theory, text="留空按 45kΩ").grid(row=1, column=5, sticky="w", padx=8)
+        ttk.Label(theory, text="允许范围 °").grid(row=2, column=0, pady=5)
+        limits = ttk.Frame(theory)
+        limits.grid(row=2, column=1, columnspan=4, sticky="w")
+        ttk.Entry(limits, textvariable=self.nominal["limit_min"], width=9).pack(side="left")
+        ttk.Label(limits, text="～").pack(side="left", padx=4)
+        ttk.Entry(limits, textvariable=self.nominal["limit_max"], width=9).pack(side="left")
+        ttk.Label(limits, text="按机构实际能转的范围填写，定位目标只能在此范围内").pack(side="left", padx=8)
+        theory_actions = ttk.Frame(theory)
+        theory_actions.grid(row=3, column=0, columnspan=6, sticky="w", pady=(8, 0))
+        self.nominal_btn = ttk.Button(theory_actions, text="按理论值下发", command=self.apply_nominal)
+        self.nominal_btn.pack(side="left")
+        self.limit_btn = ttk.Button(theory_actions, text="仅修改允许范围", command=self.apply_limits)
+        self.limit_btn.pack(side="left", padx=8)
+        self.preview = tk.StringVar(value="")
+        ttk.Label(theory_actions, textvariable=self.preview).pack(side="left", padx=12)
+
         move = ttk.LabelFrame(parent, text="角度定位 · MCU 反馈闭环，到位后停止，不自动保持或恢复运动", padding=10)
         move.pack(fill="x", pady=8)
         ttk.Label(move, text="目标角度 °").pack(side="left")
@@ -101,11 +137,31 @@ class JointPanel:
         except (KeyError, ValueError) as exc:
             raise ValueError("请完整记录 A/B 两点并选择正转方向。" + str(exc)) from exc
 
+    def read_nominal(self):
+        try:
+            f = {k: v.get() for k, v in self.fields.items()}
+            n = {k: v.get().strip() for k, v in self.nominal.items()}
+            return Nominal(int(n["raw_ref"]), millidegrees(n["angle_ref"]), SENSOR_DIRECTIONS[n["sensor"]],
+                           DIRECTIONS[f["direction"]], percent(f["duty"]), millidegrees(f["tolerance"]),
+                           millidegrees(n["limit_min"]), millidegrees(n["limit_max"]),
+                           kilohms(n["ohms"]) if n["ohms"] else 0).validate()
+        except (KeyError, ValueError) as exc:
+            raise ValueError("请记录参考点，选择电位器方向和正转方向，并填写允许范围。" + str(exc)) from exc
+
+    def read_limits(self):
+        try:
+            return millidegrees(self.nominal["limit_min"].get()), millidegrees(self.nominal["limit_max"].get())
+        except ValueError as exc:
+            raise ValueError("请填写允许范围。" + str(exc)) from exc
+
     def select(self, _=None):
         self.app.stop()
         self.forms[self.selected] = {k: v.get() for k, v in self.fields.items()}
         self.selected = int(self.choice.get()[1])
         self.set_fields(None)
+        # 参考点读数属于上一个关节，切换后必须重新记录；范围改用新关节的 MCU 值。
+        for key in ("raw_ref", "limit_min", "limit_max"): self.nominal[key].set("")
+        self.fill_limits()
         for key, value in self.forms.get(self.selected, {}).items(): self.fields[key].set(value)
         self.history.clear()
         self.query()
@@ -113,13 +169,23 @@ class JointPanel:
     def capture(self, point):
         try:
             millidegrees(self.fields["angle_" + point].get())
-            if not self.app.ready or self.app.pot.stale(time.monotonic()):
-                raise ValueError("请连接并等待有效 POT 数据")
-            if not self.motion or time.monotonic() - self.motion[0] > .5 or self.motion[1][2] or self.motion[1][4]:
-                raise ValueError("请先停止电机，待机构稳定后再记录")
-            self.fields["raw_" + point].set(str(self.app.pot.values[self.selected - 1]))
+            self.fields["raw_" + point].set(str(self.current_raw()))
             self.notice.set(f"已记录 M{self.selected} 的位置 {point.upper()}；角度采用你填写的实测值。")
         except ValueError as exc: messagebox.showerror("记录标定点", str(exc))
+
+    def capture_reference(self):
+        try:
+            millidegrees(self.nominal["angle_ref"].get())
+            self.nominal["raw_ref"].set(str(self.current_raw()))
+            self.notice.set(f"已记录 M{self.selected} 的参考点；角度采用你填写的实测值。")
+        except ValueError as exc: messagebox.showerror("记录参考点", str(exc))
+
+    def current_raw(self):
+        if not self.app.ready or self.app.pot.stale(time.monotonic()):
+            raise ValueError("请连接并等待有效 POT 数据")
+        if not self.motion or time.monotonic() - self.motion[0] > .5 or self.motion[1][2] or self.motion[1][4]:
+            raise ValueError("请先停止电机，待机构稳定后再记录")
+        return self.app.pot.values[self.selected - 1]
 
     def query(self):
         if self.capable and self.app.ready and self.app.worker:
@@ -142,18 +208,58 @@ class JointPanel:
             self.notice.set("等待 MCU 接受并回读标定；本操作不转动电机。")
         except ValueError as exc: messagebox.showerror("下发标定", str(exc))
 
+    def apply_nominal(self):
+        try:
+            nominal = self.read_nominal()
+            nominal.calibration()
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持关节定位的新固件")
+            if not self.app.confirm_exclusive(): return
+            self.app.worker.submit("JNOM", self.selected, nominal.wire())
+            self.notice.set("等待 MCU 接受并回读理论标定；本操作不转动电机。")
+        except ValueError as exc: messagebox.showerror("理论标定", str(exc))
+
+    def apply_limits(self):
+        try:
+            limit_min, limit_max = self.read_limits()
+            cal = self.device.get(self.selected)
+            if not cal:
+                raise ValueError("MCU 尚未标定当前关节，请先下发标定")
+            cal.with_limits(limit_min, limit_max).validate()
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持关节定位的新固件")
+            if not self.app.confirm_exclusive(): return
+            self.app.worker.submit("JLIM", self.selected, (limit_min, limit_max))
+            self.notice.set("等待 MCU 接受新的允许范围；本操作不转动电机。")
+        except ValueError as exc: messagebox.showerror("修改允许范围", str(exc))
+
+    def fill_limits(self):
+        """表单允许范围为空时，填入 MCU 当前关节的范围。"""
+        if self.selected in self.limits and not self.nominal["limit_min"].get() and not self.nominal["limit_max"].get():
+            low, high = self.limits[self.selected]
+            self.nominal["limit_min"].set(f"{low/1000:g}")
+            self.nominal["limit_max"].set(f"{high/1000:g}")
+
+    def device_calibration(self, joint):
+        """MCU 当前标定（JCAL）合并允许范围（JLIM）；未收到 JLIM 时按 A～B。"""
+        cal = self.device.get(joint)
+        if cal and joint in self.limits:
+            return cal.with_limits(*self.limits[joint])
+        return cal
+
     def move(self):
         try:
-            cal = self.read_form()
             target = millidegrees(self.target.get())
             timeout = int(self.timeout.get())
             record = self.states.get(self.selected)
             if not self.capable or not self.app.ready or not self.app.worker or not record or time.monotonic() - record[0] > .5:
                 raise ValueError("缺少新鲜 MCU 状态")
-            if self.device.get(self.selected) != cal or not record[1][3] or not record[1][4]:
-                raise ValueError("请先下发当前标定，并确认传感器读数有效")
-            if not cal.angle_a <= target <= cal.angle_b:
-                raise ValueError("目标须位于标定点 A/B 的角度范围内")
+            cal = self.device_calibration(self.selected)
+            if not cal or not record[1][3] or not record[1][4]:
+                raise ValueError("MCU 尚未标定当前关节，或传感器读数无效")
+            limit_min, limit_max = cal.limits
+            if not limit_min <= target <= limit_max:
+                raise ValueError(f"目标须位于允许范围 {limit_min/1000:g}～{limit_max/1000:g}° 内")
             if not 500 <= timeout <= 60000:
                 raise ValueError("超时范围为 500～60000ms")
             if not self.app.confirm_exclusive(): return
@@ -189,7 +295,7 @@ class JointPanel:
         except (ValueError, OSError) as exc: messagebox.showerror("载入标定", str(exc))
 
     def sent(self, kind, seq, args):
-        if kind in ("CAL", "JMOVE", "JGET"): self.pending[seq] = (kind, args[0])
+        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"): self.pending[seq] = (kind, args[0])
 
     def receive(self, msg):
         now = time.monotonic()
@@ -198,9 +304,14 @@ class JointPanel:
             self.query()
         elif msg[0] == "STATE": self.motion = (now, msg)
         elif msg[0] == "JCAL": self.device[msg[2]] = msg[3]
+        elif msg[0] == "JLIM":
+            self.limits[msg[2]] = (msg[3], msg[4])
+            if msg[2] == self.selected: self.fill_limits()
         elif msg[0] == "JSTATE":
             self.states[msg[2]] = (now, msg)
-            if not msg[3]: self.device.pop(msg[2], None)
+            if not msg[3]:
+                self.device.pop(msg[2], None)
+                self.limits.pop(msg[2], None)
             if msg[2] == self.selected and msg[3] and msg[4]:
                 self.history.append((now, msg[6]/1000, msg[7]/1000))
         elif msg[0] in ("ACK", "ERR") and msg[1] in self.pending:
@@ -211,7 +322,8 @@ class JointPanel:
                 "CANCELLED": "已取消"}.get(msg[3], "故障停止：" + FAULTS.get(msg[3], msg[3])))
 
     def disconnect(self):
-        self.capable = False; self.device.clear(); self.states.clear(); self.pending.clear(); self.motion = None
+        self.capable = False; self.device.clear(); self.limits.clear(); self.states.clear(); self.pending.clear()
+        self.motion = None
 
     def refresh(self):
         now = time.monotonic()
@@ -220,12 +332,28 @@ class JointPanel:
         raw = "—" if self.app.pot.stale(now) else str(self.app.pot.values[self.selected - 1])
         angle = f"{record[1][6]/1000:.3f}°" if fresh and record[1][3] and record[1][4] else "—"
         self.live.set(f"M{self.selected} / POT{self.selected}    ADC：{raw}    MCU 实测角度：{angle}")
-        try: matching = self.device.get(self.selected) == self.read_form()
+        device = self.device_calibration(self.selected)
+        try: matching = device is not None and self.device[self.selected] == Calibration(*self.read_form().wire())
         except ValueError: matching = False
-        self.cal_status.set("MCU 标定与表单一致" if matching and fresh else "未下发 / 表单有变更 / 状态过期")
+        if not fresh:
+            self.cal_status.set("状态过期 / 未连接")
+        elif device is None:
+            self.cal_status.set("MCU 未标定当前关节")
+        else:
+            low, high = device.limits
+            self.cal_status.set(f"MCU 已标定 · 允许 {low/1000:g}～{high/1000:g}°" +
+                                (" · 与两点表单一致" if matching else ""))
+        try:
+            n = self.read_nominal(); cal = n.calibration(); low, high = n.endpoints()
+            self.preview.set(f"预计：{cal.angle_a/1000:g}°→ADC {cal.raw_a}，{cal.angle_b/1000:g}°→ADC {cal.raw_b}"
+                             f"（电位器两端 ADC {low}～{high}）")
+        except ValueError as exc:
+            self.preview.set("" if not self.nominal["raw_ref"].get() else str(exc).split("。")[-1])
         unlocked = self.motion and now-self.motion[0] <= .5 and not self.motion[1][5]
-        self.apply_btn["state"] = "normal" if self.app.ready and self.capable and unlocked else "disabled"
-        self.move_btn["state"] = "normal" if fresh and matching and record[1][3] and record[1][4] and unlocked else "disabled"
+        ready = self.app.ready and self.capable and unlocked
+        for button in (self.apply_btn, self.nominal_btn, self.limit_btn):
+            button["state"] = "normal" if ready else "disabled"
+        self.move_btn["state"] = "normal" if fresh and device and record[1][3] and record[1][4] and unlocked else "disabled"
         if fresh:
             m = record[1]
             self.state_text.set(f"目标 {m[7]/1000:g}° · 输出 {m[8]/10:g}% · {m[9]} · 故障：{FAULTS[m[10]]}")

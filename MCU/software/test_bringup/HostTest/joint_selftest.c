@@ -17,7 +17,7 @@ static void emit(const char *text)
 }
 static joint_cal_t normal(void)
 {
-    joint_cal_t c = {1000, 3000, 0, 180000, 1, 800, 2000};
+    joint_cal_t c = {1000, 3000, 0, 180000, 1, 800, 2000, 0, 180000};
     return c;
 }
 static joint_control_t fresh(joint_cal_t cal)
@@ -168,7 +168,8 @@ int main(void)
 
     /* 标定导出/导入：两个关节（含负角度、反向）往返后参数逐项相同。 */
     joint_control_t source = fresh(cal);
-    joint_cal_t other = {3900, 200, -45000, 30000, -1, 650, 1500};
+    joint_cal_t other = {3900, 200,  -45000, 30000, -1,
+                         650,  1500, -40000, 25000};
     assert(!joint_calibrate(&source, 4, other));
     uint8_t blob[JOINT_CAL_BLOB_SIZE];
     joint_cal_export(&source, blob);
@@ -197,8 +198,63 @@ int main(void)
     assert(joint_cal_import(&untouched, blob) == 1U);
     assert(untouched.states[0].calibrated && !untouched.states[4].calibrated);
 
+    /* 理论标定：47k 电位器，角度增大读数减小，参考点 90° 读 2048。
+     * 每度 4095*47000/49000/270 ≈ 14.547 个读数，10° 与 170° 距参考点
+     * 各 80°，即 ±1163.75 个读数。 */
+    joint_nominal_t nominal = {
+        .raw_ref = 2048,
+        .angle_ref = 90000,
+        .sensor_direction = -1,
+        .direction = 1,
+        .duty = 800,
+        .tolerance = 2000,
+        .limit_min = 10000,
+        .limit_max = 170000,
+        .pot_ohms = 47000,
+    };
+    joint_cal_t theory;
+    assert(!joint_cal_from_nominal(&nominal, &theory));
+    assert(theory.raw_a == 3212 && theory.raw_b == 884);
+    assert(theory.angle_a == 10000 && theory.angle_b == 170000);
+    assert(theory.limit_min == 10000 && theory.limit_max == 170000);
+    int32_t at_ref = joint_angle(&theory, 2048);
+    assert(at_ref > 89900 && at_ref < 90100);
+    /* 阻值填 0 采用 45k 标称值，仍然成立。 */
+    joint_nominal_t defaulted = nominal;
+    defaulted.pot_ohms = 0;
+    assert(!joint_cal_from_nominal(&defaulted, &theory));
+    /* 允许范围超出电位器电气行程、方向或阻值无效：拒绝。 */
+    joint_nominal_t wrong = nominal;
+    wrong.limit_max = 260000;
+    assert(joint_cal_from_nominal(&wrong, &theory));
+    wrong = nominal;
+    wrong.sensor_direction = 0;
+    assert(joint_cal_from_nominal(&wrong, &theory));
+    wrong = nominal;
+    wrong.pot_ohms = 500;
+    assert(joint_cal_from_nominal(&wrong, &theory));
+    wrong = nominal;
+    wrong.raw_ref = 20; /* 低于下端固定电阻对应的读数，不可能出现 */
+    assert(joint_cal_from_nominal(&wrong, &theory));
+
+    /* 允许范围与标定点分开：收窄范围后，范围外的目标被拒绝。 */
+    j = fresh(cal);
+    feed(&j, 2000, 0);
+    assert(!joint_set_limits(&j, 0, 20000, 160000));
+    assert(j.states[0].cal.angle_a == 0 && j.states[0].cal.angle_b == 180000);
+    assert(joint_move(&j, 1, 0, 170000, 10000, 0));
+    assert(!joint_move(&j, 1, 0, 150000, 10000, 0));
+    assert(!strcmp(joint_set_limits(&j, 0, 0, 100000), "BUSY"));
+    assert(joint_cancel(&j));
+    assert(!strcmp(joint_set_limits(&j, 1, 0, 100000), "NOT_CALIBRATED"));
+    /* 读数 1 对应约 -89.9°：超出可测区间的范围被拒绝。 */
+    assert(!strcmp(joint_set_limits(&j, 0, -100000, 100000), "LIMIT_PARAM"));
+    assert(!strcmp(joint_set_limits(&j, 0, 50000, 50000), "LIMIT_PARAM"));
+    assert(j.states[0].cal.limit_min == 20000);
+
     puts("joint control: calibration, inverse sensor, simulated plant, "
          "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
-         "rollover and calibration export/import passed");
+         "rollover, calibration export/import, nominal calibration and limits "
+         "passed");
     return 0;
 }

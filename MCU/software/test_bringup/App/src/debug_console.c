@@ -418,6 +418,10 @@ static void joint_report(uint32_t now, bool config)
             (long)s->cal.angle_a, (unsigned)s->cal.raw_b, (long)s->cal.angle_b,
             s->cal.direction, s->cal.duty, s->cal.tolerance);
         (void)send_line(out);
+        (void)snprintf(out, sizeof(out), "JLIM %lu M%u %ld %ld\r\n",
+                       (unsigned long)now, s_joint_focus + 1U,
+                       (long)s->cal.limit_min, (long)s->cal.limit_max);
+        (void)send_line(out);
     }
     bool is_fresh =
         s_joints.valid &&
@@ -473,12 +477,34 @@ static void report_calibrations(void)
 }
 
 /** @brief CAL 参数顺序：raw_a angle_a raw_b angle_b direction duty tolerance。 */
+/** @brief 读数不能取 0 或满量程：那两个值同时也是断线、短路的读数。 */
+static bool is_raw_usable(int32_t raw)
+{
+    return raw >= 1 && raw <= (int32_t)BSP_ADC_RAW_MAX - 1;
+}
+
+/**
+ * @brief 标定或允许范围修改成功后：保存到 Flash 并回报新参数。
+ *
+ * @note 新参数已在 RAM 生效，ACK 照常回复；保存失败另行报告，下次上电会丢失。
+ */
+static void commit_calibration(uint32_t now)
+{
+    if (!save_calibration())
+    {
+        (void)send_line("EVENT CAL_SAVE_ERROR\r\n");
+    }
+    joint_report(now, true);
+}
+
+/**
+ * @brief CAL：两点实测标定。参数顺序：raw_a angle_a raw_b angle_b direction
+ *        duty tolerance。允许范围取两个标定点之间，可再用 JLIM 修改。
+ */
 static const char *calibrate_joint(unsigned index, const int32_t *v,
                                    uint32_t now)
 {
-    /* 读数不能取 0 或满量程：那两个值同时也是断线、短路的读数。 */
-    if (v[0] < 1 || v[0] > (int32_t)BSP_ADC_RAW_MAX - 1 || v[2] < 1 ||
-        v[2] > (int32_t)BSP_ADC_RAW_MAX - 1 || v[5] < 1 || v[6] < 0)
+    if (!is_raw_usable(v[0]) || !is_raw_usable(v[2]) || v[5] < 1 || v[6] < 0)
     {
         return "CAL_PARAM";
     }
@@ -490,16 +516,48 @@ static const char *calibrate_joint(unsigned index, const int32_t *v,
         .direction = (int)v[4],
         .duty = (unsigned)v[5],
         .tolerance = (unsigned)v[6],
+        .limit_min = v[1],
+        .limit_max = v[3],
     };
     const char *err = joint_calibrate(&s_joints, index, cal);
     if (!err)
     {
-        /* 标定已在 RAM 生效，ACK 照常回复；保存失败另行报告，下次上电会丢失。 */
-        if (!save_calibration())
-        {
-            (void)send_line("EVENT CAL_SAVE_ERROR\r\n");
-        }
-        joint_report(now, true);
+        commit_calibration(now);
+    }
+    return err;
+}
+
+/**
+ * @brief JNOM：理论标定。参数顺序：raw_ref angle_ref sensor_direction
+ *        direction duty tolerance limit_min limit_max pot_ohms（0 为标称值）。
+ */
+static const char *calibrate_joint_nominal(unsigned index, const int32_t *v,
+                                           uint32_t now)
+{
+    if (!is_raw_usable(v[0]) || v[4] < 1 || v[5] < 0 || v[8] < 0)
+    {
+        return "CAL_PARAM";
+    }
+    joint_nominal_t nominal = {
+        .raw_ref = (uint16_t)v[0],
+        .angle_ref = v[1],
+        .sensor_direction = (int)v[2],
+        .direction = (int)v[3],
+        .duty = (unsigned)v[4],
+        .tolerance = (unsigned)v[5],
+        .limit_min = v[6],
+        .limit_max = v[7],
+        .pot_ohms = (uint32_t)v[8],
+    };
+    joint_cal_t cal;
+    const char *err = joint_cal_from_nominal(&nominal, &cal);
+    if (!err)
+    {
+        err = joint_calibrate(&s_joints, index, cal);
+    }
+    if (!err)
+    {
+        commit_calibration(now);
     }
     return err;
 }
@@ -516,6 +574,19 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
     if (!strcmp(op, "CAL") && count == 7U)
     {
         return calibrate_joint(index, v, now);
+    }
+    if (!strcmp(op, "JNOM") && count == 9U)
+    {
+        return calibrate_joint_nominal(index, v, now);
+    }
+    if (!strcmp(op, "JLIM") && count == 2U)
+    {
+        const char *err = joint_set_limits(&s_joints, index, v[0], v[1]);
+        if (!err)
+        {
+            commit_calibration(now);
+        }
+        return err;
     }
     if (!strcmp(op, "JMOVE") && count == 2U)
     {

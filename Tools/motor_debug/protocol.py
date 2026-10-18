@@ -1,7 +1,7 @@
 """The desktop side of the line protocol; no GUI or serial dependencies."""
 from dataclasses import dataclass
 from board_catalog import BY_NAME, test_parameters
-from joint_model import Calibration
+from joint_model import Calibration, Nominal, validate_limits
 from motor_limits import validate_duty
 
 
@@ -31,7 +31,7 @@ def command(kind, seq, motor=1, duty=800, duration=500):
         return f"LTX {seq} {duty.hex().upper()}\n"
     if kind in ("PING", "STOP", "INFO"):
         return f"{kind} {seq}" + (" ALL\n" if kind == "STOP" else "\n")
-    if kind in ("CAL", "JMOVE", "JGET"):
+    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"):
         if type(motor) is not int or not 1 <= motor <= 6:
             raise ValueError("只有 M1～M6 支持角度控制")
         if kind == "CAL":
@@ -39,6 +39,17 @@ def command(kind, seq, motor=1, duty=800, duration=500):
                 raise ValueError("标定参数不完整")
             values = Calibration(*duty).validate().wire()
             return f"CAL {seq} M{motor} " + " ".join(map(str, values)) + "\n"
+        if kind == "JNOM":
+            if not isinstance(duty, (tuple, list)) or len(duty) != 9:
+                raise ValueError("理论标定参数不完整")
+            nominal = Nominal(*duty)
+            nominal.calibration()  # 与 MCU 相同的行程检查，越界在发送前拒绝
+            return f"JNOM {seq} M{motor} " + " ".join(map(str, nominal.wire())) + "\n"
+        if kind == "JLIM":
+            if not isinstance(duty, (tuple, list)) or len(duty) != 2:
+                raise ValueError("允许范围参数不完整")
+            validate_limits(*duty, 0)
+            return f"JLIM {seq} M{motor} {duty[0]} {duty[1]}\n"
         if kind == "JGET":
             return f"JGET {seq} M{motor}\n"
         if type(duty) is not int or not -360000 <= duty <= 360000 or type(duration) is not int or not 500 <= duration <= 60000:
@@ -82,10 +93,14 @@ def parse(line):
             return "MSTATE", int(p[1]), values, remaining, mask, p[19] == "1"
         if p == ["CAPS", "JOINT", "1"]:
             return "JCAPS", 1
-        if p[0] in ("JSTATE", "JCAL", "JRESULT"):
+        if p[0] in ("JSTATE", "JCAL", "JRESULT", "JLIM"):
             if len(p) < 3 or p[2] not in tuple(f"M{i}" for i in range(1, 7)):
                 raise ValueError()
             joint = int(p[2][1])
+            if p[0] == "JLIM" and len(p) == 5:
+                limit_min, limit_max = int(p[3]), int(p[4])
+                validate_limits(limit_min, limit_max, 0)
+                return "JLIM", int(p[1]), joint, limit_min, limit_max
             if p[0] == "JCAL" and len(p) == 10:
                 cal = Calibration(*map(int, p[3:])).validate()
                 return "JCAL", int(p[1]), joint, cal

@@ -26,6 +26,15 @@ static const char *hw_joint(const char *op, unsigned seq, unsigned id,
     {
         assert(count == 2 && v[0] == 45000 && v[1] == 10000);
     }
+    else if (!strcmp(op, "JNOM"))
+    {
+        assert(count == 9 && v[0] == 2048 && v[1] == 90000 && v[2] == -1 &&
+               v[6] == 10000 && v[7] == 170000 && v[8] == 47000);
+    }
+    else if (!strcmp(op, "JLIM"))
+    {
+        assert(count == 2 && v[0] == -5000 && v[1] == 120000);
+    }
     else
     {
         assert(!strcmp(op, "JGET") && count == 0);
@@ -292,6 +301,28 @@ int main(void)
     debug_control_line(&c, "CAL 37 M1 600 -30000 3400 90000 1 800 2000 extra",
                        7);
     assert(joint_calls == 3 && strstr(reply, "JOINT_PARAM"));
+    /* 缺少关节名的命令不能读越界字段。 */
+    debug_control_line(&c, "JGET 38", 8);
+    assert(joint_calls == 3 && strstr(reply, "JOINT_PARAM"));
+    assert(strstr(reply, "ERR 38"));
+    /* 理论标定与修改允许范围：阻值参数可超过角度参数的上限。 */
+    debug_control_line(&c, "PING 39", 9);
+    debug_control_line(
+        &c, "JNOM 40 M1 2048 90000 -1 1 800 2000 10000 170000 47000", 10);
+    assert(joint_calls == 4 && strstr(reply, "ACK 40 JNOM"));
+    debug_control_line(
+        &c, "JNOM 41 M1 2048 90000 -1 1 800 2000 10000 170000 1000001", 11);
+    assert(joint_calls == 4 && strstr(reply, "JOINT_PARAM"));
+    debug_control_line(&c, "JNOM 42 M1 2048 90000 -1 1 800 2000 10000", 12);
+    assert(joint_calls == 4 && strstr(reply, "JOINT_PARAM"));
+    debug_control_line(&c, "JLIM 43 M1 -5000 120000", 13);
+    assert(joint_calls == 5 && strstr(reply, "ACK 43 JLIM"));
+    c.locked = true;
+    debug_control_line(&c, "JLIM 44 M1 -5000 120000", 14);
+    assert(joint_calls == 5 && strstr(reply, "LOCKED"));
+    c.locked = false;
+    debug_control_line(&c, "INFO 45", 15);
+    assert(strstr(reply, "CAPS JOINT_NOMINAL 1"));
     printf("debug control: motor, board and joint protocol tests passed (%u "
            "stop calls)\n",
            stops);

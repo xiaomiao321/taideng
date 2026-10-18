@@ -51,7 +51,15 @@ static int32_t magnitude(int32_t n)
 {
     return n < 0 ? -n : n;
 }
-bool joint_cal_valid(const joint_cal_t *c)
+int32_t joint_angle(const joint_cal_t *c, uint16_t raw)
+{
+    return c->angle_a +
+           (int32_t)(((int64_t)raw - c->raw_a) * (c->angle_b - c->angle_a) /
+                     ((int32_t)c->raw_b - c->raw_a));
+}
+
+/** @brief 换算关系是否合法（两点、方向、占空比、容差），不检查允许范围。 */
+static bool is_mapping_valid(const joint_cal_t *c)
 {
     return c->raw_a > 0 && c->raw_a < ADC_RAW_FULL && c->raw_b > 0 &&
            c->raw_b < ADC_RAW_FULL &&
@@ -61,14 +69,102 @@ bool joint_cal_valid(const joint_cal_t *c)
            c->angle_b - c->angle_a >= CAL_MIN_ANGLE_SPAN &&
            (c->direction == 1 || c->direction == -1) &&
            c->duty >= MOTOR_DUTY_MIN && c->duty <= MOTOR_DUTY_SMALL_MAX &&
-           c->tolerance >= TOLERANCE_MIN && c->tolerance <= TOLERANCE_MAX &&
-           (uint32_t)(c->angle_b - c->angle_a) > 2U * c->tolerance;
+           c->tolerance >= TOLERANCE_MIN && c->tolerance <= TOLERANCE_MAX;
 }
-int32_t joint_angle(const joint_cal_t *c, uint16_t raw)
+
+/**
+ * @brief 允许范围是否合法：不越界、宽于两倍容差、两端都在电位器可测区间内
+ *        （对应读数 1～ADC_RAW_FULL-1，读数 0 或满量程会被判为传感器故障）。
+ */
+static bool are_limits_valid(const joint_cal_t *c, int32_t limit_min,
+                             int32_t limit_max)
 {
-    return c->angle_a +
-           (int32_t)(((int64_t)raw - c->raw_a) * (c->angle_b - c->angle_a) /
-                     ((int32_t)c->raw_b - c->raw_a));
+    if (limit_min < -ANGLE_LIMIT || limit_max > ANGLE_LIMIT ||
+        limit_min >= limit_max ||
+        (uint32_t)(limit_max - limit_min) <= 2U * c->tolerance)
+    {
+        return false;
+    }
+    int32_t edge_low = joint_angle(c, 1U);
+    int32_t edge_high = joint_angle(c, ADC_RAW_FULL - 1U);
+    if (edge_low > edge_high)
+    {
+        int32_t swap = edge_low;
+        edge_low = edge_high;
+        edge_high = swap;
+    }
+    return limit_min >= edge_low && limit_max <= edge_high;
+}
+
+bool joint_cal_valid(const joint_cal_t *c)
+{
+    return is_mapping_valid(c) &&
+           are_limits_valid(c, c->limit_min, c->limit_max);
+}
+
+/** @brief 带符号整数除法，四舍五入到最近整数。 */
+static int64_t divide_round(int64_t numerator, int64_t denominator)
+{
+    int64_t half = denominator / 2;
+    return (numerator >= 0) ? (numerator + half) / denominator
+                            : (numerator - half) / denominator;
+}
+
+const char *joint_cal_from_nominal(const joint_nominal_t *n, joint_cal_t *out)
+{
+    uint32_t ohms = (n->pot_ohms == 0U) ? JOINT_POT_DEFAULT_OHMS : n->pot_ohms;
+    if (ohms < JOINT_POT_MIN_OHMS || ohms > JOINT_POT_MAX_OHMS ||
+        (n->sensor_direction != 1 && n->sensor_direction != -1) ||
+        n->limit_min < -ANGLE_LIMIT || n->limit_max > ANGLE_LIMIT ||
+        n->angle_ref < -ANGLE_LIMIT || n->angle_ref > ANGLE_LIMIT)
+    {
+        return "CAL_PARAM";
+    }
+
+    /* 分压：读数 = 满量程 × (端电阻 + 抽头以下的电位器电阻) / 总电阻。
+     * 电位器走完 JOINT_POT_TRAVEL_MDEG 时读数变化 满量程 × R / 总电阻。 */
+    int64_t total = (int64_t)ohms + 2 * (int64_t)JOINT_POT_END_OHMS;
+    int64_t end_low =
+        divide_round((int64_t)ADC_RAW_FULL * JOINT_POT_END_OHMS, total);
+    int64_t end_high = divide_round(
+        (int64_t)ADC_RAW_FULL * ((int64_t)ohms + JOINT_POT_END_OHMS), total);
+    int64_t denominator = total * JOINT_POT_TRAVEL_MDEG;
+
+    int64_t raw_at[2];
+    const int32_t angles[2] = {n->limit_min, n->limit_max};
+    for (unsigned i = 0; i < 2U; ++i)
+    {
+        int64_t offset = divide_round((int64_t)n->sensor_direction *
+                                          ((int64_t)angles[i] - n->angle_ref) *
+                                          ADC_RAW_FULL * (int64_t)ohms,
+                                      denominator);
+        raw_at[i] = (int64_t)n->raw_ref + offset;
+    }
+    /* 参考点和允许范围两端都必须落在电位器电气行程内。 */
+    if ((int64_t)n->raw_ref < end_low || (int64_t)n->raw_ref > end_high ||
+        raw_at[0] < end_low || raw_at[0] > end_high || raw_at[1] < end_low ||
+        raw_at[1] > end_high)
+    {
+        return "CAL_PARAM";
+    }
+
+    joint_cal_t cal = {
+        .raw_a = (uint16_t)raw_at[0],
+        .raw_b = (uint16_t)raw_at[1],
+        .angle_a = n->limit_min,
+        .angle_b = n->limit_max,
+        .direction = n->direction,
+        .duty = n->duty,
+        .tolerance = n->tolerance,
+        .limit_min = n->limit_min,
+        .limit_max = n->limit_max,
+    };
+    if (!joint_cal_valid(&cal))
+    {
+        return "CAL_PARAM";
+    }
+    *out = cal;
+    return NULL;
 }
 void joint_init(joint_control_t *j, joint_hw_t hw)
 {
@@ -144,6 +240,31 @@ const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c)
     s->target = s->angle;
     return NULL;
 }
+const char *joint_set_limits(joint_control_t *j, unsigned index,
+                             int32_t limit_min, int32_t limit_max)
+{
+    if (index >= JOINT_COUNT)
+    {
+        return "JOINT_ID";
+    }
+    joint_state_t *s = &j->states[index];
+    if (!s->calibrated)
+    {
+        return "NOT_CALIBRATED";
+    }
+    if (j->active >= 0)
+    {
+        return "BUSY";
+    }
+    if (!are_limits_valid(&s->cal, limit_min, limit_max))
+    {
+        return "LIMIT_PARAM";
+    }
+    s->cal.limit_min = limit_min;
+    s->cal.limit_max = limit_max;
+    return NULL;
+}
+
 const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
                        int32_t target, uint32_t timeout, uint32_t now)
 {
@@ -160,14 +281,14 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
     {
         return "SENSOR_STALE";
     }
-    if (target < s->cal.angle_a || target > s->cal.angle_b ||
+    if (target < s->cal.limit_min || target > s->cal.limit_max ||
         timeout < MOVE_TIMEOUT_MIN_MS || timeout > MOVE_TIMEOUT_MAX_MS)
     {
         return "TARGET_RANGE";
     }
     if (s->raw == 0 || s->raw >= ADC_RAW_FULL ||
-        s->angle < s->cal.angle_a - (int32_t)s->cal.tolerance ||
-        s->angle > s->cal.angle_b + (int32_t)s->cal.tolerance)
+        s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
+        s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance)
     {
         return "POSITION_RANGE";
     }
@@ -227,8 +348,8 @@ bool joint_tick(joint_control_t *j, uint32_t now)
     {
         return finish(j, "TIMEOUT", JOINT_FAULT);
     }
-    if (s->angle < s->cal.angle_a - (int32_t)s->cal.tolerance ||
-        s->angle > s->cal.angle_b + (int32_t)s->cal.tolerance)
+    if (s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
+        s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance)
     {
         return finish(j, "LIMIT", JOINT_FAULT);
     }
@@ -369,6 +490,8 @@ void joint_cal_export(const joint_control_t *j,
         put_u32(&p[8], (uint32_t)s->cal.angle_a);
         put_u32(&p[12], (uint32_t)s->cal.angle_b);
         put_u32(&p[16], (uint32_t)s->cal.tolerance);
+        put_u32(&p[20], (uint32_t)s->cal.limit_min);
+        put_u32(&p[24], (uint32_t)s->cal.limit_max);
     }
 }
 
@@ -395,6 +518,8 @@ unsigned joint_cal_import(joint_control_t *j,
             .direction = (int8_t)p[1],
             .duty = get_u16(&p[2]),
             .tolerance = get_u32(&p[16]),
+            .limit_min = (int32_t)get_u32(&p[20]),
+            .limit_max = (int32_t)get_u32(&p[24]),
         };
         if (joint_calibrate(j, i, cal) == NULL)
         {

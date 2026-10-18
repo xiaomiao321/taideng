@@ -11,7 +11,13 @@ HELP = """命令（占空比用百分数，时长用 ms）：
 运行范围：M1～M6 小电机 50～100%；M7/M8 大电机 50～80%。停止使用 stop。
   motor M1 80 500         正转点动；-80 反转；时长 0 持续运行
   angle M1 45 [10000]     使用已下发标定定位到 45°，默认超时 10 秒
-  joint M1               查询关节状态及 MCU 标定
+  joint M1               查询关节状态、MCU 标定及允许范围
+  jlim M1 10 170         修改允许运动范围为 10～170°（不改标定）
+  jnom M1 2048 90 down + 80 2 10 170 [47]
+                         理论标定：ADC 2048 处为 90°，角度增大时读数
+                         down 减小 / up 增大，正转使角度 + 增大 / - 减小，
+                         占空比 80%，容差 2°，允许 10～170°，阻值 47kΩ
+                         （省略按 45kΩ）。电位器须 1:1 装在关节轴上
   lamp UP1 50 1000        灯板 50%，保持 1000ms 后关闭
   buzzer 2700 1000        蜂鸣器 2700Hz，保持 1000ms
   power [200]            一次 Linux 电源键脉冲，会作用于连接的 Linux
@@ -31,7 +37,7 @@ HELP = """命令（占空比用百分数，时长用 ms）：
 ↑ ↓ 历史；Tab 补全；Ctrl+L 清屏；输入框 Ctrl+C 或 ESC 停止。
 序号与心跳自动处理。命令一次一行，不执行操作系统命令。"""
 
-COMMANDS = ("help", "motor", "angle", "joint", "lamp", "buzzer", "power", "led", "log", "adc", "key",
+COMMANDS = ("help", "motor", "angle", "joint", "jlim", "jnom", "lamp", "buzzer", "power", "led", "log", "adc", "key",
             "status", "test", "pass", "fail", "stop", "info", "watch", "history", "clear")
 
 @dataclass(frozen=True)
@@ -53,6 +59,20 @@ def percent(s):
         return int(value * 10)
     except (InvalidOperation, ValueError):
         raise ValueError("占空比范围 −100～100%，最多一位小数") from None
+
+def kilohms(s):
+    try:
+        value = Decimal(s)
+        if not value.is_finite() or value <= 0 or value * 1000 != (value * 1000).to_integral_value():
+            raise ValueError()
+        return int(value * 1000)
+    except (InvalidOperation, ValueError):
+        raise ValueError("电位器阻值以 kΩ 为单位，如 45 或 47.5") from None
+
+def sign(s, positive, negative, what):
+    if s.lower() in positive: return 1
+    if s.lower() in negative: return -1
+    raise ValueError(what)
 
 def send(kind, target=1, value=800, duration=500):
     request = (kind, target, value, duration)
@@ -86,6 +106,17 @@ def parse_shell(text):
         return send("JMOVE", int(args[0][1]), millidegrees(args[1]), integer(args[2]) if len(args) == 3 else 10000)
     if name == "joint" and len(args) == 1 and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JGET", int(args[0][1]))
+    if name == "jlim" and len(args) == 3 and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JLIM", int(args[0][1]), (millidegrees(args[1]), millidegrees(args[2])))
+    if name == "jnom" and len(args) in (9, 10) and re.fullmatch(r"[Mm][1-6]", args[0]):
+        if not re.fullmatch(r"[0-9]+", args[1]):
+            raise ValueError("参考点 ADC 读数须为整数")
+        values = (int(args[1]), millidegrees(args[2]),
+                  sign(args[3], ("up",), ("down",), "读数方向须为 up 或 down"),
+                  sign(args[4], ("+",), ("-",), "正转方向须为 + 或 -"),
+                  percent(args[5]), millidegrees(args[6]), millidegrees(args[7]), millidegrees(args[8]),
+                  kilohms(args[9]) if len(args) == 10 else 0)
+        return send("JNOM", int(args[0][1]), values)
     if name == "lamp" and len(args) == 3:
         return send("TEST", "LAMP_" + args[0].upper(), percent(args[1]), integer(args[2]))
     if name == "buzzer" and len(args) == 2:
@@ -126,6 +157,7 @@ def complete(text):
     if position == 1:
         options = {"motor": [f"M{i}" for i in range(1, 9)],
                    "angle": [f"M{i}" for i in range(1, 7)], "joint": [f"M{i}" for i in range(1, 7)],
+                   "jlim": [f"M{i}" for i in range(1, 7)], "jnom": [f"M{i}" for i in range(1, 7)],
                    "lamp": ["UP1", "UP2", "UP3", "UP4", "DOWN1", "DOWN2", "DOWN3"],
                    "test": list(BY_NAME), "watch": ["on", "off"],
                    "adc": ["test"], "key": ["test"]}.get(words[0].lower(), [])
