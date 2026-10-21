@@ -49,3 +49,7 @@ __pycache__/
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# 合作方交付包与项目范围表，只保留本地
+/Linux/
+/需求/
