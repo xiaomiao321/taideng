@@ -22,6 +22,18 @@ Motor and lighting controller for a lamp-shaped companion robot prototype: a 4-l
 
 工程文件、Gerber、BOM、3D 模型和交互式 BOM 在 `MCU/hardware/`。首板调试中发现的硬件问题、根因和排查惯例记录在 `MCU/hardware/已知硬件问题.md`。
 
+## 布线
+
+四层：顶层和底层走线，内层 1 为完整 GND 平面，内层 2 为按 24V、12V、5V 分区的电源平面。电机和灯板的功率走线集中在板的左右两侧和下方，PWM 与反馈信号从 MCU 经内层和底层走到各接口，与功率路径分开。
+
+| 顶层 | 底层 |
+|---|---|
+| ![顶层](MCU/hardware/PCB/布线_1_顶层.png) | ![底层](MCU/hardware/PCB/布线_4_底层.png) |
+
+| 内层 1，GND | 内层 2，电源 |
+|---|---|
+| ![GND](MCU/hardware/PCB/布线_2_内层1_GND.png) | ![电源](MCU/hardware/PCB/布线_3_内层2_电源.png) |
+
 ## 固件
 
 `MCU/software/test_bringup/`，STM32CubeMX 生成外设初始化，CMake 构建，FreeRTOS。
