@@ -27,7 +27,7 @@ catch
 {
 }
 
-$includeArgs = @('-I', (Join-Path $projectDir 'BSP\Inc'), '-I', (Join-Path $projectDir 'Protocol\Inc'), '-I', (Join-Path $projectDir 'App\inc'))
+$includeArgs = @('-I', (Join-Path $projectDir 'Config'), '-I', (Join-Path $projectDir 'BSP\Inc'), '-I', (Join-Path $projectDir 'Protocol\Inc'), '-I', (Join-Path $projectDir 'App\inc'))
 $warnArgs = @('-std=c11', '-Wall', '-Wextra')
 
 $suites = @(

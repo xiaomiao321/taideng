@@ -12,9 +12,6 @@
 /** @brief 蜂鸣器与 Linux 电源脉冲测试的最长持续时间，单位毫秒。 */
 #define MAX_PULSE_DURATION_MS (10000U)
 
-/** @brief 电机点动测试的最长持续时间，单位毫秒。 */
-#define MAX_MOTOR_DURATION_MS (5000U)
-
 /** @brief 蜂鸣器测试频率范围，单位 Hz。 */
 #define BUZZER_MIN_HZ (100)
 #define BUZZER_MAX_HZ (20000)
@@ -85,7 +82,7 @@ const char *debug_board_start(debug_board_t *b, unsigned seq, const char *name,
         (kind == BOARD_LAMP && (value < 0 || value > LAMP_MAX_PERMILLE)) ||
         (kind == BOARD_MOTOR &&
          (value <= 0 || !motor_duty_valid(motor, value) ||
-          duration > MAX_MOTOR_DURATION_MS)) ||
+          duration > DEBUG_BOARD_MAX_MOTOR_DURATION_MS)) ||
         (kind < BOARD_BUZZER && value != 0) ||
         (kind == BOARD_ADC && value != 0))
     {

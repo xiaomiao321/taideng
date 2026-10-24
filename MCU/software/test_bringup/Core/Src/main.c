@@ -27,6 +27,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_config.h"
 #include "bringup_test.h"
 #include "app_main.h"
 #include "bsp_common.h"
@@ -47,23 +48,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* 只修改 APP_MODE 选择入口，修改后重新编译烧录。
- * DEBUG: USART3 上位机 / 终端；BOARD: HOME 启动全板测试；
- * ANDROID: USART1 二进制 Android 协议，USART3 仅输出日志。 */
-#define APP_MODE_DEBUG (0)
-#define APP_MODE_BOARD (1)
-#define APP_MODE_ANDROID (2)
-#ifndef APP_MODE
-#define APP_MODE APP_MODE_DEBUG
-#endif
+/* 运行模式 APP_MODE 与看门狗超时在 Config/app_config.h 中修改。 */
 #if (APP_MODE != APP_MODE_DEBUG) && (APP_MODE != APP_MODE_BOARD) && (APP_MODE != APP_MODE_ANDROID)
 #error "Invalid APP_MODE: use APP_MODE_DEBUG, APP_MODE_BOARD or APP_MODE_ANDROID"
 #endif
 
-/* 看门狗标称超时。主循环单次最长阻塞约 100ms（串口限时发送），
- * LSI 最快时实际超时约为标称值的 0.68 倍，仍有充足余量。
- * BOARD 模式的测试用例会阻塞等待人工确认，不启用看门狗。 */
-#define APP_WATCHDOG_TIMEOUT_MS (1000U)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/

@@ -41,17 +41,8 @@ _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
 /** @brief 每次 update 最多处理的接收字节数，限制单次循环耗时。 */
 #define CONSOLE_RX_BUDGET (128U)
 
-/** @brief 电位器采样周期，单位毫秒。 */
-#define ADC_PERIOD_MS (10U)
-
 /** @brief 单次六路 ADC 扫描的等待超时，单位毫秒。 */
 #define ADC_TIMEOUT_MS (5U)
-
-/** @brief 每个采样周期连续扫描的次数，合成一组读数以压低 PWM 干扰。 */
-#define ADC_OVERSAMPLE (16U)
-
-/** @brief 状态行上报周期，单位毫秒。 */
-#define STATUS_PERIOD_MS (100U)
 
 /** @brief 一行 LRX 最多携带的透传字节数。 */
 #define LINUX_RX_BYTES_PER_LINE (32U)
@@ -529,8 +520,7 @@ static unsigned load_calibration(void)
 {
     /* 必须在 init 之前读旧记录：init 换用新长度后可能擦掉旧记录所在扇区。 */
     static uint8_t old[JOINT_CAL_BLOB_V2_SIZE];
-    bool has_old =
-        bsp_param_flash_peek(JOINT_CAL_BLOB_V2_SIZE, old) == BSP_OK;
+    bool has_old = bsp_param_flash_peek(JOINT_CAL_BLOB_V2_SIZE, old) == BSP_OK;
     bsp_status_t status = bsp_param_flash_init(JOINT_CAL_BLOB_SIZE);
     s_is_cal_store_ok = (status == BSP_OK);
     /* 备用扇区擦除失败（ERR_HAL）时已有记录仍可读，只是之后保存可能失败。 */
@@ -688,8 +678,8 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
         {
             return "TUNE_PARAM";
         }
-        joint_tune_t tune = {(joint_mode_t)v[0], (unsigned)v[1],
-                             (unsigned)v[2], (unsigned)v[3]};
+        joint_tune_t tune = {(joint_mode_t)v[0], (unsigned)v[1], (unsigned)v[2],
+                             (unsigned)v[3]};
         const char *err = joint_set_tune(&s_joints, index, tune);
         if (!err)
         {
@@ -749,12 +739,12 @@ static void check_control(void)
         debug_board_update(&s_board, HAL_GetTick(), false);
     }
     now = HAL_GetTick();
-    if ((uint32_t)(now - s_last_adc_ms) >= ADC_PERIOD_MS)
+    if ((uint32_t)(now - s_last_adc_ms) >= POT_SAMPLE_PERIOD_MS)
     {
         s_last_adc_ms = now;
-        static uint16_t samples[ADC_OVERSAMPLE][BSP_ADC_CHANNEL_COUNT];
+        static uint16_t samples[POT_OVERSAMPLE][BSP_ADC_CHANNEL_COUNT];
         s_is_pot_valid = s_is_adc_ok;
-        for (unsigned i = 0; i < ADC_OVERSAMPLE && s_is_pot_valid; ++i)
+        for (unsigned i = 0; i < POT_OVERSAMPLE && s_is_pot_valid; ++i)
         {
             s_is_pot_valid =
                 bsp_adc_read_all(samples[i], ADC_TIMEOUT_MS) == BSP_OK;
@@ -762,8 +752,8 @@ static void check_control(void)
         if (s_is_pot_valid)
         {
             uint16_t now_raw[BSP_ADC_CHANNEL_COUNT];
-            joint_filter((const uint16_t(*)[JOINT_COUNT])samples,
-                         ADC_OVERSAMPLE, now_raw, s_pot_spread);
+            joint_filter((const uint16_t (*)[JOINT_COUNT])samples,
+                         POT_OVERSAMPLE, now_raw, s_pot_spread);
             /* 再和前两次取中值，去掉单次 2～3° 的尖峰，代价是 10ms 延迟。 */
             for (unsigned i = 0; i < BSP_ADC_CHANNEL_COUNT; ++i)
             {
@@ -1058,8 +1048,7 @@ static void report_trace(void)
     int16_t duty = 0;
     (void)bsp_motor_hbridge_get_duty(
         bsp_motor_handle((bsp_motor_id_t)s_joint_focus), &duty);
-    bool is_braking =
-        s_joints.active == (int)s_joint_focus && s_joints.braking;
+    bool is_braking = s_joints.active == (int)s_joint_focus && s_joints.braking;
     char out[96];
     (void)snprintf(out, sizeof(out), "JT %lu M%u %u %u %ld %ld %d %u %s\r\n",
                    (unsigned long)s_joints.sample_ms, s_joint_focus + 1U,
@@ -1135,7 +1124,7 @@ void debug_console_update(void)
     report_trace();
 
     uint32_t now = HAL_GetTick();
-    if ((uint32_t)(now - s_last_status_ms) >= STATUS_PERIOD_MS)
+    if ((uint32_t)(now - s_last_status_ms) >= STATUS_REPORT_PERIOD_MS)
     {
         s_last_status_ms = now;
         report_status(now);

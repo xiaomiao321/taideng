@@ -44,8 +44,11 @@ class JointPanel:
         self.live = tk.StringVar(value="ADC：—  实测角度：—")
         ttk.Label(parent, textvariable=self.live, font=("Segoe UI", 13)).pack(anchor="w", pady=(0, 8))
 
-        box = ttk.LabelFrame(parent, text="两点标定 · 已知位置 A 的角度须小于位置 B", padding=10)
-        box.pack(fill="x")
+        # 标定和调试参数放进子标签页，一次只显示一个，给下面的曲线留出高度。
+        sections = ttk.Notebook(parent)
+        sections.pack(fill="x")
+        box = ttk.Frame(sections, padding=10)
+        sections.add(box, text="两点标定 · A 的角度须小于 B")
         self.fields = {key: tk.StringVar() for key in
                        ("raw_a", "angle_a", "raw_b", "angle_b", "direction", "duty", "tolerance")}
         for row, label, key in ((0, "位置 A", "a"), (1, "位置 B", "b")):
@@ -73,9 +76,8 @@ class JointPanel:
         self.cal_status = tk.StringVar(value="尚未标定")
         ttk.Label(actions, textvariable=self.cal_status).pack(side="left", padx=12)
 
-        theory = ttk.LabelFrame(parent, text="理论标定 · 电位器 1:1 装在关节轴上，270° 行程；正转方向、占空比、容差沿用上方设置",
-                                padding=10)
-        theory.pack(fill="x", pady=(8, 0))
+        theory = ttk.Frame(sections, padding=10)
+        sections.add(theory, text="理论标定 · 正转方向、占空比、容差沿用两点标定页")
         self.nominal = {key: tk.StringVar() for key in
                         ("angle_ref", "raw_ref", "sensor", "ohms", "limit_min", "limit_max")}
         self.nominal["ohms"].set("45")
@@ -107,9 +109,8 @@ class JointPanel:
         self.preview = tk.StringVar(value="")
         ttk.Label(theory_actions, textvariable=self.preview).pack(side="left", padx=12)
 
-        tune = ttk.LabelFrame(parent, text="电机调试 · PWM 上电默认 5kHz 刹车；控制参数随标定存入 MCU，上电自动恢复",
-                              padding=10)
-        tune.pack(fill="x", pady=(8, 0))
+        tune = ttk.Frame(sections, padding=10)
+        sections.add(tune, text="电机调试 · 上电默认 5kHz 刹车，参数存入 MCU")
         self.tune_fields = {"khz": tk.StringVar(value="5"), "decay": tk.StringVar(value="刹车"),
                             "mode": tk.StringVar(value="比例式"), "kp": tk.StringVar(value="1"),
                             "low": tk.StringVar(value="30"), "brake": tk.StringVar(value="50")}
@@ -154,12 +155,13 @@ class JointPanel:
         self.move_btn = ttk.Button(move, text="开始定位", command=self.move)
         self.move_btn.pack(side="left", padx=8)
         ttk.Button(move, text="停止全部 / 解锁", command=app.stop).pack(side="left")
-        ttk.Label(parent, textvariable=self.notice, wraplength=950).pack(anchor="w", pady=4)
         self.state_text = tk.StringVar(value="等待 MCU 关节状态")
-        ttk.Label(parent, textvariable=self.state_text).pack(anchor="w")
-        self.canvas = tk.Canvas(parent, height=110, bg="white", highlightthickness=1,
+        ttk.Label(move, textvariable=self.state_text).pack(side="left", padx=16)
+        # 曲线先于提示文字分配空间：窗口矮时先压缩提示，不压缩曲线。
+        self.canvas = tk.Canvas(parent, height=220, bg="white", highlightthickness=1,
                                 highlightbackground="#d5dce4")
-        self.canvas.pack(fill="both", expand=True, pady=(8, 0))
+        self.canvas.pack(fill="both", expand=True, pady=(4, 0))
+        ttk.Label(parent, textvariable=self.notice, wraplength=950).pack(anchor="w", pady=4)
         self.canvas.bind("<Configure>", lambda _: self.draw())
         self.set_fields(None)
         self.refresh()

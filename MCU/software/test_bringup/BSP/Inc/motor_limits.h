@@ -14,33 +14,16 @@
 
 #include <stdbool.h>
 
+#include "app_config.h"
+
 /** @brief 电机总数。 */
 #define MOTOR_COUNT (8U)
 
 /** @brief 小关节电机数量；下标小于该值的是小电机，其余是履带大电机。 */
 #define MOTOR_SMALL_COUNT (6U)
 
-/**
- * @brief 允许输出的最小占空比绝对值，千分比。
- *
- * 滑行 PWM 下低于约 50% 电机转不动；刹车 PWM 下能转的占空比更低，
- * 调试时需要扫低占空比，所以这里只挡掉明显无意义的值。
- */
-#define MOTOR_DUTY_MIN (100)
-
 /** @brief 满占空比，千分比；标定参数按它校验，实际输出另受下面的上限约束。 */
 #define MOTOR_DUTY_FULL (1000)
-
-/**
- * @brief 全部电机的占空比硬上限，千分比，暂定 100%。
- *
- * 开环 RUN/MSET、板级测试、关节开关式和比例式的输出都不会超过它；
- * 标定里填的占空比高于它时，输出按它截断，标定本身仍然有效。
- * 上位机 motor_limits.py 的 DUTY_LIMIT 需同步修改。
- */
-#ifndef MOTOR_DUTY_LIMIT
-#define MOTOR_DUTY_LIMIT (1000)
-#endif
 
 #define MOTOR_DUTY_CAP(rated)                                                  \
     (((rated) < MOTOR_DUTY_LIMIT) ? (rated) : MOTOR_DUTY_LIMIT)

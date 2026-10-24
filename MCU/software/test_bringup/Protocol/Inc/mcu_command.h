@@ -20,10 +20,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "app_config.h"
 #include "mcu_protocol.h"
-
-/** @brief 连续多久没有收到合法请求就判定失联，单位毫秒。 */
-#define MCU_COMMAND_LINK_TIMEOUT_MS (5000U)
 
 /**
  * @brief 命令层需要的硬件动作，由上层实现并在初始化时注册。

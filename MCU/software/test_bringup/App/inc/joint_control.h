@@ -21,20 +21,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "app_config.h"
+
 /** @brief 关节数量，对应 M1～M6 和电位器 POT1～POT6。 */
 #define JOINT_COUNT (6U)
-
-/** @brief 电位器读数距上次采样超过该时间即视为失效，单位毫秒。 */
-#define JOINT_SENSOR_STALE_MS (50U)
-
-/** @brief 电位器标称电气行程，毫度。 */
-#define JOINT_POT_TRAVEL_MDEG (270000)
-
-/** @brief 电位器阻值未知时采用的标称值，欧姆。 */
-#define JOINT_POT_DEFAULT_OHMS (45000U)
-
-/** @brief 电位器两端各串的固定电阻（3V3-1k-[电位器]-1k-GND），欧姆。 */
-#define JOINT_POT_END_OHMS (1000U)
 
 /** @brief 理论标定允许的电位器阻值范围，欧姆。 */
 #define JOINT_POT_MIN_OHMS (1000U)
@@ -102,12 +92,6 @@ typedef struct
     unsigned brake_ms; /**< 比例式进入容差或换向时的制动时长，0 为不制动。 */
 } joint_tune_t;
 
-/** @brief 比例系数上限，千分比/度。 */
-#define JOINT_KP_MAX (1000U)
-
-/** @brief 制动时长上限，单位毫秒；不超过到达判定的保持时间。 */
-#define JOINT_BRAKE_MAX_MS (200U)
-
 /** @brief 一次采样最多参与滤波的样本数。 */
 #define JOINT_FILTER_MAX_SAMPLES (32U)
 
@@ -127,10 +111,10 @@ typedef struct
 {
     joint_cal_t cal;
     bool calibrated;
-    uint16_t raw;   /**< 最近一次 ADC 读数。 */
-    int32_t angle;  /**< 最近一次换算角度，毫度。 */
-    int32_t target; /**< 目标角度，毫度。 */
-    int duty;       /**< 当前输出占空比。 */
+    uint16_t raw;    /**< 最近一次 ADC 读数。 */
+    int32_t angle;   /**< 最近一次换算角度，毫度。 */
+    int32_t target;  /**< 目标角度，毫度。 */
+    int duty;        /**< 当前输出占空比。 */
     uint16_t spread; /**< 最近一次采样中各样本的极差，反映噪声。 */
     joint_tune_t tune;
     joint_phase_t phase;
@@ -240,8 +224,8 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
  * @param[in] spread JOINT_COUNT 个样本极差；可为 NULL，记为 0。
  * @param[in] valid 本次采样是否成功；失败时不更新读数。
  */
-void joint_feed(joint_control_t *j, const uint16_t *raw,
-                const uint16_t *spread, bool valid, uint32_t now);
+void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
+                bool valid, uint32_t now);
 
 /**
  * @brief 周期调用：推进运动控制。

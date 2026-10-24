@@ -19,16 +19,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "app_config.h"
 #include "motor_limits.h"
 
 /** @brief 一行命令的最大长度（含结尾空字符），单位为字节。 */
 #define DEBUG_CONTROL_LINE_MAX (192U)
-
-/** @brief 心跳超时：超过该时间没收到 PING 即停止输出并锁定，单位毫秒。 */
-#define DEBUG_CONTROL_HEARTBEAT_TIMEOUT_MS (1000U)
-
-/** @brief 电机从停止到按新占空比启动之间的等待时间，单位毫秒。 */
-#define DEBUG_CONTROL_SETTLE_MS (100U)
 
 /**
  * @brief 调用者提供的硬件回调。test、confirm、joint、manual、aux 可为 NULL，

@@ -13,6 +13,7 @@
 #ifndef AITAID_BSP_MOTOR_H
 #define AITAID_BSP_MOTOR_H
 
+#include "app_config.h"
 #include "bsp_common.h"
 #include "bsp_motor_hbridge.h"
 
@@ -109,14 +110,8 @@ void bsp_motor_emergency_stop(void);
 /** @brief CubeMX 配置的电机 PWM 频率，单位 kHz；bsp_motor_set_pwm 只能分频。 */
 #define BSP_MOTOR_PWM_BASE_KHZ (20U)
 
-/**
- * @brief 上电默认的 PWM 频率与衰减方式：5kHz 刹车。
- *
- * 2026-10-24 实测 M1：20kHz 滑行、5kHz 滑行、20kHz 刹车在 40% 下都转不动，
- * 5kHz 刹车 20%～30% 即可稳定转动，断电后滑行也小得多。
- */
-#define BSP_MOTOR_PWM_DEFAULT_KHZ (5U)
-#define BSP_MOTOR_PWM_DEFAULT_SLOW_DECAY (true)
+/* 上电默认 PWM：BSP_MOTOR_PWM_DEFAULT_KHZ、BSP_MOTOR_PWM_DEFAULT_SLOW_DECAY，
+ * 见 app_config.h。 */
 
 /**
  * @brief 设置全部电机的 PWM 频率和关断段衰减方式（调试用）。

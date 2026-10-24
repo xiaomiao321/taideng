@@ -6,19 +6,11 @@
 #ifndef AITAID_BSP_KEY_H
 #define AITAID_BSP_KEY_H
 
+#include "app_config.h"
 #include "bsp_common.h"
 
 #include <stdbool.h>
 #include <stdint.h>
-
-/**
- * @brief HOME 按键的软件消抖时间，单位为毫秒。
- *
- * @note 主板已经用 10kΩ 上拉和 100nF 电容构成约 1ms 的 RC 滤波。本参数是在
- *       硬件滤波之上再加的一层软件消抖，用于吸收被 RC 削弱、但仍跨过逻辑
- *       阈值的余抖，因此取值明显大于 RC 时间常数。
- */
-#define BSP_KEY_DEBOUNCE_MS (20U)
 
 /**
  * @brief 初始化 HOME 按键模块的软件状态。

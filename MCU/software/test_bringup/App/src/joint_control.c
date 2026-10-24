@@ -17,51 +17,10 @@
 /** @brief 两个标定点之间至少相差的角度，毫度。 */
 #define CAL_MIN_ANGLE_SPAN (1000)
 
-/** @brief 到达容差的允许范围，毫度。 */
-#define TOLERANCE_MIN (100U)
-#define TOLERANCE_MAX (10000U)
-
-/** @brief 单次运动超时的允许范围，单位毫秒。 */
-#define MOVE_TIMEOUT_MIN_MS (500U)
-#define MOVE_TIMEOUT_MAX_MS (60000U)
-
-/** @brief 在容差内连续保持该时间才判定到达，单位毫秒。 */
-#define REACHED_HOLD_MS (200U)
-
-/** @brief 误差至少减小这么多才算有进展，毫度。 */
-#define PROGRESS_STEP (500)
-
-/** @brief 超过该时间没有进展判定为停滞，单位毫秒。 */
-#define STALL_MS (2000U)
-
-/** @brief 误差比初始值多出 2 倍容差加该余量即判定方向反了，毫度。 */
-#define DIRECTION_MARGIN (1000U)
-
-/** @brief 换向前停顿时间，单位毫秒。 */
-#define REVERSE_SETTLE_MS (100U)
-
-/** @brief 误差小于 5 倍容差加该余量时改为点动，毫度。 */
-#define NEAR_MARGIN (5000U)
-
-/** @brief 点动脉冲：驱动段与停顿段时长，单位毫秒。 */
-#define PULSE_ON_MS (30U)
-#define PULSE_OFF_MS (100U)
-
-/**
- * @brief 没保存过控制参数时的默认值：比例式，每度 1%，起转 30%，制动 50ms。
- *
- * 2026-10-24 在 5kHz 刹车 PWM 下实测 M1：3°～30° 的定位 1～1.5 秒到位，
- * 过冲不超过 2.4°。
- */
-#define DEFAULT_MODE (JOINT_MODE_P)
-#define DEFAULT_KP (10U)
-#define DEFAULT_DUTY_MIN (300U)
-#define DEFAULT_BRAKE_MS (50U)
-
 /** @brief 序列化中版本 2 每个关节的字节数，控制参数从这里开始。 */
 #define BLOB_V2_ENTRY_SIZE (28U)
 
-_Static_assert(JOINT_BRAKE_MAX_MS <= REACHED_HOLD_MS,
+_Static_assert(JOINT_BRAKE_MAX_MS <= JOINT_REACHED_HOLD_MS,
                "brake must end before the reached hold expires");
 
 static int32_t magnitude(int32_t n)
@@ -86,7 +45,8 @@ static bool is_mapping_valid(const joint_cal_t *c)
            c->angle_b - c->angle_a >= CAL_MIN_ANGLE_SPAN &&
            (c->direction == 1 || c->direction == -1) &&
            c->duty >= MOTOR_DUTY_MIN && c->duty <= MOTOR_DUTY_FULL &&
-           c->tolerance >= TOLERANCE_MIN && c->tolerance <= TOLERANCE_MAX;
+           c->tolerance >= JOINT_TOLERANCE_MIN &&
+           c->tolerance <= JOINT_TOLERANCE_MAX;
 }
 
 /**
@@ -191,8 +151,9 @@ void joint_init(joint_control_t *j, joint_hw_t hw)
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         j->states[i].fault = "NONE";
-        j->states[i].tune = (joint_tune_t){DEFAULT_MODE, DEFAULT_KP,
-                                           DEFAULT_DUTY_MIN, DEFAULT_BRAKE_MS};
+        j->states[i].tune =
+            (joint_tune_t){JOINT_DEFAULT_MODE, JOINT_DEFAULT_KP,
+                           JOINT_DEFAULT_DUTY_MIN, JOINT_DEFAULT_BRAKE_MS};
     }
 }
 static bool output(joint_control_t *j, int duty)
@@ -407,7 +368,8 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
         return "SENSOR_STALE";
     }
     if (target < s->cal.limit_min || target > s->cal.limit_max ||
-        timeout < MOVE_TIMEOUT_MIN_MS || timeout > MOVE_TIMEOUT_MAX_MS)
+        timeout < JOINT_MOVE_TIMEOUT_MIN_MS ||
+        timeout > JOINT_MOVE_TIMEOUT_MAX_MS)
     {
         return "TARGET_RANGE";
     }
@@ -440,8 +402,8 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
     s->fault = "NONE";
     return NULL;
 }
-void joint_feed(joint_control_t *j, const uint16_t *raw,
-                const uint16_t *spread, bool valid, uint32_t now)
+void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
+                bool valid, uint32_t now)
 {
     j->valid = valid;
     if (!valid)
@@ -498,24 +460,24 @@ bool joint_tick(joint_control_t *j, uint32_t now)
         {
             return finish(j, "HARDWARE", JOINT_FAULT);
         }
-        if ((uint32_t)(now - j->stable_ms) >= REACHED_HOLD_MS)
+        if ((uint32_t)(now - j->stable_ms) >= JOINT_REACHED_HOLD_MS)
         {
             return finish(j, "REACHED", JOINT_DONE);
         }
         return true;
     }
     j->stable = false;
-    if (distance + PROGRESS_STEP < j->best_error)
+    if (distance + JOINT_PROGRESS_STEP < j->best_error)
     {
         j->best_error = distance;
         j->progress_ms = now;
     }
-    if (distance >
-        j->initial_error + (int32_t)(2U * s->cal.tolerance + DIRECTION_MARGIN))
+    if (distance > j->initial_error + (int32_t)(2U * s->cal.tolerance +
+                                                JOINT_DIRECTION_MARGIN))
     {
         return finish(j, "DIRECTION", JOINT_FAULT);
     }
-    if ((uint32_t)(now - j->progress_ms) >= STALL_MS)
+    if ((uint32_t)(now - j->progress_ms) >= JOINT_STALL_MS)
     {
         return finish(j, "STALL", JOINT_FAULT);
     }
@@ -523,8 +485,8 @@ bool joint_tick(joint_control_t *j, uint32_t now)
     if (sign != j->last_sign)
     {
         /* 比例式过冲换向时先制动；刚启动（last_sign 为 0）时电机本来就停着。 */
-        bool ok = (proportional && j->last_sign != 0) ? brake(j, now)
-                                                      : output(j, 0);
+        bool ok =
+            (proportional && j->last_sign != 0) ? brake(j, now) : output(j, 0);
         if (!ok)
         {
             return finish(j, "HARDWARE", JOINT_FAULT);
@@ -533,7 +495,7 @@ bool joint_tick(joint_control_t *j, uint32_t now)
         j->switch_ms = now;
         s->phase = JOINT_SETTLE;
     }
-    if ((uint32_t)(now - j->switch_ms) < REVERSE_SETTLE_MS)
+    if ((uint32_t)(now - j->switch_ms) < JOINT_REVERSE_SETTLE_MS)
     {
         if (!release_brake(j, now))
         {
@@ -558,9 +520,10 @@ bool joint_tick(joint_control_t *j, uint32_t now)
         }
         return true;
     }
-    /* 接近目标时改为短脉冲点动（驱动 PULSE_ON_MS、停 PULSE_OFF_MS），
+    /* 接近目标时改为短脉冲点动（驱动 JOINT_PULSE_ON_MS、停 JOINT_PULSE_OFF_MS），
      * 因为低占空比电机根本转不动。 */
-    bool near = distance <= (int32_t)(5U * s->cal.tolerance + NEAR_MARGIN);
+    bool near =
+        distance <= (int32_t)(5U * s->cal.tolerance + JOINT_NEAR_MARGIN);
     if (near && !j->near_mode)
     {
         j->pulse_on = false;
@@ -574,12 +537,13 @@ bool joint_tick(joint_control_t *j, uint32_t now)
     int duty = sign * s->cal.direction * (int)duty_max(s);
     if (near)
     {
-        if (!j->pulse_on && (uint32_t)(now - j->pulse_ms) >= PULSE_OFF_MS)
+        if (!j->pulse_on && (uint32_t)(now - j->pulse_ms) >= JOINT_PULSE_OFF_MS)
         {
             j->pulse_on = true;
             j->pulse_ms = now;
         }
-        else if (j->pulse_on && (uint32_t)(now - j->pulse_ms) >= PULSE_ON_MS)
+        else if (j->pulse_on &&
+                 (uint32_t)(now - j->pulse_ms) >= JOINT_PULSE_ON_MS)
         {
             j->pulse_on = false;
             j->pulse_ms = now;
@@ -660,7 +624,8 @@ void joint_cal_export(const joint_control_t *j,
 unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
                           uint32_t size)
 {
-    bool is_v3 = blob[0] == JOINT_CAL_BLOB_VERSION && size == JOINT_CAL_BLOB_SIZE;
+    bool is_v3 =
+        blob[0] == JOINT_CAL_BLOB_VERSION && size == JOINT_CAL_BLOB_SIZE;
     bool is_v2 = blob[0] == 2U && size == JOINT_CAL_BLOB_V2_SIZE;
     if ((!is_v3 && !is_v2) || blob[1] != JOINT_COUNT)
     {
