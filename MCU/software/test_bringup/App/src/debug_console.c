@@ -102,6 +102,9 @@ static uint32_t s_seen_linux_overflows = 0U;
 static uint16_t s_pot_cache[BSP_ADC_CHANNEL_COUNT];
 /** @brief 最近一次采样中每路样本的极差。 */
 static uint16_t s_pot_spread[BSP_ADC_CHANNEL_COUNT];
+/** @brief 前两次过采样结果，做时间上的三点中值；计数为已有的有效次数。 */
+static uint16_t s_pot_history[2][BSP_ADC_CHANNEL_COUNT];
+static unsigned s_pot_history_count = 0U;
 static bool s_is_pot_valid = false;
 /** @brief JTRACE 打开时每次采样上报一行 JT。 */
 static bool s_is_trace_on = false;
@@ -515,23 +518,38 @@ static bool save_calibration(void)
 }
 
 /**
- * @brief 初始化 Flash 参数存储并恢复上次保存的标定。
+ * @brief 初始化 Flash 参数存储并恢复上次保存的标定和控制参数。
+ *
+ * 只有旧格式（版本 2）记录时，恢复其中的标定并立即按新格式保存。
  *
  * @return 恢复的关节数。
  * @note 需要擦除备用扇区时会阻塞约 2 秒，只在初始化阶段调用。
  */
 static unsigned load_calibration(void)
 {
+    /* 必须在 init 之前读旧记录：init 换用新长度后可能擦掉旧记录所在扇区。 */
+    static uint8_t old[JOINT_CAL_BLOB_V2_SIZE];
+    bool has_old =
+        bsp_param_flash_peek(JOINT_CAL_BLOB_V2_SIZE, old) == BSP_OK;
     bsp_status_t status = bsp_param_flash_init(JOINT_CAL_BLOB_SIZE);
     s_is_cal_store_ok = (status == BSP_OK);
     /* 备用扇区擦除失败（ERR_HAL）时已有记录仍可读，只是之后保存可能失败。 */
     uint8_t blob[JOINT_CAL_BLOB_SIZE];
-    if (((status != BSP_OK) && (status != BSP_ERR_HAL)) ||
-        (bsp_param_flash_load(blob) != BSP_OK))
+    if ((status != BSP_OK) && (status != BSP_ERR_HAL))
     {
         return 0U;
     }
-    return joint_cal_import(&s_joints, blob);
+    if (bsp_param_flash_load(blob) == BSP_OK)
+    {
+        return joint_cal_import(&s_joints, blob, sizeof(blob));
+    }
+    unsigned restored =
+        has_old ? joint_cal_import(&s_joints, old, sizeof(old)) : 0U;
+    if (restored > 0U)
+    {
+        (void)save_calibration();
+    }
+    return restored;
 }
 
 /** @brief 上报全部已标定关节的参数和状态，供上位机同步。 */
@@ -675,7 +693,7 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
         const char *err = joint_set_tune(&s_joints, index, tune);
         if (!err)
         {
-            joint_report(now, true);
+            commit_calibration(now);
         }
         return err;
     }
@@ -743,8 +761,28 @@ static void check_control(void)
         }
         if (s_is_pot_valid)
         {
+            uint16_t now_raw[BSP_ADC_CHANNEL_COUNT];
             joint_filter((const uint16_t(*)[JOINT_COUNT])samples,
-                         ADC_OVERSAMPLE, s_pot_cache, s_pot_spread);
+                         ADC_OVERSAMPLE, now_raw, s_pot_spread);
+            /* 再和前两次取中值，去掉单次 2～3° 的尖峰，代价是 10ms 延迟。 */
+            for (unsigned i = 0; i < BSP_ADC_CHANNEL_COUNT; ++i)
+            {
+                s_pot_cache[i] =
+                    (s_pot_history_count >= 2U)
+                        ? joint_median3(s_pot_history[0][i],
+                                        s_pot_history[1][i], now_raw[i])
+                        : now_raw[i];
+                s_pot_history[0][i] = s_pot_history[1][i];
+                s_pot_history[1][i] = now_raw[i];
+            }
+            if (s_pot_history_count < 2U)
+            {
+                ++s_pot_history_count;
+            }
+        }
+        else
+        {
+            s_pot_history_count = 0U;
         }
         joint_feed(&s_joints, s_pot_cache, s_pot_spread, s_is_pot_valid,
                    HAL_GetTick());

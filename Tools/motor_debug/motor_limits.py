@@ -1,8 +1,11 @@
 """Operating PWM ranges; lamp PWM is intentionally independent."""
+# 全部电机的占空比硬上限（千分比），与 MCU motor_limits.h 的 MOTOR_DUTY_LIMIT 保持一致。
+DUTY_LIMIT = 1000
+
 def duty_limits(motor):
     if type(motor) is not int or not 1 <= motor <= 8:
         raise ValueError("电机编号须为 M1～M8")
-    return 100, 1000 if motor <= 6 else 800
+    return 100, min(1000 if motor <= 6 else 800, DUTY_LIMIT)
 
 def validate_duty(motor, duty, allow_stop=False):
     low, high = duty_limits(motor)

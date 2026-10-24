@@ -40,14 +40,17 @@
 #define JOINT_POT_MIN_OHMS (1000U)
 #define JOINT_POT_MAX_OHMS (1000000U)
 
-/** @brief 标定数据序列化格式的版本；格式变化时加一，旧数据不再加载。 */
-#define JOINT_CAL_BLOB_VERSION (2U)
+/** @brief 标定数据序列化格式的版本；格式变化时加一。 */
+#define JOINT_CAL_BLOB_VERSION (3U)
 
-/** @brief 序列化后每个关节占用的字节数。 */
-#define JOINT_CAL_BLOB_ENTRY_SIZE (28U)
+/** @brief 序列化后每个关节占用的字节数：28 字节标定加 8 字节控制参数。 */
+#define JOINT_CAL_BLOB_ENTRY_SIZE (36U)
 
 /** @brief 序列化后的总字节数：4 字节头加每个关节一项，是 4 的倍数。 */
 #define JOINT_CAL_BLOB_SIZE (4U + JOINT_COUNT * JOINT_CAL_BLOB_ENTRY_SIZE)
+
+/** @brief 旧格式（版本 2，只有标定、没有控制参数）的总字节数，用于迁移。 */
+#define JOINT_CAL_BLOB_V2_SIZE (4U + JOINT_COUNT * 28U)
 
 /** @brief 一个关节的标定参数。 */
 typedef struct
@@ -90,7 +93,7 @@ typedef enum
     JOINT_MODE_COUNT
 } joint_mode_t;
 
-/** @brief 控制参数；只在 RAM 中，上电恢复默认值（开关式）。 */
+/** @brief 控制参数；随标定一起保存到 Flash，没保存过时用比例式默认值。 */
 typedef struct
 {
     joint_mode_t mode;
@@ -203,6 +206,11 @@ const char *joint_set_limits(joint_control_t *j, unsigned index,
                              int32_t limit_min, int32_t limit_max);
 
 /**
+ * @brief 三点中值，用于在时间上去掉单次采样的尖峰。
+ */
+uint16_t joint_median3(uint16_t a, uint16_t b, uint16_t c);
+
+/**
  * @brief 设置控制参数；不要求已标定。
  *
  * @return NULL 表示成功；"JOINT_ID"、"BUSY" 或 "TUNE_PARAM"。
@@ -254,21 +262,25 @@ const char *joint_phase_name(joint_phase_t phase);
  * 格式（多字节均为小端）：
  *   头：版本 u8、关节数 u8、保留 u16；
  *   每个关节：已标定 u8、方向 i8、占空比 u16、raw_a u16、raw_b u16、
- *            angle_a i32、angle_b i32、容差 u32、limit_min i32、limit_max i32。
+ *            angle_a i32、angle_b i32、容差 u32、limit_min i32、limit_max i32，
+ *            控制参数有效 u8、控制方式 u8、kp u16、起转占空比 u16、制动 u16。
+ * 版本 2 没有最后 8 字节，其余相同。
  */
 void joint_cal_export(const joint_control_t *j,
                       uint8_t blob[JOINT_CAL_BLOB_SIZE]);
 
 /**
- * @brief 从 joint_cal_export() 的结果恢复标定。
+ * @brief 从 joint_cal_export() 的结果恢复标定和控制参数。
  *
- * 版本或关节数不符时什么都不做；每个关节的参数仍经 joint_calibrate() 校验，
- * 不合法的项被跳过，未标记已标定的关节保持原状。
+ * 接受版本 3（size 为 JOINT_CAL_BLOB_SIZE）和版本 2（size 为
+ * JOINT_CAL_BLOB_V2_SIZE，只有标定）。版本、长度或关节数不符时什么都不做；
+ * 每个关节的参数仍经 joint_calibrate()、joint_set_tune() 校验，不合法的项
+ * 被跳过，未标记的关节保持原状。
  *
- * @return 成功恢复的关节数。
+ * @return 成功恢复标定的关节数。
  * @note 只应在没有关节运动时调用（如初始化阶段）。
  */
-unsigned joint_cal_import(joint_control_t *j,
-                          const uint8_t blob[JOINT_CAL_BLOB_SIZE]);
+unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
+                          uint32_t size);
 
 #endif /* AITAID_JOINT_CONTROL_H */

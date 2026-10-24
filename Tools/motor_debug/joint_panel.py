@@ -107,11 +107,11 @@ class JointPanel:
         self.preview = tk.StringVar(value="")
         ttk.Label(theory_actions, textvariable=self.preview).pack(side="left", padx=12)
 
-        tune = ttk.LabelFrame(parent, text="电机调试 · PWM 与控制参数只在 MCU 内存中，重新上电恢复 20kHz 滑行、开关式",
+        tune = ttk.LabelFrame(parent, text="电机调试 · PWM 上电默认 5kHz 刹车；控制参数随标定存入 MCU，上电自动恢复",
                               padding=10)
         tune.pack(fill="x", pady=(8, 0))
-        self.tune_fields = {"khz": tk.StringVar(value="20"), "decay": tk.StringVar(value="滑行"),
-                            "mode": tk.StringVar(value="开关式"), "kp": tk.StringVar(value="3"),
+        self.tune_fields = {"khz": tk.StringVar(value="5"), "decay": tk.StringVar(value="刹车"),
+                            "mode": tk.StringVar(value="比例式"), "kp": tk.StringVar(value="1"),
                             "low": tk.StringVar(value="30"), "brake": tk.StringVar(value="50")}
         ttk.Label(tune, text="PWM 频率 kHz").grid(row=0, column=0, padx=5, pady=4, sticky="w")
         ttk.Combobox(tune, textvariable=self.tune_fields["khz"], values=PWM_KHZ, state="readonly",
@@ -335,7 +335,7 @@ class JointPanel:
                 raise ValueError("请连接支持电机调试的新固件")
             if not self.app.confirm_exclusive(): return
             self.app.worker.submit("JTUNE", self.selected, values)
-            self.notice.set("下发控制参数会先停止全部电机；开关式只用标定里的占空比，其余参数留给比例式。")
+            self.notice.set("下发控制参数会先停止全部电机，并随标定保存到 MCU；开关式只用标定里的占空比。")
         except (KeyError, ValueError) as exc: messagebox.showerror("控制参数", str(exc))
 
     def toggle_trace(self):

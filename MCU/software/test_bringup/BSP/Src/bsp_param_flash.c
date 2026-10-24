@@ -127,6 +127,23 @@ bsp_status_t bsp_param_flash_init(uint32_t payload_size)
     return flash_journal_prepare(&s_journal);
 }
 
+bsp_status_t bsp_param_flash_peek(uint32_t payload_size, void *payload)
+{
+    const uint8_t *areas[FLASH_JOURNAL_AREA_COUNT] = {
+        (const uint8_t *)PARAM_AREA0_ADDRESS,
+        (const uint8_t *)PARAM_AREA1_ADDRESS};
+    flash_journal_ops_t ops = {erase_area, program_area, NULL};
+    /* 只扫描和读取，不调用 prepare，所以不会擦除。 */
+    flash_journal_t probe;
+    bsp_status_t status = flash_journal_init(&probe, ops, areas,
+                                             PARAM_AREA_SIZE, payload_size);
+    if (status != BSP_OK)
+    {
+        return status;
+    }
+    return flash_journal_load(&probe, payload);
+}
+
 bsp_status_t bsp_param_flash_load(void *payload)
 {
     if (!s_is_initialized)

@@ -59,7 +59,8 @@ bsp_status_t bsp_motor_init(void)
     }
 
     s_is_initialized = true;
-    return BSP_OK;
+    return bsp_motor_set_pwm(BSP_MOTOR_PWM_DEFAULT_KHZ,
+                             BSP_MOTOR_PWM_DEFAULT_SLOW_DECAY);
 }
 
 bsp_status_t bsp_motor_set_duty(bsp_motor_id_t motor_id, int16_t duty_permille)

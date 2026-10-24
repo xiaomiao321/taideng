@@ -41,6 +41,8 @@ typedef enum
  *
  * @note 调用前必须完成 MX_TIM2/4/8/9/12_Init()。
  * @note 初始化期间所有电机保持停止（两路低电平），符合上电安全状态要求。
+ * @note 完成后按 BSP_MOTOR_PWM_DEFAULT_KHZ 和 BSP_MOTOR_PWM_DEFAULT_SLOW_DECAY
+ *       设置 PWM。
  */
 bsp_status_t bsp_motor_init(void);
 
@@ -108,10 +110,19 @@ void bsp_motor_emergency_stop(void);
 #define BSP_MOTOR_PWM_BASE_KHZ (20U)
 
 /**
+ * @brief 上电默认的 PWM 频率与衰减方式：5kHz 刹车。
+ *
+ * 2026-10-24 实测 M1：20kHz 滑行、5kHz 滑行、20kHz 刹车在 40% 下都转不动，
+ * 5kHz 刹车 20%～30% 即可稳定转动，断电后滑行也小得多。
+ */
+#define BSP_MOTOR_PWM_DEFAULT_KHZ (5U)
+#define BSP_MOTOR_PWM_DEFAULT_SLOW_DECAY (true)
+
+/**
  * @brief 设置全部电机的 PWM 频率和关断段衰减方式（调试用）。
  *
  * @param[in] khz PWM 频率，须能整除 BSP_MOTOR_PWM_BASE_KHZ：1、2、4、5、10、20。
- * @param[in] slow_decay true 为刹车（慢衰减），false 为滑行（快衰减，上电默认）。
+ * @param[in] slow_decay true 为刹车（慢衰减），false 为滑行（快衰减）。
  *
  * @retval BSP_OK 已切换。
  * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化。

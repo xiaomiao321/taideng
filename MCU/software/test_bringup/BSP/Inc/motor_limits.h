@@ -28,11 +28,32 @@
  */
 #define MOTOR_DUTY_MIN (100)
 
+/** @brief 满占空比，千分比；标定参数按它校验，实际输出另受下面的上限约束。 */
+#define MOTOR_DUTY_FULL (1000)
+
+/**
+ * @brief 全部电机的占空比硬上限，千分比，暂定 100%。
+ *
+ * 开环 RUN/MSET、板级测试、关节开关式和比例式的输出都不会超过它；
+ * 标定里填的占空比高于它时，输出按它截断，标定本身仍然有效。
+ * 上位机 motor_limits.py 的 DUTY_LIMIT 需同步修改。
+ */
+#ifndef MOTOR_DUTY_LIMIT
+#define MOTOR_DUTY_LIMIT (1000)
+#endif
+
+#define MOTOR_DUTY_CAP(rated)                                                  \
+    (((rated) < MOTOR_DUTY_LIMIT) ? (rated) : MOTOR_DUTY_LIMIT)
+
 /** @brief 小关节电机占空比绝对值上限，千分比。 */
-#define MOTOR_DUTY_SMALL_MAX (1000)
+#define MOTOR_DUTY_SMALL_MAX MOTOR_DUTY_CAP(1000)
 
 /** @brief 履带大电机占空比绝对值上限，千分比。 */
-#define MOTOR_DUTY_LARGE_MAX (800)
+#define MOTOR_DUTY_LARGE_MAX MOTOR_DUTY_CAP(800)
+
+_Static_assert(MOTOR_DUTY_LIMIT >= MOTOR_DUTY_MIN &&
+                   MOTOR_DUTY_LIMIT <= MOTOR_DUTY_FULL,
+               "duty limit must stay within MIN..FULL");
 
 /**
  * @brief 判断某路电机能否输出给定占空比。

@@ -47,10 +47,19 @@
 #define PULSE_ON_MS (30U)
 #define PULSE_OFF_MS (100U)
 
-/** @brief 上电默认的控制参数：开关式；切到比例式时的初值。 */
-#define DEFAULT_KP (30U)
-#define DEFAULT_DUTY_MIN (500U)
+/**
+ * @brief 没保存过控制参数时的默认值：比例式，每度 1%，起转 30%，制动 50ms。
+ *
+ * 2026-10-24 在 5kHz 刹车 PWM 下实测 M1：3°～30° 的定位 1～1.5 秒到位，
+ * 过冲不超过 2.4°。
+ */
+#define DEFAULT_MODE (JOINT_MODE_P)
+#define DEFAULT_KP (10U)
+#define DEFAULT_DUTY_MIN (300U)
 #define DEFAULT_BRAKE_MS (50U)
+
+/** @brief 序列化中版本 2 每个关节的字节数，控制参数从这里开始。 */
+#define BLOB_V2_ENTRY_SIZE (28U)
 
 _Static_assert(JOINT_BRAKE_MAX_MS <= REACHED_HOLD_MS,
                "brake must end before the reached hold expires");
@@ -76,7 +85,7 @@ static bool is_mapping_valid(const joint_cal_t *c)
            c->angle_b >= -ANGLE_LIMIT && c->angle_b <= ANGLE_LIMIT &&
            c->angle_b - c->angle_a >= CAL_MIN_ANGLE_SPAN &&
            (c->direction == 1 || c->direction == -1) &&
-           c->duty >= MOTOR_DUTY_MIN && c->duty <= MOTOR_DUTY_SMALL_MAX &&
+           c->duty >= MOTOR_DUTY_MIN && c->duty <= MOTOR_DUTY_FULL &&
            c->tolerance >= TOLERANCE_MIN && c->tolerance <= TOLERANCE_MAX;
 }
 
@@ -182,7 +191,7 @@ void joint_init(joint_control_t *j, joint_hw_t hw)
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         j->states[i].fault = "NONE";
-        j->states[i].tune = (joint_tune_t){JOINT_MODE_BANG, DEFAULT_KP,
+        j->states[i].tune = (joint_tune_t){DEFAULT_MODE, DEFAULT_KP,
                                            DEFAULT_DUTY_MIN, DEFAULT_BRAKE_MS};
     }
 }
@@ -327,6 +336,24 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
     }
     j->states[index].tune = tune;
     return NULL;
+}
+uint16_t joint_median3(uint16_t a, uint16_t b, uint16_t c)
+{
+    if (a > b)
+    {
+        uint16_t t = a;
+        a = b;
+        b = t;
+    }
+    /* 此时 a <= b：中值是 b、c 中较小者与 a 中较大的那个。 */
+    uint16_t low = (b < c) ? b : c;
+    return (a > low) ? a : low;
+}
+/** @brief 本关节允许输出的最大占空比：标定值与全局上限取小。 */
+static unsigned duty_max(const joint_state_t *s)
+{
+    return s->cal.duty < MOTOR_DUTY_SMALL_MAX ? s->cal.duty
+                                              : MOTOR_DUTY_SMALL_MAX;
 }
 void joint_filter(const uint16_t (*samples)[JOINT_COUNT], unsigned count,
                   uint16_t out[JOINT_COUNT], uint16_t spread[JOINT_COUNT])
@@ -517,13 +544,13 @@ bool joint_tick(joint_control_t *j, uint32_t now)
     s->phase = JOINT_MOVING;
     if (proportional)
     {
-        unsigned low = s->tune.duty_min < s->cal.duty ? s->tune.duty_min
-                                                      : s->cal.duty;
+        unsigned high = duty_max(s);
+        unsigned low = s->tune.duty_min < high ? s->tune.duty_min : high;
         uint64_t magnitude_duty =
             low + ((uint64_t)s->tune.kp * (uint32_t)distance + 500U) / 1000U;
-        if (magnitude_duty > s->cal.duty)
+        if (magnitude_duty > high)
         {
-            magnitude_duty = s->cal.duty;
+            magnitude_duty = high;
         }
         if (!output(j, sign * s->cal.direction * (int)magnitude_duty))
         {
@@ -544,7 +571,7 @@ bool joint_tick(joint_control_t *j, uint32_t now)
     {
         j->pulse_on = false;
     }
-    int duty = sign * s->cal.direction * (int)s->cal.duty;
+    int duty = sign * s->cal.direction * (int)duty_max(s);
     if (near)
     {
         if (!j->pulse_on && (uint32_t)(now - j->pulse_ms) >= PULSE_OFF_MS)
@@ -607,6 +634,12 @@ void joint_cal_export(const joint_control_t *j,
     {
         const joint_state_t *s = &j->states[i];
         uint8_t *p = &blob[4U + i * JOINT_CAL_BLOB_ENTRY_SIZE];
+        uint8_t *t = &p[BLOB_V2_ENTRY_SIZE];
+        t[0] = 1U;
+        t[1] = (uint8_t)s->tune.mode;
+        put_u16(&t[2], (uint16_t)s->tune.kp);
+        put_u16(&t[4], (uint16_t)s->tune.duty_min);
+        put_u16(&t[6], (uint16_t)s->tune.brake_ms);
         if (!s->calibrated)
         {
             continue;
@@ -624,17 +657,27 @@ void joint_cal_export(const joint_control_t *j,
     }
 }
 
-unsigned joint_cal_import(joint_control_t *j,
-                          const uint8_t blob[JOINT_CAL_BLOB_SIZE])
+unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
+                          uint32_t size)
 {
-    if (blob[0] != JOINT_CAL_BLOB_VERSION || blob[1] != JOINT_COUNT)
+    bool is_v3 = blob[0] == JOINT_CAL_BLOB_VERSION && size == JOINT_CAL_BLOB_SIZE;
+    bool is_v2 = blob[0] == 2U && size == JOINT_CAL_BLOB_V2_SIZE;
+    if ((!is_v3 && !is_v2) || blob[1] != JOINT_COUNT)
     {
         return 0U;
     }
+    unsigned entry = is_v3 ? JOINT_CAL_BLOB_ENTRY_SIZE : BLOB_V2_ENTRY_SIZE;
     unsigned restored = 0U;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        const uint8_t *p = &blob[4U + i * JOINT_CAL_BLOB_ENTRY_SIZE];
+        const uint8_t *p = &blob[4U + i * entry];
+        const uint8_t *t = &p[BLOB_V2_ENTRY_SIZE];
+        if (is_v3 && t[0] == 1U)
+        {
+            joint_tune_t tune = {(joint_mode_t)t[1], get_u16(&t[2]),
+                                 get_u16(&t[4]), get_u16(&t[6])};
+            (void)joint_set_tune(j, i, tune);
+        }
         if (p[0] != 1U)
         {
             continue;

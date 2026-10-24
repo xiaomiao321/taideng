@@ -106,7 +106,9 @@ static void tune_test(void)
 {
     joint_control_t j = fresh(normal());
     joint_tune_t def = j.states[0].tune;
-    assert(def.mode == JOINT_MODE_BANG);
+    assert(def.mode == JOINT_MODE_P && def.kp == 10 && def.duty_min == 300 &&
+           def.brake_ms == 50);
+    joint_tune_t bang_tune = {JOINT_MODE_BANG, 30, 500, 50};
     joint_tune_t p = {JOINT_MODE_P, 30, 300, 50};
     assert(!joint_set_tune(&j, 1, p)); /* 不要求已标定 */
     joint_tune_t bad = p;
@@ -172,12 +174,56 @@ static void tune_test(void)
     assert(joint_cancel(&plain));
 
     /* 带惯性的模型：两种方式都能到位，比例式加制动的过冲明显更小。 */
-    int32_t bang = inertia_test(def, 150000);
+    int32_t bang = inertia_test(bang_tune, 150000);
     int32_t prop = inertia_test(p, 150000);
     assert(prop < bang);
     (void)inertia_test(p, 30000);
     printf("inertia overshoot: bang %ld mdeg, proportional %ld mdeg\n",
            (long)bang, (long)prop);
+}
+static joint_tune_t p_tune(void)
+{
+    joint_tune_t t = {JOINT_MODE_BANG, 55, 420, 120};
+    return t;
+}
+/** 控制参数随标定保存；未标定关节的控制参数也保存；版本 2 只恢复标定。 */
+static void tune_blob_test(void)
+{
+    joint_control_t source = fresh(normal());
+    assert(!joint_set_tune(&source, 0, p_tune()));
+    assert(!joint_set_tune(&source, 3, p_tune())); /* M4 未标定 */
+    uint8_t blob[JOINT_CAL_BLOB_SIZE];
+    joint_cal_export(&source, blob);
+    joint_control_t restored = fresh(normal());
+    restored.states[0].calibrated = false;
+    assert(joint_cal_import(&restored, blob, sizeof(blob)) == 1U);
+    assert(!memcmp(&restored.states[0].tune, &source.states[0].tune,
+                   sizeof(joint_tune_t)));
+    assert(!memcmp(&restored.states[3].tune, &source.states[3].tune,
+                   sizeof(joint_tune_t)));
+    assert(!restored.states[3].calibrated);
+    assert(restored.states[1].tune.mode == JOINT_MODE_P);
+
+    /* 由版本 3 构造版本 2：去掉每项最后 8 字节。 */
+    uint8_t v2[JOINT_CAL_BLOB_V2_SIZE];
+    memcpy(v2, blob, 4);
+    v2[0] = 2U;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        memcpy(&v2[4 + i * 28], &blob[4 + i * JOINT_CAL_BLOB_ENTRY_SIZE], 28);
+    }
+    joint_control_t migrated = fresh(normal());
+    migrated.states[0].calibrated = false;
+    assert(joint_cal_import(&migrated, v2, sizeof(v2)) == 1U);
+    assert(!memcmp(&migrated.states[0].cal, &source.states[0].cal,
+                   sizeof(joint_cal_t)));
+    assert(migrated.states[0].tune.mode == JOINT_MODE_P &&
+           migrated.states[0].tune.kp == 10);
+    assert(joint_cal_import(&migrated, v2, sizeof(blob)) == 0U);
+
+    assert(joint_median3(1, 2, 3) == 2 && joint_median3(3, 1, 2) == 2 &&
+           joint_median3(2, 3, 1) == 2 && joint_median3(5, 5, 1) == 5 &&
+           joint_median3(100, 4095, 101) == 101 && joint_median3(0, 7, 7) == 7);
 }
 static void filter_test(void)
 {
@@ -327,7 +373,7 @@ int main(void)
     joint_cal_export(&source, blob);
     joint_control_t restored = fresh(normal());
     restored.states[0].calibrated = false;
-    assert(joint_cal_import(&restored, blob) == 2U);
+    assert(joint_cal_import(&restored, blob, sizeof(blob)) == 2U);
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         assert(restored.states[i].calibrated == source.states[i].calibrated);
@@ -341,14 +387,17 @@ int main(void)
     joint_control_t untouched = fresh(normal());
     untouched.states[0].calibrated = false;
     blob[0] = (uint8_t)(JOINT_CAL_BLOB_VERSION + 1U);
-    assert(joint_cal_import(&untouched, blob) == 0U);
+    assert(joint_cal_import(&untouched, blob, sizeof(blob)) == 0U);
     assert(!untouched.states[0].calibrated && !untouched.states[4].calibrated);
     /* 数据损坏成非法参数（占空比 0）：该项被跳过，其余照常恢复。 */
     blob[0] = (uint8_t)JOINT_CAL_BLOB_VERSION;
     blob[4U + 4U * JOINT_CAL_BLOB_ENTRY_SIZE + 2U] = 0U;
     blob[4U + 4U * JOINT_CAL_BLOB_ENTRY_SIZE + 3U] = 0U;
-    assert(joint_cal_import(&untouched, blob) == 1U);
+    assert(joint_cal_import(&untouched, blob, sizeof(blob)) == 1U);
     assert(untouched.states[0].calibrated && !untouched.states[4].calibrated);
+    /* 长度与版本不符：拒绝。 */
+    assert(joint_cal_import(&untouched, blob, JOINT_CAL_BLOB_V2_SIZE) == 0U);
+    tune_blob_test();
 
     /* 理论标定：47k 电位器，角度增大读数减小，参考点 90° 读 2048。
      * 每度 4095*47000/49000/270 ≈ 14.547 个读数，10° 与 170° 距参考点

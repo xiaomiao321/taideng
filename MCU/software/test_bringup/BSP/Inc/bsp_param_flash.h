@@ -38,6 +38,21 @@
 bsp_status_t bsp_param_flash_init(uint32_t payload_size);
 
 /**
+ * @brief 按另一种参数长度只读地查找最新记录，用于从旧格式迁移。
+ *
+ * 不擦除、不改变本模块的初始化状态；应在 bsp_param_flash_init() 之前调用，
+ * 因为 init 换用新长度后可能把存有旧记录的扇区当作备用扇区擦掉。
+ *
+ * @param[in] payload_size 旧格式的参数字节数，4 的倍数，1 至 1024。
+ * @param[out] payload 输出缓冲，至少 payload_size 字节。
+ *
+ * @retval BSP_OK 找到并读出。
+ * @retval BSP_IDLE 没有这种长度的记录。
+ * @retval BSP_ERR_PARAM payload_size 无效。
+ */
+bsp_status_t bsp_param_flash_peek(uint32_t payload_size, void *payload);
+
+/**
  * @brief 读出最新保存的参数。
  *
  * @retval BSP_OK 已读出。
