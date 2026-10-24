@@ -147,7 +147,6 @@ void joint_init(joint_control_t *j, joint_hw_t hw)
 {
     memset(j, 0, sizeof(*j));
     j->hw = hw;
-    j->active = -1;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         j->states[i].fault = "NONE";
@@ -156,59 +155,81 @@ void joint_init(joint_control_t *j, joint_hw_t hw)
                            JOINT_DEFAULT_DUTY_MIN, JOINT_DEFAULT_BRAKE_MS};
     }
 }
-static bool output(joint_control_t *j, int duty)
+bool joint_any_active(const joint_control_t *j)
 {
-    joint_state_t *s = &j->states[j->active];
-    if (s->duty == duty && !j->braking)
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        if (j->states[i].motion.active)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+static bool output(joint_control_t *j, unsigned i, int duty)
+{
+    joint_state_t *s = &j->states[i];
+    if (s->duty == duty && !s->motion.braking)
     {
         return true;
     }
-    if (!j->hw.drive((unsigned)j->active, duty))
+    if (!j->hw.drive(i, duty))
     {
         return false;
     }
     s->duty = duty;
-    j->braking = false;
+    s->motion.braking = false;
     return true;
 }
 /** @brief 开始短路制动；没有制动回调或制动时长为 0 时改为滑行。 */
-static bool brake(joint_control_t *j, uint32_t now)
+static bool brake(joint_control_t *j, unsigned i, uint32_t now)
 {
-    joint_state_t *s = &j->states[j->active];
+    joint_state_t *s = &j->states[i];
     if (!j->hw.brake || s->tune.brake_ms == 0U)
     {
-        return output(j, 0);
+        return output(j, i, 0);
     }
-    if (j->braking)
+    if (s->motion.braking)
     {
         return true;
     }
-    if (!j->hw.brake((unsigned)j->active))
+    if (!j->hw.brake(i))
     {
         return false;
     }
     s->duty = 0;
-    j->braking = true;
-    j->brake_ms = now;
+    s->motion.braking = true;
+    s->motion.brake_ms = now;
     return true;
 }
 /** @brief 制动时间到就松开为滑行。 */
-static bool release_brake(joint_control_t *j, uint32_t now)
+static bool release_brake(joint_control_t *j, unsigned i, uint32_t now)
 {
-    const joint_state_t *s = &j->states[j->active];
-    if (j->braking && (uint32_t)(now - j->brake_ms) >= s->tune.brake_ms)
+    const joint_state_t *s = &j->states[i];
+    if (s->motion.braking &&
+        (uint32_t)(now - s->motion.brake_ms) >= s->tune.brake_ms)
     {
-        return output(j, 0);
+        return output(j, i, 0);
     }
     return true;
 }
-static bool finish(joint_control_t *j, const char *result, joint_phase_t phase)
+/** @brief 回报一条运动命令的结果。 */
+static void report_result(joint_control_t *j, unsigned i, unsigned seq,
+                          const char *result)
 {
-    unsigned index = (unsigned)j->active;
-    bool ok = j->hw.drive(index, 0);
-    joint_state_t *s = &j->states[index];
+    char line[80];
+    (void)snprintf(line, sizeof(line), "JRESULT %u M%u %s\r\n", seq, i + 1U,
+                   result);
+    j->hw.reply(line);
+}
+static bool finish(joint_control_t *j, unsigned i, const char *result,
+                   joint_phase_t phase)
+{
+    bool ok = j->hw.drive(i, 0);
+    joint_state_t *s = &j->states[i];
     s->duty = 0;
-    j->braking = false;
+    s->motion.braking = false;
+    s->motion.active = false;
     if (!ok)
     {
         result = "HARDWARE";
@@ -216,20 +237,20 @@ static bool finish(joint_control_t *j, const char *result, joint_phase_t phase)
     }
     s->phase = phase;
     s->fault = phase == JOINT_FAULT ? result : "NONE";
-    char line[80];
-    (void)snprintf(line, sizeof(line), "JRESULT %u M%u %s\r\n", j->seq,
-                   index + 1U, result);
-    j->active = -1;
-    j->hw.reply(line);
+    report_result(j, i, s->motion.seq, result);
     return ok && phase != JOINT_FAULT;
 }
 bool joint_cancel(joint_control_t *j)
 {
-    if (j->active < 0)
+    bool ok = true;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        return true;
+        if (j->states[i].motion.active && !finish(j, i, "CANCELLED", JOINT_IDLE))
+        {
+            ok = false;
+        }
     }
-    return finish(j, "CANCELLED", JOINT_IDLE);
+    return ok;
 }
 const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c)
 {
@@ -237,11 +258,11 @@ const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c)
     {
         return "CAL_PARAM";
     }
-    if (j->active >= 0)
+    joint_state_t *s = &j->states[index];
+    if (s->motion.active)
     {
         return "BUSY";
     }
-    joint_state_t *s = &j->states[index];
     s->cal = c;
     s->calibrated = true;
     s->phase = JOINT_IDLE;
@@ -265,7 +286,7 @@ const char *joint_set_limits(joint_control_t *j, unsigned index,
     {
         return "NOT_CALIBRATED";
     }
-    if (j->active >= 0)
+    if (s->motion.active)
     {
         return "BUSY";
     }
@@ -291,7 +312,7 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
     {
         return "TUNE_PARAM";
     }
-    if (j->active >= 0)
+    if (j->states[index].motion.active)
     {
         return "BUSY";
     }
@@ -379,24 +400,29 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
     {
         return "POSITION_RANGE";
     }
-    if (j->active >= 0)
+    joint_motion_t *m = &s->motion;
+    if (m->active)
     {
-        return "BUSY";
+        /* 新目标替代旧目标：方向、制动和换向计时沿用，避免带电直接反转。 */
+        report_result(j, index, m->seq, "SUPERSEDED");
     }
-    j->active = (int)index;
-    j->seq = seq;
-    j->start_ms = now;
-    j->progress_ms = now;
-    j->timeout_ms = timeout;
-    j->switch_ms = now;
-    j->last_sign = 0;
-    j->stable = false;
-    j->initial_error = magnitude(target - s->angle);
-    j->best_error = j->initial_error;
-    j->pulse_on = false;
-    j->near_mode = false;
-    j->braking = false;
-    j->pulse_ms = now;
+    else
+    {
+        m->last_sign = 0;
+        m->braking = false;
+        m->switch_ms = now;
+    }
+    m->active = true;
+    m->seq = seq;
+    m->start_ms = now;
+    m->progress_ms = now;
+    m->timeout_ms = timeout;
+    m->stable = false;
+    m->initial_error = magnitude(target - s->angle);
+    m->best_error = m->initial_error;
+    m->pulse_on = false;
+    m->near_mode = false;
+    m->pulse_ms = now;
     s->target = target;
     s->phase = JOINT_SETTLE;
     s->fault = "NONE";
@@ -421,85 +447,83 @@ void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
         }
     }
 }
-bool joint_tick(joint_control_t *j, uint32_t now)
+/** @brief 推进一个运动中关节的控制；返回 false 表示产生了新故障。 */
+static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
 {
-    if (j->active < 0)
-    {
-        return true;
-    }
-    joint_state_t *s = &j->states[j->active];
+    joint_state_t *s = &j->states[i];
+    joint_motion_t *m = &s->motion;
     if (!j->valid || (uint32_t)(now - j->sample_ms) > JOINT_SENSOR_STALE_MS ||
         s->raw == 0 || s->raw >= ADC_RAW_FULL)
     {
-        return finish(j, "SENSOR", JOINT_FAULT);
+        return finish(j, i, "SENSOR", JOINT_FAULT);
     }
-    if ((uint32_t)(now - j->start_ms) >= j->timeout_ms)
+    if ((uint32_t)(now - m->start_ms) >= m->timeout_ms)
     {
-        return finish(j, "TIMEOUT", JOINT_FAULT);
+        return finish(j, i, "TIMEOUT", JOINT_FAULT);
     }
     if (s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
         s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance)
     {
-        return finish(j, "LIMIT", JOINT_FAULT);
+        return finish(j, i, "LIMIT", JOINT_FAULT);
     }
     int32_t error = s->target - s->angle, distance = magnitude(error);
     bool proportional = s->tune.mode == JOINT_MODE_P;
     if (distance <= (int32_t)s->cal.tolerance)
     {
-        if (!j->stable)
+        if (!m->stable)
         {
-            j->stable = true;
-            j->stable_ms = now;
+            m->stable = true;
+            m->stable_ms = now;
             /* 比例式到点先短路制动，吃掉惯性，再松开滑行。 */
-            if (proportional && !brake(j, now))
+            if (proportional && !brake(j, i, now))
             {
-                return finish(j, "HARDWARE", JOINT_FAULT);
+                return finish(j, i, "HARDWARE", JOINT_FAULT);
             }
         }
-        if (!(proportional ? release_brake(j, now) : output(j, 0)))
+        if (!(proportional ? release_brake(j, i, now) : output(j, i, 0)))
         {
-            return finish(j, "HARDWARE", JOINT_FAULT);
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
         }
-        if ((uint32_t)(now - j->stable_ms) >= JOINT_REACHED_HOLD_MS)
+        if ((uint32_t)(now - m->stable_ms) >= JOINT_REACHED_HOLD_MS)
         {
-            return finish(j, "REACHED", JOINT_DONE);
+            return finish(j, i, "REACHED", JOINT_DONE);
         }
         return true;
     }
-    j->stable = false;
-    if (distance + JOINT_PROGRESS_STEP < j->best_error)
+    m->stable = false;
+    if (distance + JOINT_PROGRESS_STEP < m->best_error)
     {
-        j->best_error = distance;
-        j->progress_ms = now;
+        m->best_error = distance;
+        m->progress_ms = now;
     }
-    if (distance > j->initial_error + (int32_t)(2U * s->cal.tolerance +
+    if (distance > m->initial_error + (int32_t)(2U * s->cal.tolerance +
                                                 JOINT_DIRECTION_MARGIN))
     {
-        return finish(j, "DIRECTION", JOINT_FAULT);
+        return finish(j, i, "DIRECTION", JOINT_FAULT);
     }
-    if ((uint32_t)(now - j->progress_ms) >= JOINT_STALL_MS)
+    if ((uint32_t)(now - m->progress_ms) >= JOINT_STALL_MS)
     {
-        return finish(j, "STALL", JOINT_FAULT);
+        return finish(j, i, "STALL", JOINT_FAULT);
     }
     int sign = error > 0 ? 1 : -1;
-    if (sign != j->last_sign)
+    if (sign != m->last_sign)
     {
         /* 比例式过冲换向时先制动；刚启动（last_sign 为 0）时电机本来就停着。 */
         bool ok =
-            (proportional && j->last_sign != 0) ? brake(j, now) : output(j, 0);
+            (proportional && m->last_sign != 0) ? brake(j, i, now) : output(j, i, 0);
         if (!ok)
         {
-            return finish(j, "HARDWARE", JOINT_FAULT);
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
         }
-        j->last_sign = sign;
-        j->switch_ms = now;
+        m->last_sign = sign;
+        m->switch_ms = now;
         s->phase = JOINT_SETTLE;
     }
-    if ((uint32_t)(now - j->switch_ms) < JOINT_REVERSE_SETTLE_MS)
+    if ((uint32_t)(now - m->switch_ms) < JOINT_REVERSE_SETTLE_MS)
     {
-        if (!release_brake(j, now))
+        if (!release_brake(j, i, now))
         {
-            return finish(j, "HARDWARE", JOINT_FAULT);
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
         }
         return true;
     }
@@ -514,9 +538,9 @@ bool joint_tick(joint_control_t *j, uint32_t now)
         {
             magnitude_duty = high;
         }
-        if (!output(j, sign * s->cal.direction * (int)magnitude_duty))
+        if (!output(j, i, sign * s->cal.direction * (int)magnitude_duty))
         {
-            return finish(j, "HARDWARE", JOINT_FAULT);
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
         }
         return true;
     }
@@ -524,40 +548,52 @@ bool joint_tick(joint_control_t *j, uint32_t now)
      * 因为低占空比电机根本转不动。 */
     bool near =
         distance <= (int32_t)(5U * s->cal.tolerance + JOINT_NEAR_MARGIN);
-    if (near && !j->near_mode)
+    if (near && !m->near_mode)
     {
-        j->pulse_on = false;
-        j->pulse_ms = now;
+        m->pulse_on = false;
+        m->pulse_ms = now;
     }
-    j->near_mode = near;
+    m->near_mode = near;
     if (!near)
     {
-        j->pulse_on = false;
+        m->pulse_on = false;
     }
     int duty = sign * s->cal.direction * (int)duty_max(s);
     if (near)
     {
-        if (!j->pulse_on && (uint32_t)(now - j->pulse_ms) >= JOINT_PULSE_OFF_MS)
+        if (!m->pulse_on && (uint32_t)(now - m->pulse_ms) >= JOINT_PULSE_OFF_MS)
         {
-            j->pulse_on = true;
-            j->pulse_ms = now;
+            m->pulse_on = true;
+            m->pulse_ms = now;
         }
-        else if (j->pulse_on &&
-                 (uint32_t)(now - j->pulse_ms) >= JOINT_PULSE_ON_MS)
+        else if (m->pulse_on &&
+                 (uint32_t)(now - m->pulse_ms) >= JOINT_PULSE_ON_MS)
         {
-            j->pulse_on = false;
-            j->pulse_ms = now;
+            m->pulse_on = false;
+            m->pulse_ms = now;
         }
-        if (!j->pulse_on)
+        if (!m->pulse_on)
         {
             duty = 0;
         }
     }
-    if (!output(j, duty))
+    if (!output(j, i, duty))
     {
-        return finish(j, "HARDWARE", JOINT_FAULT);
+        return finish(j, i, "HARDWARE", JOINT_FAULT);
     }
     return true;
+}
+bool joint_tick(joint_control_t *j, uint32_t now)
+{
+    bool ok = true;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        if (j->states[i].motion.active && !tick_one(j, i, now))
+        {
+            ok = false;
+        }
+    }
+    return ok;
 }
 const char *joint_phase_name(joint_phase_t phase)
 {

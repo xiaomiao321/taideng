@@ -106,6 +106,27 @@ typedef enum
     JOINT_PHASE_COUNT
 } joint_phase_t;
 
+/** @brief 一个关节本次运动的过程状态，只在运动期间有意义。 */
+typedef struct
+{
+    bool active;           /**< 是否正在运动。 */
+    int last_sign;         /**< 上一次驱动方向，0 表示刚开始。 */
+    unsigned seq;          /**< 启动本次运动的命令序号。 */
+    uint32_t start_ms;     /**< 运动开始时刻。 */
+    uint32_t progress_ms;  /**< 最近一次误差明显减小的时刻。 */
+    uint32_t stable_ms;    /**< 进入容差的时刻。 */
+    uint32_t switch_ms;    /**< 最近一次换向的时刻。 */
+    uint32_t pulse_ms;     /**< 点动脉冲当前段开始的时刻。 */
+    uint32_t brake_ms;     /**< 本次制动开始的时刻。 */
+    uint32_t timeout_ms;   /**< 本次运动的超时。 */
+    int32_t initial_error; /**< 开始时的误差绝对值。 */
+    int32_t best_error;    /**< 运动中达到过的最小误差。 */
+    bool stable;           /**< 是否处于容差内。 */
+    bool pulse_on;         /**< 点动脉冲是否处于驱动段。 */
+    bool near_mode;        /**< 是否已进入接近目标的点动模式。 */
+    bool braking;          /**< 是否正在短路制动。 */
+} joint_motion_t;
+
 /** @brief 单个关节的运行状态。 */
 typedef struct
 {
@@ -119,6 +140,7 @@ typedef struct
     joint_tune_t tune;
     joint_phase_t phase;
     const char *fault; /**< 最近一次故障名，没有故障时为 "NONE"。 */
+    joint_motion_t motion;
 } joint_state_t;
 
 /** @brief 调用者提供的硬件回调。 */
@@ -132,29 +154,15 @@ typedef struct
     bool (*brake)(unsigned index);
 } joint_hw_t;
 
-/** @brief 全部关节的控制状态。同一时刻最多一个关节在运动。调用者只读。 */
+/**
+ * @brief 全部关节的控制状态。各关节可同时运动、互不影响。调用者只读。
+ */
 typedef struct
 {
     joint_hw_t hw;
     joint_state_t states[JOINT_COUNT];
-    int active;            /**< 正在运动的关节下标，-1 表示没有。 */
-    int last_sign;         /**< 上一次驱动方向。 */
-    unsigned seq;          /**< 启动运动的命令序号。 */
-    uint32_t sample_ms;    /**< 最近一次有效采样的时刻。 */
-    uint32_t start_ms;     /**< 运动开始时刻。 */
-    uint32_t progress_ms;  /**< 最近一次误差明显减小的时刻。 */
-    uint32_t stable_ms;    /**< 进入容差的时刻。 */
-    uint32_t switch_ms;    /**< 最近一次换向的时刻。 */
-    uint32_t pulse_ms;     /**< 点动脉冲当前段开始的时刻。 */
-    uint32_t brake_ms;     /**< 本次制动开始的时刻。 */
-    uint32_t timeout_ms;   /**< 本次运动的超时。 */
-    int32_t initial_error; /**< 开始时的误差绝对值。 */
-    int32_t best_error;    /**< 运动中达到过的最小误差。 */
-    bool valid;            /**< 最近一次采样是否有效。 */
-    bool stable;           /**< 是否处于容差内。 */
-    bool pulse_on;         /**< 点动脉冲是否处于驱动段。 */
-    bool near_mode;        /**< 是否已进入接近目标的点动模式。 */
-    bool braking;          /**< 运动中的关节是否正在短路制动。 */
+    uint32_t sample_ms; /**< 最近一次有效采样的时刻。 */
+    bool valid;         /**< 最近一次采样是否有效。 */
 } joint_control_t;
 
 /** @brief 初始化：全部关节未标定、空闲。 */
@@ -166,7 +174,10 @@ bool joint_cal_valid(const joint_cal_t *c);
 /** @brief 按标定把 ADC 读数换算成角度，毫度。 */
 int32_t joint_angle(const joint_cal_t *c, uint16_t raw);
 
-/** @brief 写入标定；返回 NULL 表示成功，否则为错误名。 */
+/** @brief 是否有任一关节正在运动。 */
+bool joint_any_active(const joint_control_t *j);
+
+/** @brief 写入标定；返回 NULL 表示成功，否则为错误名（该关节运动中为 BUSY）。 */
 const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c);
 
 /**
@@ -183,7 +194,7 @@ const char *joint_cal_from_nominal(const joint_nominal_t *n, joint_cal_t *out);
 /**
  * @brief 只修改已标定关节的允许运动范围，不改换算关系。
  *
- * @return NULL 表示成功；"NOT_CALIBRATED"、"BUSY"（有关节在运动）或
+ * @return NULL 表示成功；"NOT_CALIBRATED"、"BUSY"（该关节在运动）或
  *         "LIMIT_PARAM"（范围无效或超出电位器可测区间）。
  */
 const char *joint_set_limits(joint_control_t *j, unsigned index,
@@ -213,7 +224,12 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
 void joint_filter(const uint16_t (*samples)[JOINT_COUNT], unsigned count,
                   uint16_t out[JOINT_COUNT], uint16_t spread[JOINT_COUNT]);
 
-/** @brief 启动一次运动；返回 NULL 表示已接受，否则为错误名。 */
+/**
+ * @brief 启动一次运动；返回 NULL 表示已接受，否则为错误名。
+ *
+ * 其他关节的运动不受影响。该关节已在运动时，新目标替代旧目标：旧命令回报
+ * JRESULT ... SUPERSEDED，驱动方向和制动状态沿用，进度、超时等重新计算。
+ */
 const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
                        int32_t target, uint32_t timeout, uint32_t now);
 
@@ -228,13 +244,14 @@ void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
                 bool valid, uint32_t now);
 
 /**
- * @brief 周期调用：推进运动控制。
+ * @brief 周期调用：推进全部运动中关节的控制。
  *
- * @retval false 本次调用产生了新的控制故障（运动已停止）。
+ * @retval false 本次调用中有关节产生了新的控制故障（该关节已停止，
+ *         其他关节照常运动，是否全部停机由调用者决定）。
  */
 bool joint_tick(joint_control_t *j, uint32_t now);
 
-/** @brief 取消运动并停机；返回 false 表示停机时硬件失败。 */
+/** @brief 取消全部关节的运动并停机；返回 false 表示停机时硬件失败。 */
 bool joint_cancel(joint_control_t *j);
 
 /** @brief 阶段的短名称，用于状态上报。 */
@@ -262,7 +279,7 @@ void joint_cal_export(const joint_control_t *j,
  * 被跳过，未标记的关节保持原状。
  *
  * @return 成功恢复标定的关节数。
- * @note 只应在没有关节运动时调用（如初始化阶段）。
+ * @note 只应在没有关节运动时调用（如初始化阶段）；运动中的关节被跳过。
  */
 unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
                           uint32_t size);

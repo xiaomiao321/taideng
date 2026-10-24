@@ -70,6 +70,22 @@ void debug_control_init(debug_control_t *c, debug_hw_t hw)
     c->hw = hw;
     c->locked = !stop(c);
 }
+/** @brief 单路 RUN 或多路手动是否正在占用电机（含等待启动）。 */
+static bool manual_active(const debug_control_t *c)
+{
+    if (c->motor || c->pending || c->multi_pending)
+    {
+        return true;
+    }
+    for (unsigned i = 0; i < MOTOR_COUNT; ++i)
+    {
+        if (c->multi_duty[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
 /** @brief 心跳是否有效。 */
 static bool has_heartbeat(const debug_control_t *c, uint32_t now)
 {
@@ -332,7 +348,10 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
                 answer(c, (unsigned)seq, "ERR", "LOCKED");
                 return;
             }
-            if (!stop(c))
+            /* JMOVE 不打断其他关节的运动，只在单路或多路手动占用电机时
+             * 先全部停下接管；改标定、范围和参数仍先全部停下。 */
+            bool move = !strcmp(tokens[0], "JMOVE");
+            if ((!move || manual_active(c)) && !stop(c))
             {
                 answer(c, (unsigned)seq, "ERR", "HARDWARE");
                 return;

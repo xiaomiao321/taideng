@@ -384,6 +384,12 @@ class App:
             return messagebox.askyesno("切换控制", "当前关节定位将取消，是否切换到手动电机控制？")
         return True
 
+    def confirm_joint_move(self):
+        """关节定位不打断其他关节，只在手动电机或板级测试占用输出时确认。"""
+        active = any(self.motor_panel.actual or ()) or self.board_panel.phase != "IDLE"
+        active = active or bool(getattr(self.motor_panel, "pending_mask", 0))
+        return not active or messagebox.askyesno("切换控制", "此操作会停止手动电机输出或正在进行的测试，是否继续？")
+
     def confirm_exclusive(self):
         active = any(self.motor_panel.actual or ()) or any(self.light_panel.actual or ())
         active = active or self.board_panel.phase != "IDLE"

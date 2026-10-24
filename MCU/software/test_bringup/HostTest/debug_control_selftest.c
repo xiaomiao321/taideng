@@ -365,6 +365,19 @@ int main(void)
     assert(aux_calls == 1 && strstr(reply, "ACK 52 MPWM"));
     debug_control_line(&c, "INFO 53", 23);
     assert(strstr(reply, "CAPS MOTOR_PWM 1"));
+    /* JMOVE 不打断其他关节：没有手动控制占用电机时不停机。 */
+    stops_before = stops;
+    unsigned calls_before = joint_calls;
+    debug_control_line(&c, "JMOVE 54 M1 45000 10000", 24);
+    debug_control_line(&c, "JMOVE 55 M1 45000 10000", 25);
+    assert(joint_calls == calls_before + 2 && stops == stops_before &&
+           strstr(reply, "ACK 55 JMOVE"));
+    /* 单路 RUN 占用电机时，JMOVE 先全部停下再接管。 */
+    c.motor = 2;
+    c.duty = 800;
+    debug_control_line(&c, "JMOVE 56 M1 45000 10000", 26);
+    assert(stops == stops_before + 1 && c.motor == 0 &&
+           strstr(reply, "ACK 56 JMOVE"));
     printf("debug control: motor, board and joint protocol tests passed (%u "
            "stop calls)\n",
            stops);

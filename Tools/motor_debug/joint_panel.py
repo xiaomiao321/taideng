@@ -308,7 +308,7 @@ class JointPanel:
                 raise ValueError(f"目标须位于允许范围 {limit_min/1000:g}～{limit_max/1000:g}° 内")
             if not 500 <= timeout <= 60000:
                 raise ValueError("超时范围为 500～60000ms")
-            if not self.app.confirm_exclusive(): return
+            if not self.app.confirm_joint_move(): return
             self.app.worker.submit("JMOVE", self.selected, target, timeout)
             self.notice.set("已请求定位；到位依据真实 POT 反馈与所设容差判定。")
         except ValueError as exc: messagebox.showerror("角度定位", str(exc))
@@ -410,7 +410,7 @@ class JointPanel:
             self.notice.set(f"{label}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
         elif msg[0] == "JRESULT":
             self.notice.set(f"M{msg[2]} 定位：" + {"REACHED": "已在容差内稳定 200ms，停止驱动",
-                "CANCELLED": "已取消"}.get(msg[3], "故障停止：" + FAULTS.get(msg[3], msg[3])))
+                "CANCELLED": "已取消", "SUPERSEDED": "已被新目标替代"}.get(msg[3], "故障停止：" + FAULTS.get(msg[3], msg[3])))
 
     def disconnect(self):
         self.capable = False; self.device.clear(); self.limits.clear(); self.states.clear(); self.pending.clear()

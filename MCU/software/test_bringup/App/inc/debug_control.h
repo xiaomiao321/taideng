@@ -11,6 +11,8 @@
  * - 心跳超时、HOME 按下或硬件失败都会停止全部输出并锁定，
  *   只有显式 STOP ALL（且 HOME 已松开）才解锁；
  * - 电机启动前先停 DEBUG_CONTROL_SETTLE_MS，避免带电直接换向。
+ * - JMOVE 可让多个关节同时运动，不打断其他关节；单路或多路手动占用电机时，
+ *   JMOVE 先全部停下再接管。
  */
 
 #ifndef AITAID_DEBUG_CONTROL_H

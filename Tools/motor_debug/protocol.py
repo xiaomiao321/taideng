@@ -150,7 +150,7 @@ def parse(line):
                 if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT") or p[10] not in ("NONE", "SENSOR", "LIMIT", "STALL", "DIRECTION", "TIMEOUT", "HARDWARE"):
                     raise ValueError()
                 return "JSTATE", int(p[1]), joint, bool(calibrated), bool(valid), raw, angle, target, duty, p[9], p[10]
-            if p[0] == "JRESULT" and len(p) == 4 and p[3] in ("REACHED", "CANCELLED", "SENSOR", "LIMIT", "STALL", "DIRECTION", "TIMEOUT", "HARDWARE"):
+            if p[0] == "JRESULT" and len(p) == 4 and p[3] in ("REACHED", "CANCELLED", "SUPERSEDED", "SENSOR", "LIMIT", "STALL", "DIRECTION", "TIMEOUT", "HARDWARE"):
                 if not 0 <= int(p[1]) <= 65535:
                     raise ValueError()
                 return "JRESULT", int(p[1]), joint, p[3]

@@ -36,6 +36,7 @@ class TraceTests(unittest.TestCase):
                          ("JT", 1234, 1, 2048, 6, 90123, 150000, -450, True, "MOVE"))
         self.assertEqual(parse("JTUNE 10 M3 1 30 300 50"), ("JTUNE", 10, 3, 1, 30, 300, 50))
         self.assertEqual(parse("MPWM 5 1"), ("MPWM", 5, True))
+        self.assertEqual(parse("JRESULT 7 M2 SUPERSEDED"), ("JRESULT", 7, 2, "SUPERSEDED"))
         self.assertEqual(parse("JT 1 M1 4096 0 0 0 0 0 IDLE")[0], "BAD")
         self.assertEqual(parse("JT 1 M1 2048 0 0 0 0 2 IDLE")[0], "BAD")
 

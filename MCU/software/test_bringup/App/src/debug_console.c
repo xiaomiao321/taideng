@@ -262,7 +262,7 @@ static bool manual_control(void)
     {
         debug_board_cancel(&s_board);
     }
-    return s_joints.active < 0 || joint_cancel(&s_joints);
+    return joint_cancel(&s_joints);
 }
 
 static int hex_digit(char ch)
@@ -401,7 +401,7 @@ static const char *set_motor_pwm(const char *const *args, unsigned count)
         {
             return "PWM_PARAM";
         }
-        if (s_joints.active >= 0 || s_board.phase != BOARD_IDLE)
+        if (joint_any_active(&s_joints) || s_board.phase != BOARD_IDLE)
         {
             return "BUSY";
         }
@@ -670,6 +670,8 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
     }
     if (!strcmp(op, "JMOVE") && count == 2U)
     {
+        /* 全板测试会直接驱动电机，关节运动前先取消。 */
+        debug_board_cancel(&s_board);
         return joint_move(&s_joints, seq, index, v[0], (uint32_t)v[1], now);
     }
     if (!strcmp(op, "JTUNE") && count == 4U)
@@ -896,6 +898,7 @@ static void process_console_rx(void)
  * @param[out] is_pending 是否有电机在等待启动。
  *
  * @note 优先级：关节运动 > 全板电机测试 > 多路手动 > 单路 RUN。
+ *       多个关节同时运动时报告编号最小的一个；各路占空比见 MSTATE。
  */
 static void active_motor(unsigned *motor, int *duty, bool *is_pending)
 {
@@ -920,11 +923,15 @@ static void active_motor(unsigned *motor, int *duty, bool *is_pending)
     {
         *is_pending = true;
     }
-    if (s_joints.active >= 0)
+    for (unsigned i = JOINT_COUNT; i-- > 0U;)
     {
-        *motor = (unsigned)s_joints.active + 1U;
-        *duty = s_joints.states[s_joints.active].duty;
-        *is_pending = s_joints.states[s_joints.active].phase == JOINT_SETTLE;
+        const joint_state_t *s = &s_joints.states[i];
+        if (s->motion.active)
+        {
+            *motor = i + 1U;
+            *duty = s->duty;
+            *is_pending = s->phase == JOINT_SETTLE;
+        }
     }
 }
 
@@ -980,6 +987,13 @@ static void report_status(uint32_t now)
     if (motor > 0U && motor <= MOTOR_COUNT)
     {
         duties[motor - 1U] = duty;
+    }
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        if (s_joints.states[i].motion.active)
+        {
+            duties[i] = s_joints.states[i].duty;
+        }
     }
     used = 0U;
     append(out, sizeof(out), &used, "MSTATE %lu", (unsigned long)now);
@@ -1048,7 +1062,7 @@ static void report_trace(void)
     int16_t duty = 0;
     (void)bsp_motor_hbridge_get_duty(
         bsp_motor_handle((bsp_motor_id_t)s_joint_focus), &duty);
-    bool is_braking = s_joints.active == (int)s_joint_focus && s_joints.braking;
+    bool is_braking = s->motion.active && s->motion.braking;
     char out[96];
     (void)snprintf(out, sizeof(out), "JT %lu M%u %u %u %ld %ld %d %u %s\r\n",
                    (unsigned long)s_joints.sample_ms, s_joint_focus + 1U,

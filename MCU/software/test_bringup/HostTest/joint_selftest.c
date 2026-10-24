@@ -7,11 +7,17 @@ static bool hardware_ok;
 static bool is_braking;
 static unsigned brake_calls;
 static char reply[100];
+/* 多关节用例按关节分别记录输出，并保留全部回复。 */
+static int duties[6];
+static bool braked[6];
+static char log_text[2000];
 static bool drive(unsigned index, int duty)
 {
     assert(index < 6);
     output_duty = duty;
     is_braking = false;
+    duties[index] = duty;
+    braked[index] = false;
     return hardware_ok;
 }
 static bool brake_motor(unsigned index)
@@ -19,12 +25,16 @@ static bool brake_motor(unsigned index)
     assert(index < 6);
     output_duty = 0;
     is_braking = true;
+    duties[index] = 0;
+    braked[index] = true;
     ++brake_calls;
     return hardware_ok;
 }
 static void emit(const char *text)
 {
     snprintf(reply, sizeof(reply), "%s", text);
+    size_t used = strlen(log_text);
+    snprintf(&log_text[used], sizeof(log_text) - used, "%s", text);
 }
 static joint_cal_t normal(void)
 {
@@ -40,6 +50,9 @@ static joint_control_t fresh(joint_cal_t cal)
     is_braking = false;
     brake_calls = 0;
     reply[0] = 0;
+    log_text[0] = 0;
+    memset(duties, 0, sizeof(duties));
+    memset(braked, 0, sizeof(braked));
     joint_init(&j, hw);
     assert(!joint_calibrate(&j, 0, cal));
     return j;
@@ -62,13 +75,13 @@ static void plant_test(bool reversed)
     double raw = 2000;
     feed(&j, (uint16_t)raw, 0);
     assert(!joint_move(&j, 10, 0, 130000, 20000, 0));
-    for (uint32_t now = 0; now < 20000 && j.active >= 0; now += 10)
+    for (uint32_t now = 0; now < 20000 && joint_any_active(&j); now += 10)
     {
         raw += output_duty / 1000.0 * 5.0;
         feed(&j, (uint16_t)raw, now);
         assert(joint_tick(&j, now));
     }
-    assert(j.active == -1 && j.states[0].phase == JOINT_DONE &&
+    assert(!joint_any_active(&j) && j.states[0].phase == JOINT_DONE &&
            output_duty == 0);
     assert(j.states[0].angle >= 128000 && j.states[0].angle <= 132000);
     assert(strstr(reply, "REACHED"));
@@ -85,7 +98,7 @@ static int32_t inertia_test(joint_tune_t tune, int32_t target)
     feed(&j, (uint16_t)raw, 0);
     int32_t start = j.states[0].angle, overshoot = 0;
     assert(!joint_move(&j, 20, 0, target, 20000, 0));
-    for (uint32_t now = 0; now < 20000 && j.active >= 0; now += 10)
+    for (uint32_t now = 0; now < 20000 && joint_any_active(&j); now += 10)
     {
         double steady = output_duty / 1000.0 * 8.0;
         speed += is_braking ? -speed * 0.8
@@ -98,7 +111,7 @@ static int32_t inertia_test(joint_tune_t tune, int32_t target)
         overshoot = past > overshoot ? past : overshoot;
         assert(joint_tick(&j, now));
     }
-    assert(j.active == -1 && j.states[0].phase == JOINT_DONE);
+    assert(!joint_any_active(&j) && j.states[0].phase == JOINT_DONE);
     assert(strstr(reply, "REACHED"));
     return overshoot;
 }
@@ -145,7 +158,7 @@ static void tune_test(void)
     assert(joint_tick(&j, 170) && !is_braking && output_duty == 0);
     feed(&j, 2667, 320);
     assert(joint_tick(&j, 320));
-    assert(j.active == -1 && j.states[0].phase == JOINT_DONE);
+    assert(!joint_any_active(&j) && j.states[0].phase == JOINT_DONE);
 
     /* 过冲换向：比例式先制动再反向。 */
     j = fresh(normal());
@@ -224,6 +237,88 @@ static void tune_blob_test(void)
     assert(joint_median3(1, 2, 3) == 2 && joint_median3(3, 1, 2) == 2 &&
            joint_median3(2, 3, 1) == 2 && joint_median3(5, 5, 1) == 5 &&
            joint_median3(100, 4095, 101) == 101 && joint_median3(0, 7, 7) == 7);
+}
+/** 两个关节各自的带惯性模型，读数/10ms。 */
+static void step_plant(double *raw, double *speed, unsigned i)
+{
+    double steady = duties[i] / 1000.0 * 8.0;
+    speed[i] += braked[i]   ? -speed[i] * 0.8
+                : duties[i] ? (steady - speed[i]) * 0.2
+                            : -speed[i] * 0.05;
+    raw[i] += speed[i];
+}
+static void feed_all(joint_control_t *j, const double *raw, uint32_t now)
+{
+    uint16_t values[6];
+    for (unsigned i = 0; i < 6; ++i)
+    {
+        values[i] = (uint16_t)raw[i];
+    }
+    joint_feed(j, values, NULL, true, now);
+}
+static void multi_test(void)
+{
+    /* 两个关节同时运动，各自到位，互不打断。 */
+    joint_control_t j = fresh(normal());
+    joint_cal_t reversed = normal();
+    reversed.raw_a = 3000;
+    reversed.raw_b = 1000;
+    reversed.direction = -1;
+    assert(!joint_calibrate(&j, 1, reversed));
+    double raw[6] = {2000, 2000, 2000, 2000, 2000, 2000}, speed[6] = {0};
+    feed_all(&j, raw, 0);
+    assert(!joint_move(&j, 30, 0, 130000, 20000, 0));
+    assert(!joint_move(&j, 31, 1, 40000, 20000, 0));
+    assert(j.states[0].motion.active && j.states[1].motion.active);
+    bool both_driving = false;
+    for (uint32_t now = 0; now < 20000 && joint_any_active(&j); now += 10)
+    {
+        step_plant(raw, speed, 0);
+        step_plant(raw, speed, 1);
+        feed_all(&j, raw, now);
+        assert(joint_tick(&j, now));
+        both_driving = both_driving || (duties[0] != 0 && duties[1] != 0);
+    }
+    assert(both_driving);
+    assert(j.states[0].phase == JOINT_DONE && j.states[1].phase == JOINT_DONE);
+    assert(j.states[0].angle >= 128000 && j.states[0].angle <= 132000);
+    assert(j.states[1].angle >= 38000 && j.states[1].angle <= 42000);
+    assert(strstr(log_text, "JRESULT 30 M1 REACHED") &&
+           strstr(log_text, "JRESULT 31 M2 REACHED"));
+
+    /* 运动中的关节不能改标定和参数，其他关节可以。 */
+    j = fresh(normal());
+    double still[6] = {2000, 2000, 2000, 2000, 2000, 2000};
+    feed_all(&j, still, 0);
+    assert(!joint_move(&j, 40, 0, 150000, 10000, 0));
+    assert(!strcmp(joint_calibrate(&j, 0, normal()), "BUSY"));
+    assert(!strcmp(joint_set_limits(&j, 0, 10000, 170000), "BUSY"));
+    joint_tune_t t = j.states[0].tune;
+    assert(!strcmp(joint_set_tune(&j, 0, t), "BUSY"));
+    assert(!joint_calibrate(&j, 2, normal()));
+    assert(!joint_set_tune(&j, 2, t));
+
+    /* 同一关节的新目标替代旧目标：旧命令回报 SUPERSEDED，方向不变时不重新停顿。 */
+    assert(joint_tick(&j, 0));
+    feed_all(&j, still, 100);
+    assert(joint_tick(&j, 100) && duties[0] > 0);
+    assert(!joint_move(&j, 41, 0, 160000, 10000, 110));
+    assert(strstr(log_text, "JRESULT 40 M1 SUPERSEDED"));
+    assert(j.states[0].motion.seq == 41 && j.states[0].target == 160000);
+    feed_all(&j, still, 110);
+    assert(joint_tick(&j, 110) && duties[0] > 0);
+
+    /* 一个关节的传感器故障只停它自己，另一个继续。 */
+    assert(!joint_move(&j, 42, 2, 150000, 10000, 110));
+    double broken[6] = {2000, 2000, 0, 2000, 2000, 2000};
+    feed_all(&j, broken, 120);
+    assert(!joint_tick(&j, 120));
+    assert(!strcmp(j.states[2].fault, "SENSOR") && !j.states[2].motion.active);
+    assert(j.states[0].motion.active && duties[0] > 0 && duties[2] == 0);
+
+    /* 取消全部。 */
+    assert(joint_cancel(&j) && !joint_any_active(&j));
+    assert(duties[0] == 0 && strstr(log_text, "JRESULT 41 M1 CANCELLED"));
 }
 static void filter_test(void)
 {
@@ -352,7 +447,7 @@ int main(void)
     j = fresh(cal);
     feed(&j, 2000, 0);
     assert(!joint_move(&j, 8, 0, 150000, 10000, 0));
-    assert(joint_cancel(&j) && output_duty == 0 && j.active == -1 &&
+    assert(joint_cancel(&j) && output_duty == 0 && !joint_any_active(&j) &&
            strstr(reply, "CANCELLED"));
     j = fresh(cal);
     feed(&j, 2000, UINT32_MAX - 100);
@@ -455,9 +550,11 @@ int main(void)
 
     tune_test();
     filter_test();
+    multi_test();
     puts("joint control: calibration, inverse sensor, simulated plant, "
          "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
          "rollover, calibration export/import, nominal calibration, limits, "
-         "proportional mode with braking and ADC filter passed");
+         "proportional mode with braking, ADC filter and concurrent joints "
+         "passed");
     return 0;
 }
