@@ -137,6 +137,15 @@ static void tune_test(void)
     bad.brake_ms = JOINT_BRAKE_MAX_MS + 1U;
     assert(joint_set_tune(&j, 0, bad));
     assert(!strcmp(joint_set_tune(&j, 6, p), "JOINT_ID"));
+    /* 最高占空比写进 cal.duty，要求已标定、非零且不超过上限。 */
+    assert(!strcmp(joint_set_duty_max(&j, 1, 500), "NOT_CALIBRATED"));
+    assert(!strcmp(joint_set_duty_max(&j, 0, 0), "TUNE_PARAM"));
+    assert(!strcmp(joint_set_duty_max(&j, 0, 99), "TUNE_PARAM"));
+    assert(!strcmp(joint_set_duty_max(&j, 0, MOTOR_DUTY_LIMIT + 1U),
+                   "TUNE_PARAM"));
+    assert(!strcmp(joint_set_duty_max(&j, 6, 500), "JOINT_ID"));
+    assert(!joint_set_duty_max(&j, 0, 600) && j.states[0].cal.duty == 600);
+    assert(!joint_set_duty_max(&j, 0, 800));
 
     /* 比例式占空比：远处饱和到 cal.duty，近处为起转占空比加比例项。 */
     assert(!joint_set_tune(&j, 0, p));

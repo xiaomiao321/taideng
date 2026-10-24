@@ -63,7 +63,7 @@ class JointPanel:
         ttk.Label(box, text="正转方向").grid(row=2, column=0, pady=5)
         ttk.Combobox(box, textvariable=self.fields["direction"], values=list(DIRECTIONS), state="readonly",
                      width=20).grid(row=2, column=1, columnspan=2, sticky="w")
-        ttk.Label(box, text="占空比 10～100%").grid(row=2, column=3)
+        ttk.Label(box, text="最高占空比 10～100%").grid(row=2, column=3)
         ttk.Spinbox(box, from_=10, to=100, increment=1, textvariable=self.fields["duty"], width=9).grid(row=2, column=4)
         tolerance = ttk.Frame(box)
         tolerance.grid(row=2, column=5)
@@ -115,7 +115,8 @@ class JointPanel:
         sections.add(tune, text="电机调试 · 上电默认 5kHz 刹车，参数存入 MCU")
         self.tune_fields = {"khz": tk.StringVar(value="5"), "decay": tk.StringVar(value="刹车"),
                             "mode": tk.StringVar(value="比例式"), "kp": tk.StringVar(value="1"),
-                            "low": tk.StringVar(value="30"), "brake": tk.StringVar(value="50")}
+                            "low": tk.StringVar(value="30"), "brake": tk.StringVar(value="50"),
+                            "high": tk.StringVar()}
         ttk.Label(tune, text="PWM 频率 kHz").grid(row=0, column=0, padx=5, pady=4, sticky="w")
         ttk.Combobox(tune, textvariable=self.tune_fields["khz"], values=PWM_KHZ, state="readonly",
                      width=6).grid(row=0, column=1, sticky="w")
@@ -135,12 +136,14 @@ class JointPanel:
         ttk.Entry(tune, textvariable=self.tune_fields["low"], width=6).grid(row=1, column=5, sticky="w")
         ttk.Label(tune, text="制动 ms").grid(row=1, column=6, padx=(12, 5))
         ttk.Entry(tune, textvariable=self.tune_fields["brake"], width=6).grid(row=1, column=7, sticky="w")
+        ttk.Label(tune, text="最高 %").grid(row=1, column=8, padx=(12, 5))
+        ttk.Entry(tune, textvariable=self.tune_fields["high"], width=6).grid(row=1, column=9, sticky="w")
         self.tune_btn = ttk.Button(tune, text="下发当前关节", command=self.apply_tune)
-        self.tune_btn.grid(row=1, column=8, padx=8)
+        self.tune_btn.grid(row=1, column=10, padx=8)
         self.tune_status = tk.StringVar(value="MCU：—")
-        ttk.Label(tune, textvariable=self.tune_status).grid(row=2, column=0, columnspan=9, sticky="w")
+        ttk.Label(tune, textvariable=self.tune_status).grid(row=2, column=0, columnspan=11, sticky="w")
         record = ttk.Frame(tune)
-        record.grid(row=3, column=0, columnspan=9, sticky="w", pady=(6, 0))
+        record.grid(row=3, column=0, columnspan=11, sticky="w", pady=(6, 0))
         self.trace_btn = ttk.Button(record, text="开始记录", command=self.toggle_trace)
         self.trace_btn.pack(side="left")
         self.trace_status = tk.StringVar(value="每 10ms 记录当前关节的读数、噪声、角度、占空比，存为 records 目录下的 CSV")
@@ -219,6 +222,7 @@ class JointPanel:
         self.set_fields(None)
         # 参考点读数属于上一个关节，切换后必须重新记录；范围改用新关节的 MCU 值。
         for key in ("raw_ref", "limit_min", "limit_max"): self.nominal[key].set("")
+        self.tune_fields["high"].set("")  # 收到新关节的 JTUNE 后重新填入
         self.fill_limits()
         for key, value in self.forms.get(self.selected, {}).items(): self.fields[key].set(value)
         self.history.clear()
@@ -356,7 +360,8 @@ class JointPanel:
         mode = MODES[f["mode"]]
         try: brake = int(f["brake"])
         except ValueError: raise ValueError("制动时长须为 0～200ms 的整数") from None
-        return mode, percent(f["kp"]), percent(f["low"]), brake
+        high = (percent(f["high"]),) if f["high"] else ()  # 留空不改最高占空比
+        return (mode, percent(f["kp"]), percent(f["low"]), brake, *high)
 
     def apply_tune(self):
         try:
@@ -365,7 +370,7 @@ class JointPanel:
                 raise ValueError("请连接支持电机调试的新固件")
             if not self.app.confirm_exclusive(): return
             self.app.worker.submit("JTUNE", self.selected, values)
-            self.notice.set("下发控制参数会先停止全部电机，并随标定保存到 MCU；开关式只用标定里的占空比。")
+            self.notice.set("下发控制参数会先停止全部电机，并随标定保存到 MCU；最高占空比即标定里的占空比，两种方式都受它限制。")
         except (KeyError, ValueError) as exc: messagebox.showerror("控制参数", str(exc))
 
     def toggle_trace(self):
@@ -415,6 +420,8 @@ class JointPanel:
             self.pwm = (msg[1], msg[2])
         elif msg[0] == "JTUNE":
             self.tunes[msg[2]] = msg[3:]
+            if msg[2] == self.selected and msg[7] and not self.tune_fields["high"].get():
+                self.tune_fields["high"].set(f"{msg[7]/10:g}")
         elif msg[0] == "JT":
             if msg[2] == self.selected:
                 self.trace_at, self.spread = now, msg[4]
@@ -480,9 +487,10 @@ class JointPanel:
         self.pwm_status.set("MCU：—" if not self.pwm else
                             f"MCU 当前：{self.pwm[0]}kHz {'刹车' if self.pwm[1] else '滑行'}")
         t = self.tunes.get(self.selected)
+        high = "" if not t or not t[4] else f" 最高 {t[4]/10:g}%"
         self.tune_status.set(f"M{self.selected} MCU 当前：—" if not t else
-                             f"M{self.selected} MCU 当前：开关式，占空比用标定值" if t[0] == 0 else
-                             f"M{self.selected} MCU 当前：比例式 每度 {t[1]/10:g}% 起转 {t[2]/10:g}% 制动 {t[3]}ms")
+                             f"M{self.selected} MCU 当前：开关式{high}" if t[0] == 0 else
+                             f"M{self.selected} MCU 当前：比例式 每度 {t[1]/10:g}% 起转 {t[2]/10:g}% 制动 {t[3]}ms{high}")
         rec = self.app.recorder
         if self.tracing and rec.file:
             noise = "" if self.spread is None else f"  本次采样极差 {self.spread}"

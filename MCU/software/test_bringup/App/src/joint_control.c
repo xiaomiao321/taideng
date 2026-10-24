@@ -319,6 +319,30 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
     j->states[index].tune = tune;
     return NULL;
 }
+
+const char *joint_set_duty_max(joint_control_t *j, unsigned index,
+                               unsigned duty)
+{
+    if (index >= JOINT_COUNT)
+    {
+        return "JOINT_ID";
+    }
+    joint_state_t *s = &j->states[index];
+    if (!s->calibrated)
+    {
+        return "NOT_CALIBRATED";
+    }
+    if (duty == 0U || !motor_duty_valid(index, (int)duty))
+    {
+        return "TUNE_PARAM";
+    }
+    if (s->motion.active)
+    {
+        return "BUSY";
+    }
+    s->cal.duty = duty;
+    return NULL;
+}
 uint16_t joint_median3(uint16_t a, uint16_t b, uint16_t c)
 {
     if (a > b)

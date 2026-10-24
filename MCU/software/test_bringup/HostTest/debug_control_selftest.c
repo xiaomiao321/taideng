@@ -46,8 +46,8 @@ static const char *hw_joint(const char *op, unsigned seq, unsigned id,
     }
     else if (!strcmp(op, "JTUNE"))
     {
-        assert(count == 4 && v[0] == 1 && v[1] == 30 && v[2] == 300 &&
-               v[3] == 50);
+        assert((count == 4 || (count == 5 && v[4] == 700)) && v[0] == 1 &&
+               v[1] == 30 && v[2] == 300 && v[3] == 50);
     }
     else if (!strcmp(op, "JTRACE"))
     {
@@ -349,13 +349,18 @@ int main(void)
            stops == stops_before + 1);
     debug_control_line(&c, "JTUNE 47 M1 1 30 300", 17);
     assert(joint_calls == 6 && strstr(reply, "JOINT_PARAM"));
+    /* 第 5 个参数为可选的最高占空比，再多就是格式错误。 */
+    debug_control_line(&c, "JTUNE 147 M1 1 30 300 50 700 1", 17);
+    assert(joint_calls == 6 && strstr(reply, "JOINT_PARAM"));
+    debug_control_line(&c, "JTUNE 148 M1 1 30 300 50 700", 17);
+    assert(joint_calls == 7 && strstr(reply, "ACK 148 JTUNE"));
     c.linked = false;
     stops_before = stops;
     debug_control_line(&c, "JTRACE 48 M1 1", 18);
-    assert(joint_calls == 7 && strstr(reply, "ACK 48 JTRACE") &&
+    assert(joint_calls == 8 && strstr(reply, "ACK 48 JTRACE") &&
            stops == stops_before);
     debug_control_line(&c, "JTUNE 49 M1 1 30 300 50", 19);
-    assert(joint_calls == 7 && strstr(reply, "NO_HEARTBEAT"));
+    assert(joint_calls == 8 && strstr(reply, "NO_HEARTBEAT"));
     /* MPWM 交给 aux，与 LSET 一样要心跳。 */
     c.hw.aux = hw_aux;
     debug_control_line(&c, "MPWM 50 5 1", 20);

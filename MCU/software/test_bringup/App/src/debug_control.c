@@ -313,7 +313,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
                          : trace                       ? 1U
                          : !strcmp(tokens[0], "CAL")   ? 7U
                          : nominal                     ? MAX_JOINT_ARGS
-                         : !strcmp(tokens[0], "JTUNE") ? 4U
+                         : !strcmp(tokens[0], "JTUNE") ? (n == 8U ? 5U : 4U)
                                                        : 2U;
         unsigned joint = (n >= 3U)
                              ? parse_motor_name(tokens[2], JOINT_MOTOR_COUNT)

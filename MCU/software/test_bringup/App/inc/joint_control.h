@@ -214,6 +214,15 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
                            joint_tune_t tune);
 
 /**
+ * @brief 设置闭环的最高占空比，即标定里的 cal.duty；两种控制方式都受它限制。
+ *
+ * @return NULL 表示成功；"JOINT_ID"、"NOT_CALIBRATED"、"BUSY" 或
+ *         "TUNE_PARAM"。
+ */
+const char *joint_set_duty_max(joint_control_t *j, unsigned index,
+                               unsigned duty);
+
+/**
  * @brief 把多次扫描的读数合成一组：每路去掉最大、最小各四分之一后取平均。
  *
  * @param[in] samples count 组读数，每组 JOINT_COUNT 个。

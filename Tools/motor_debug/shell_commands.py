@@ -18,8 +18,9 @@ HELP = """命令（占空比用百分数，时长用 ms）：
                          down 减小 / up 增大，正转使角度 + 增大 / - 减小，
                          占空比 80%，容差 2°，允许 10～170°，阻值 47kΩ
                          （省略按 45kΩ）。电位器须 1:1 装在关节轴上
-  tune M1 p 1 30 50       比例式控制：每度误差加 1% 占空比，起转 30%，
-                         到位和换向时制动 50ms，保存到 MCU；tune M1 bang 改为开关式
+  tune M1 p 1 30 50 [80]  比例式控制：每度误差加 1% 占空比，起转 30%，
+                         到位和换向时制动 50ms，最高 80%（省略不改），保存到 MCU；
+                         tune M1 bang [80] 改为开关式
   trace M1 on / off       每 10ms 上报 M1 的读数、噪声、角度、占空比，
                          自动存成 records 目录下的 CSV
   pwm [5 brake]          查询或设置电机 PWM：频率 1/2/4/5/10/20kHz，
@@ -123,10 +124,10 @@ def parse_shell(text):
                   percent(args[5]), millidegrees(args[6]), millidegrees(args[7]), millidegrees(args[8]),
                   kilohms(args[9]) if len(args) == 10 else 0)
         return send("JNOM", int(args[0][1]), values)
-    if name == "tune" and len(args) == 2 and args[1].lower() == "bang" and re.fullmatch(r"[Mm][1-6]", args[0]):
-        return send("JTUNE", int(args[0][1]), (0, 30, 500, 50))
-    if name == "tune" and len(args) == 5 and args[1].lower() == "p" and re.fullmatch(r"[Mm][1-6]", args[0]):
-        return send("JTUNE", int(args[0][1]), (1, percent(args[2]), percent(args[3]), integer(args[4])))
+    if name == "tune" and len(args) in (2, 3) and args[1].lower() == "bang" and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JTUNE", int(args[0][1]), (0, 30, 500, 50, *map(percent, args[2:])))
+    if name == "tune" and len(args) in (5, 6) and args[1].lower() == "p" and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JTUNE", int(args[0][1]), (1, percent(args[2]), percent(args[3]), integer(args[4]), *map(percent, args[5:])))
     if name == "trace" and len(args) == 2 and args[1].lower() in ("on", "off") and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JTRACE", int(args[0][1]), int(args[1].lower() == "on"))
     if name == "pwm" and not args:

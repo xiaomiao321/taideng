@@ -63,9 +63,9 @@ def command(kind, seq, motor=1, duty=800, duration=500):
                 raise ValueError("数据记录参数须为 on 或 off")
             return f"JTRACE {seq} M{motor} {duty}\n"
         if kind == "JTUNE":
-            if not isinstance(duty, (tuple, list)) or len(duty) != 4:
+            if not isinstance(duty, (tuple, list)) or len(duty) not in (4, 5):
                 raise ValueError("控制参数不完整")
-            mode, kp, low, brake = duty
+            mode, kp, low, brake, *high = duty
             if mode not in (0, 1) or type(kp) is not int or not 0 <= kp <= 1000:
                 raise ValueError("比例系数须为 0～100%/度")
             if type(low) is not int or low <= 0:
@@ -73,7 +73,11 @@ def command(kind, seq, motor=1, duty=800, duration=500):
             validate_duty(motor, low)
             if type(brake) is not int or not 0 <= brake <= 200:
                 raise ValueError("制动时长须为 0～200ms")
-            return f"JTUNE {seq} M{motor} {mode} {kp} {low} {brake}\n"
+            if high:  # 可选的最高占空比，写入该关节标定的占空比
+                if type(high[0]) is not int or high[0] <= 0:
+                    raise ValueError("最高占空比须为正数")
+                validate_duty(motor, high[0])
+            return f"JTUNE {seq} M{motor} {mode} {kp} {low} {brake}" + "".join(f" {h}" for h in high) + "\n"
         if type(duty) is not int or not -360000 <= duty <= 360000 or type(duration) is not int or not 500 <= duration <= 60000:
             raise ValueError("目标角度或超时时间不正确（500～60000ms）")
         return f"JMOVE {seq} M{motor} {duty} {duration}\n"
@@ -108,11 +112,12 @@ def parse(line):
             if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT"):
                 raise ValueError()
             return "JT", tick, int(p[2][1]), raw, spread, angle, target, duty, bool(brake), p[9]
-        if p[0] == "JTUNE" and len(p) == 7 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
-            mode, kp, low, brake = map(int, p[3:])
+        if p[0] == "JTUNE" and len(p) in (7, 8) and p[2] in tuple(f"M{i}" for i in range(1, 7)):
+            mode, kp, low, brake, *high = map(int, p[3:])
             if mode not in (0, 1):
                 raise ValueError()
-            return "JTUNE", int(p[1]), int(p[2][1]), mode, kp, low, brake
+            # 最高占空比：旧固件不报为 None，未标定时固件报 0
+            return "JTUNE", int(p[1]), int(p[2][1]), mode, kp, low, brake, (high or [None])[0]
         if p[0] == "MPWM" and len(p) == 3:
             khz, slow = int(p[1]), int(p[2])
             if slow not in (0, 1):

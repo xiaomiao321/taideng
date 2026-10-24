@@ -485,10 +485,10 @@ static void joint_report(unsigned index, uint32_t now, bool config)
     }
     if (config)
     {
-        (void)snprintf(out, sizeof(out), "JTUNE %lu M%u %u %u %u %u\r\n",
+        (void)snprintf(out, sizeof(out), "JTUNE %lu M%u %u %u %u %u %u\r\n",
                        (unsigned long)now, index + 1U,
                        (unsigned)s->tune.mode, s->tune.kp, s->tune.duty_min,
-                       s->tune.brake_ms);
+                       s->tune.brake_ms, s->calibrated ? s->cal.duty : 0U);
         (void)send_line(out);
     }
     bool is_fresh =
@@ -678,15 +678,26 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
         debug_board_cancel(&s_board);
         return joint_move(&s_joints, seq, index, v[0], (uint32_t)v[1], now);
     }
-    if (!strcmp(op, "JTUNE") && count == 4U)
+    /* 第 5 个参数可选，为最高占空比；任一项被拒绝时两项都不改。 */
+    if (!strcmp(op, "JTUNE") && (count == 4U || count == 5U))
     {
-        if (v[0] < 0 || v[1] < 0 || v[2] < 0 || v[3] < 0)
+        if (v[0] < 0 || v[1] < 0 || v[2] < 0 || v[3] < 0 ||
+            (count == 5U && v[4] < 0))
         {
             return "TUNE_PARAM";
         }
+        joint_tune_t old = s_joints.states[index].tune;
         joint_tune_t tune = {(joint_mode_t)v[0], (unsigned)v[1], (unsigned)v[2],
                              (unsigned)v[3]};
         const char *err = joint_set_tune(&s_joints, index, tune);
+        if (!err && count == 5U)
+        {
+            err = joint_set_duty_max(&s_joints, index, (unsigned)v[4]);
+            if (err)
+            {
+                s_joints.states[index].tune = old;
+            }
+        }
         if (!err)
         {
             commit_calibration(now);
