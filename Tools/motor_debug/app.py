@@ -141,7 +141,7 @@ class SerialWorker(threading.Thread):
                 self.seq = (self.seq + 1) & 65535
                 self.events.put(("sent", (kind, self.seq, (selected, speed, duration))))
                 if kind in ("STOP", "RUN", "TEST", "CAL", "JMOVE", "JNOM", "JLIM"):
-                    joints.cancel()
+                    if kind != "JMOVE": joints.cancel()  # 与固件一致：定位不打断其他关节
                     if board:
                         finish("CANCELLED")
                     motor, duty = 0, 0

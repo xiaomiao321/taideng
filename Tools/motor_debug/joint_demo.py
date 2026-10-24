@@ -4,17 +4,18 @@ from joint_model import Calibration, Nominal
 
 class DemoJoints:
     def __init__(self, emit):
-        self.emit = emit; self.configs = {}; self.focus = 1; self.active = None
-        self.targets = {}; self.phases = {}; self.started = 0.; self.seq = 0
-        self.stable = None
+        self.emit = emit; self.configs = {}; self.focus = 1
+        self.targets = {}; self.phases = {}; self.round = 0
+        self.active = {}  # 关节号 -> [seq, 开始时刻, 超时秒, 进入容差时刻]
 
     def cancel(self):
-        if self.active:
-            self.emit(f"JRESULT {self.seq} M{self.active} CANCELLED")
-            self.phases[self.active] = "IDLE"; self.active = None
+        for joint, (seq, *_) in self.active.items():
+            self.emit(f"JRESULT {seq} M{joint} CANCELLED")
+            self.phases[joint] = "IDLE"
+        self.active.clear()
 
     def request(self, kind, seq, joint, value, duration, vals, tick):
-        self.focus = joint
+        if kind != "JMOVE": self.focus = joint
         if kind in ("CAL", "JNOM"):
             try:
                 cal = (Calibration(*value) if kind == "CAL" else Nominal(*value).calibration()).validate()
@@ -32,8 +33,8 @@ class DemoJoints:
             cal = self.configs.get(joint)
             if not cal: return "NOT_CALIBRATED"
             if not cal.limits[0] <= value <= cal.limits[1]: return "TARGET_RANGE"
-            self.targets[joint] = value; self.active = joint; self.seq = seq
-            self.started = time.monotonic(); self.timeout = duration/1000; self.stable = None
+            if joint in self.active: self.emit(f"JRESULT {self.active[joint][0]} M{joint} SUPERSEDED")
+            self.targets[joint] = value; self.active[joint] = [seq, time.monotonic(), duration/1000, None]
             self.phases[joint] = "SETTLE"
         if kind in ("CAL", "JGET", "JNOM", "JLIM") and joint in self.configs:
             cal = self.configs[joint]
@@ -43,26 +44,33 @@ class DemoJoints:
 
     def step(self, vals, tick):
         motor = duty = 0
-        if self.active:
-            joint = self.active; cal = self.configs[joint]
-            now = time.monotonic(); angle = cal.angle(vals[joint-1]); error = self.targets[joint]-angle
-            if now-self.started > self.timeout:
-                self.emit(f"JRESULT {self.seq} M{joint} TIMEOUT")
-                self.phases[joint] = "FAULT"; self.active = None
+        duties = {}
+        now = time.monotonic()
+        for joint, motion in list(self.active.items()):
+            seq, started, timeout, stable = motion
+            cal = self.configs[joint]; angle = cal.angle(vals[joint-1]); error = self.targets[joint]-angle
+            if now-started > timeout:
+                self.emit(f"JRESULT {seq} M{joint} TIMEOUT")
+                self.phases[joint] = "FAULT"; del self.active[joint]
             elif abs(error) <= cal.tolerance:
-                if self.stable is None: self.stable = now
-                if now-self.stable >= .2:
-                    self.emit(f"JRESULT {self.seq} M{joint} REACHED")
-                    self.phases[joint] = "DONE"; self.active = None
-            elif now-self.started >= .1:
-                self.stable = None; self.phases[joint] = "MOVE"
-                motor = joint; duty = (1 if error > 0 else -1)*cal.direction*cal.duty
+                if stable is None: motion[3] = now
+                elif now-stable >= .2:
+                    self.emit(f"JRESULT {seq} M{joint} REACHED")
+                    self.phases[joint] = "DONE"; del self.active[joint]
+            elif now-started >= .1:
+                motion[3] = None; self.phases[joint] = "MOVE"
+                duties[joint] = (1 if error > 0 else -1)*cal.direction*cal.duty
                 target_raw = cal.raw_a + (self.targets[joint]-cal.angle_a)*(cal.raw_b-cal.raw_a)/(cal.angle_b-cal.angle_a)
                 diff = target_raw-vals[joint-1]
                 vals[joint-1] += max(-cal.duty*.03, min(cal.duty*.03, diff))
-        joint = self.focus; cal = self.configs.get(joint)
-        angle = int(cal.angle(vals[joint-1])) if cal else 0
-        phase = self.phases.get(joint, "IDLE")
-        self.emit(f"JSTATE {tick} M{joint} {int(cal is not None)} 1 {int(vals[joint-1])} {angle} "
-                  f"{self.targets.get(joint,angle)} {duty if motor==joint else 0} {phase} {'TIMEOUT' if phase=='FAULT' else 'NONE'}")
+                if not motor: motor, duty = joint, duties[joint]
+        # 与固件一致：焦点关节和运动中的关节每次都报，其余轮流补报一个。
+        self.round = self.round % 6 + 1
+        for joint in range(1, 7):
+            if joint not in (self.focus, self.round) and joint not in self.active: continue
+            cal = self.configs.get(joint)
+            angle = int(cal.angle(vals[joint-1])) if cal else 0
+            phase = self.phases.get(joint, "IDLE")
+            self.emit(f"JSTATE {tick} M{joint} {int(cal is not None)} 1 {int(vals[joint-1])} {angle} "
+                      f"{self.targets.get(joint,angle)} {duties.get(joint, 0)} {phase} {'TIMEOUT' if phase=='FAULT' else 'NONE'}")
         return motor, duty

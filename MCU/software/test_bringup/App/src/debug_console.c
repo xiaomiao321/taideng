@@ -72,8 +72,10 @@ static bool s_is_cal_store_ok = false;
 static debug_control_t s_control;
 static debug_board_t s_board;
 static joint_control_t s_joints;
-/** @brief JGET/CAL/JMOVE 最近操作的关节，周期 JSTATE 报告它。 */
+/** @brief JGET/CAL 等最近操作的关节（JMOVE 除外），JTRACE 记录它，周期 JSTATE 每次都报告它。 */
 static unsigned s_joint_focus = 0U;
+/** @brief 周期 JSTATE 轮流补报的关节，使空闲关节约每 600ms 刷新一次。 */
+static unsigned s_joint_round = 0U;
 
 /** @brief 正在拼接的命令行。 */
 static char s_line[DEBUG_CONTROL_LINE_MAX];
@@ -463,28 +465,28 @@ static bool joint_brake(unsigned index)
     return bsp_motor_brake((bsp_motor_id_t)index) == BSP_OK;
 }
 
-/** @brief 上报焦点关节的状态；config 为 true 时先上报标定参数。 */
-static void joint_report(uint32_t now, bool config)
+/** @brief 上报一个关节的状态；config 为 true 时先上报标定参数。 */
+static void joint_report(unsigned index, uint32_t now, bool config)
 {
-    const joint_state_t *s = &s_joints.states[s_joint_focus];
+    const joint_state_t *s = &s_joints.states[index];
     char out[128];
     if (config && s->calibrated)
     {
         (void)snprintf(
             out, sizeof(out), "JCAL %lu M%u %u %ld %u %ld %d %u %u\r\n",
-            (unsigned long)now, s_joint_focus + 1U, (unsigned)s->cal.raw_a,
+            (unsigned long)now, index + 1U, (unsigned)s->cal.raw_a,
             (long)s->cal.angle_a, (unsigned)s->cal.raw_b, (long)s->cal.angle_b,
             s->cal.direction, s->cal.duty, s->cal.tolerance);
         (void)send_line(out);
         (void)snprintf(out, sizeof(out), "JLIM %lu M%u %ld %ld\r\n",
-                       (unsigned long)now, s_joint_focus + 1U,
+                       (unsigned long)now, index + 1U,
                        (long)s->cal.limit_min, (long)s->cal.limit_max);
         (void)send_line(out);
     }
     if (config)
     {
         (void)snprintf(out, sizeof(out), "JTUNE %lu M%u %u %u %u %u\r\n",
-                       (unsigned long)now, s_joint_focus + 1U,
+                       (unsigned long)now, index + 1U,
                        (unsigned)s->tune.mode, s->tune.kp, s->tune.duty_min,
                        s->tune.brake_ms);
         (void)send_line(out);
@@ -494,7 +496,7 @@ static void joint_report(uint32_t now, bool config)
         (uint32_t)(HAL_GetTick() - s_joints.sample_ms) <= JOINT_SENSOR_STALE_MS;
     (void)snprintf(
         out, sizeof(out), "JSTATE %lu M%u %u %u %u %ld %ld %d %s %s\r\n",
-        (unsigned long)now, s_joint_focus + 1U, (unsigned)s->calibrated,
+        (unsigned long)now, index + 1U, (unsigned)s->calibrated,
         (unsigned)is_fresh, (unsigned)s->raw, (long)s->angle, (long)s->target,
         s->duty, joint_phase_name(s->phase), s->fault);
     (void)send_line(out);
@@ -549,11 +551,9 @@ static void report_calibrations(void)
     {
         if (s_joints.states[i].calibrated)
         {
-            s_joint_focus = i;
-            joint_report(HAL_GetTick(), true);
+            joint_report(i, HAL_GetTick(), true);
         }
     }
-    s_joint_focus = 0U;
 }
 
 /** @brief CAL 参数顺序：raw_a angle_a raw_b angle_b direction duty tolerance。 */
@@ -574,7 +574,7 @@ static void commit_calibration(uint32_t now)
     {
         (void)send_line("EVENT CAL_SAVE_ERROR\r\n");
     }
-    joint_report(now, true);
+    joint_report(s_joint_focus, now, true);
 }
 
 /**
@@ -645,10 +645,14 @@ static const char *calibrate_joint_nominal(unsigned index, const int32_t *v,
 static const char *joint_command(const char *op, unsigned seq, unsigned index,
                                  const int32_t *v, unsigned count, uint32_t now)
 {
-    s_joint_focus = index;
+    /* 多关节同时定位时焦点不跟着 JMOVE 走，上位机看的关节和数据记录不会被切走。 */
+    if (strcmp(op, "JMOVE"))
+    {
+        s_joint_focus = index;
+    }
     if (!strcmp(op, "JGET"))
     {
-        joint_report(now, true);
+        joint_report(s_joint_focus, now, true);
         return NULL;
     }
     if (!strcmp(op, "CAL") && count == 7U)
@@ -1040,7 +1044,18 @@ static void report_status(uint32_t now)
     (void)send_line(out);
     check_control();
 
-    joint_report(HAL_GetTick(), false);
+    /* 焦点关节和正在运动的关节每次都报，其余关节每次轮流补报一个，
+       避免 6 路全报占满串口带宽。 */
+    s_joint_round = (s_joint_round + 1U) % JOINT_COUNT;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        if (i == s_joint_focus || i == s_joint_round ||
+            s_joints.states[i].motion.active)
+        {
+            joint_report(i, HAL_GetTick(), false);
+            check_control();
+        }
+    }
 }
 
 /**

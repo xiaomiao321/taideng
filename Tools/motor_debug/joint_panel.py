@@ -13,6 +13,8 @@ PWM_KHZ = ("1", "2", "4", "5", "10", "20")
 SENSOR_DIRECTIONS = {"角度增大时 ADC 增大": 1, "角度增大时 ADC 减小": -1}
 FAULTS = {"NONE": "无", "SENSOR": "采样失败/过期", "LIMIT": "超出标定范围", "STALL": "运动无进展",
           "DIRECTION": "方向错误/误差增大", "TIMEOUT": "定位超时", "HARDWARE": "驱动失败"}
+PHASES = {"IDLE": "空闲", "SETTLE": "准备", "MOVE": "运动", "DONE": "到位", "FAULT": "故障"}
+STATE_FRESH_S = 1.0  # 非焦点空闲关节的 JSTATE 约每 600ms 轮到一次
 
 class JointPanel:
     def __init__(self, parent, app):
@@ -39,10 +41,10 @@ class JointPanel:
                              values=[f"M{i} / POT{i}" for i in range(1, 7)])
         choice.pack(side="left", padx=10)
         choice.bind("<<ComboboxSelected>>", self.select)
+        self.live = tk.StringVar(value="ADC：—  实测角度：—")
+        ttk.Label(head, textvariable=self.live, font=("Segoe UI", 13)).pack(side="left", padx=10)
         ttk.Button(head, text="保存标定文件", command=self.save).pack(side="right")
         ttk.Button(head, text="载入标定文件", command=self.load).pack(side="right", padx=8)
-        self.live = tk.StringVar(value="ADC：—  实测角度：—")
-        ttk.Label(parent, textvariable=self.live, font=("Segoe UI", 13)).pack(anchor="w", pady=(0, 8))
 
         # 标定和调试参数放进子标签页，一次只显示一个，给下面的曲线留出高度。
         sections = ttk.Notebook(parent)
@@ -144,19 +146,29 @@ class JointPanel:
         self.trace_status = tk.StringVar(value="每 10ms 记录当前关节的读数、噪声、角度、占空比，存为 records 目录下的 CSV")
         ttk.Label(record, textvariable=self.trace_status).pack(side="left", padx=12)
 
-        move = ttk.LabelFrame(parent, text="角度定位 · MCU 反馈闭环，到位后停止，不自动保持或恢复运动", padding=10)
+        move = ttk.LabelFrame(parent, text="角度定位 · 勾选的关节同时定位，到位后停止，不自动保持或恢复运动", padding=10)
         move.pack(fill="x", pady=8)
-        ttk.Label(move, text="目标角度 °").pack(side="left")
-        self.target = tk.StringVar()
-        ttk.Entry(move, textvariable=self.target, width=10).pack(side="left", padx=8)
-        ttk.Label(move, text="超时 ms").pack(side="left", padx=5)
+        for row, text in ((1, "目标角度 °"), (2, "实测角度 °"), (3, "状态")):
+            ttk.Label(move, text=text).grid(row=row, column=0, sticky="w", padx=(0, 8))
+        self.targets, self.checks, self.cells = {}, {}, {}
+        for joint in range(1, 7):
+            self.checks[joint] = tk.BooleanVar(value=joint == 1)
+            self.targets[joint] = tk.StringVar()
+            self.cells[joint] = (tk.StringVar(value="—"), tk.StringVar(value="—"))
+            ttk.Checkbutton(move, text=f"M{joint}", variable=self.checks[joint]).grid(row=0, column=joint, padx=6)
+            ttk.Entry(move, textvariable=self.targets[joint], width=9).grid(row=1, column=joint, padx=6, pady=2)
+            ttk.Label(move, textvariable=self.cells[joint][0]).grid(row=2, column=joint)
+            ttk.Label(move, textvariable=self.cells[joint][1]).grid(row=3, column=joint)
+        side = ttk.Frame(move)
+        side.grid(row=0, column=7, rowspan=4, sticky="nw", padx=(16, 0))
+        timeout = ttk.Frame(side)
+        timeout.pack(anchor="w")
+        ttk.Label(timeout, text="超时 ms").pack(side="left")
         self.timeout = tk.StringVar(value="10000")
-        ttk.Entry(move, textvariable=self.timeout, width=9).pack(side="left", padx=8)
-        self.move_btn = ttk.Button(move, text="开始定位", command=self.move)
-        self.move_btn.pack(side="left", padx=8)
-        ttk.Button(move, text="停止全部 / 解锁", command=app.stop).pack(side="left")
-        self.state_text = tk.StringVar(value="等待 MCU 关节状态")
-        ttk.Label(move, textvariable=self.state_text).pack(side="left", padx=16)
+        ttk.Entry(timeout, textvariable=self.timeout, width=8).pack(side="left", padx=8)
+        self.move_btn = ttk.Button(side, text="勾选的关节同时定位", command=self.move)
+        self.move_btn.pack(anchor="w", fill="x", pady=4)
+        ttk.Button(side, text="停止全部 / 解锁", command=app.stop).pack(anchor="w", fill="x")
         # 曲线先于提示文字分配空间：窗口矮时先压缩提示，不压缩曲线。
         self.canvas = tk.Canvas(parent, height=220, bg="white", highlightthickness=1,
                                 highlightbackground="#d5dce4")
@@ -201,7 +213,7 @@ class JointPanel:
             raise ValueError("请填写允许范围。" + str(exc)) from exc
 
     def select(self, _=None):
-        self.app.stop()
+        # 不停车：切换关节只换显示和数据记录的对象，其他关节继续定位。
         self.forms[self.selected] = {k: v.get() for k, v in self.fields.items()}
         self.selected = int(self.choice.get()[1])
         self.set_fields(None)
@@ -293,24 +305,40 @@ class JointPanel:
             return cal.with_limits(*self.limits[joint])
         return cal
 
+    def check_target(self, joint):
+        target = millidegrees(self.targets[joint].get())
+        record = self.states.get(joint)
+        if not record or time.monotonic() - record[0] > STATE_FRESH_S:
+            raise ValueError("缺少新鲜 MCU 状态")
+        cal = self.device_calibration(joint)
+        if not cal or not record[1][3] or not record[1][4]:
+            raise ValueError("MCU 尚未标定该关节，或传感器读数无效")
+        limit_min, limit_max = cal.limits
+        if not limit_min <= target <= limit_max:
+            raise ValueError(f"目标须位于允许范围 {limit_min/1000:g}～{limit_max/1000:g}° 内")
+        return target
+
     def move(self):
+        """勾选的关节全部检查通过才一起下发，任何一个不合格都不下发。"""
         try:
-            target = millidegrees(self.target.get())
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持关节定位的新固件")
             timeout = int(self.timeout.get())
-            record = self.states.get(self.selected)
-            if not self.capable or not self.app.ready or not self.app.worker or not record or time.monotonic() - record[0] > .5:
-                raise ValueError("缺少新鲜 MCU 状态")
-            cal = self.device_calibration(self.selected)
-            if not cal or not record[1][3] or not record[1][4]:
-                raise ValueError("MCU 尚未标定当前关节，或传感器读数无效")
-            limit_min, limit_max = cal.limits
-            if not limit_min <= target <= limit_max:
-                raise ValueError(f"目标须位于允许范围 {limit_min/1000:g}～{limit_max/1000:g}° 内")
             if not 500 <= timeout <= 60000:
                 raise ValueError("超时范围为 500～60000ms")
+            joints = [joint for joint, check in self.checks.items() if check.get()]
+            if not joints:
+                raise ValueError("请勾选要定位的关节")
+            requests, errors = [], []
+            for joint in joints:
+                try: requests.append((joint, self.check_target(joint)))
+                except ValueError as exc: errors.append(f"M{joint}：{exc}")
+            if errors:
+                raise ValueError("\n".join(errors))
             if not self.app.confirm_joint_move(): return
-            self.app.worker.submit("JMOVE", self.selected, target, timeout)
-            self.notice.set("已请求定位；到位依据真实 POT 反馈与所设容差判定。")
+            for joint, target in requests:
+                self.app.worker.submit("JMOVE", joint, target, timeout)
+            self.notice.set(f"已请求 {'、'.join(f'M{j}' for j in joints)} 定位；到位依据真实 POT 反馈与所设容差判定。")
         except ValueError as exc: messagebox.showerror("角度定位", str(exc))
 
     def apply_pwm(self):
@@ -406,6 +434,7 @@ class JointPanel:
         elif msg[0] in ("ACK", "ERR") and msg[1] in self.pending:
             kind, joint = self.pending.pop(msg[1])
             if kind == "JTRACE" and msg[0] == "ERR": self.tracing = False
+            if kind == "JMOVE" and msg[0] == "ACK": return  # 同时下发多个时不让 ACK 盖掉别的关节的拒绝原因
             label = {"MPWM": "电机 PWM", "JTUNE": f"M{joint} 控制参数", "JTRACE": f"M{joint} 数据记录"}.get(kind, f"M{joint} {kind}")
             self.notice.set(f"{label}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
         elif msg[0] == "JRESULT":
@@ -422,7 +451,7 @@ class JointPanel:
         fresh = self.app.ready and self.capable and record and now-record[0] <= .5
         raw = "—" if self.app.pot.stale(now) else str(self.app.pot.values[self.selected - 1])
         angle = f"{record[1][6]/1000:.3f}°" if fresh and record[1][3] and record[1][4] else "—"
-        self.live.set(f"M{self.selected} / POT{self.selected}    ADC：{raw}    MCU 实测角度：{angle}")
+        self.live.set(f"ADC：{raw}    MCU 实测角度：{angle}")
         device = self.device_calibration(self.selected)
         try: matching = device is not None and self.device[self.selected] == Calibration(*self.read_form().wire())
         except ValueError: matching = False
@@ -462,11 +491,17 @@ class JointPanel:
             self.trace_status.set("等待 MCU 数据")
         elif rec.path:
             self.trace_status.set(f"上次记录 {rec.path}")
-        self.move_btn["state"] = "normal" if fresh and device and record[1][3] and record[1][4] and unlocked else "disabled"
-        if fresh:
-            m = record[1]
-            self.state_text.set(f"目标 {m[7]/1000:g}° · 输出 {m[8]/10:g}% · {m[9]} · 故障：{FAULTS[m[10]]}")
-        else: self.state_text.set("等待关节状态；旧固件需更新，断线后不会自动恢复定位或下发标定。")
+        self.move_btn["state"] = "normal" if ready else "disabled"
+        for joint, (angle_text, state_text) in self.cells.items():
+            r = self.states.get(joint)
+            m = r[1] if self.app.ready and self.capable and r and now-r[0] <= STATE_FRESH_S else None
+            angle_text.set(f"{m[6]/1000:.1f}" if m and m[3] and m[4] else "—")
+            if not m: state_text.set("—")
+            elif not m[3]: state_text.set("未标定")
+            elif not m[4]: state_text.set("读数无效")
+            elif m[9] == "FAULT": state_text.set("故障 " + FAULTS.get(m[10], m[10]).split("/")[0])
+            elif m[9] in ("SETTLE", "MOVE"): state_text.set(f"{PHASES[m[9]]} {m[8]/10:g}%")
+            else: state_text.set(PHASES.get(m[9], m[9]))
         self.draw()
 
     def draw(self):
