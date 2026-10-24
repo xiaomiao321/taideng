@@ -14,6 +14,7 @@ from joint_panel import JointPanel
 from joint_demo import DemoJoints
 from channel_panel import ChannelPanel
 from linux_panel import LinuxPanel
+from trace_recorder import TraceRecorder
 
 COLORS = ("#2563eb", "#e45d32", "#159c72", "#995bd6", "#c49c12", "#d74386")
 
@@ -245,6 +246,7 @@ class App:
         self.events = queue.Queue()
         self.pot = PotModel()
         self.history = deque(maxlen=300)
+        self.recorder = TraceRecorder()
         self.ready = False
         self.state_received = 0.
         root.title("全板调试上位机" + (" · 模拟模式" if demo else ""))
@@ -461,12 +463,15 @@ class App:
                                     "换向等待中…" if pending else
                                     f"M{motor} {'正转' if duty > 0 else '反转'} · {abs(duty)/10:g}%（指令占空比）" if motor else
                                     "全部电机停止")
+                elif msg[0] == "JT":
+                    self.record(msg)
                 elif msg[0] == "ADCERR":
                     self.pot.valid = False
                     self.adc_status.set(f"ADC 采样错误 {msg[2]}")
                     self.add_log(value)
-                elif msg[0] not in ("MSTATE", "LSTATE", "LRX"):
+                elif msg[0] not in ("MSTATE", "LSTATE", "LRX", "JT"):
                     self.add_log(value)
+        self.record(None)
         now = time.monotonic()
         state_fresh = now - self.state_received < 0.5
         for b in self.run_buttons:
@@ -524,7 +529,25 @@ class App:
             if len(segment) >= 4:
                 c.create_line(*segment, fill=color, width=2)
 
+    def record(self, msg):
+        """Save JT lines to CSV; msg None only checks whether the file should close."""
+        try:
+            if msg is None:
+                done = self.recorder.idle()
+                if done:
+                    self.add_log(f"数据记录已保存 {done[0]}，{done[1]} 行")
+                    self.terminal.write(f"数据记录已保存 {done[0]}，{done[1]} 行", "event")
+                return
+            opened = self.recorder.add(msg)
+            if opened:
+                self.add_log("开始记录 " + opened)
+                self.terminal.write("开始记录 " + opened, "event")
+        except OSError as exc:
+            self.recorder.close()
+            self.add_log(f"数据记录失败：{exc}")
+
     def close(self):
+        self.recorder.close()
         self.linux_panel.close()
         if self.worker:
             self.worker.quit.set()

@@ -46,6 +46,7 @@ typedef struct
     uint32_t channel_bi;     /**< 反转 PWM 通道（TIM_CHANNEL_x）。 */
     uint32_t arr;            /**< 初始化时缓存的 ARR，用于 CCR 换算。 */
     int16_t duty_permille;   /**< 最近一次设定的有符号占空比。 */
+    bool is_slow_decay;      /**< 关断段是否刹车（慢衰减），否则滑行。 */
     bool is_initialized;     /**< 本实例是否已初始化。 */
 } bsp_motor_hbridge_t;
 
@@ -82,6 +83,10 @@ bsp_status_t bsp_motor_hbridge_init(bsp_motor_hbridge_t *self,
  * @retval BSP_ERR_PARAM self 为 NULL，或占空比超出范围。
  * @retval BSP_ERR_NOT_INITIALIZED 本实例尚未初始化。
  *
+ * @note 滑行（快衰减）模式下，正转时 FI 输出 PWM、BI 保持低：关断段两路都低，
+ *       电机滑行，电流衰减快，低占空比时力矩很小。刹车（慢衰减）模式下，
+ *       正转时 FI 保持高、BI 输出 (1-duty) 的 PWM：关断段两路都高，电机短路
+ *       续流，转速与占空比更接近线性。反转时两路对调。
  * @note 换向时先把相反的通道清零，再给目标通道赋值，避免两路同时导通。
  * @note 中间没有死区等待；RZ7899 这类芯片自身有死区，若换成无死区的桥，
  *       需在换向前先调用 coast 并等待。
@@ -90,6 +95,20 @@ bsp_status_t bsp_motor_hbridge_init(bsp_motor_hbridge_t *self,
  */
 bsp_status_t bsp_motor_hbridge_set_duty(bsp_motor_hbridge_t *self,
                                         int16_t duty_permille);
+
+/**
+ * @brief 选择 PWM 关断段的衰减方式。
+ *
+ * @param[in,out] self 已初始化的 H 桥句柄，不允许为 NULL。
+ * @param[in] slow_decay true 为刹车（慢衰减），false 为滑行（快衰减）。
+ *
+ * @retval BSP_OK 已切换，从下一次 set_duty 起生效。
+ * @retval BSP_ERR_PARAM self 为 NULL。
+ * @retval BSP_ERR_NOT_INITIALIZED 本实例尚未初始化。
+ * @retval BSP_ERR_CONFIG 电机还在转（最近一次占空比不为 0），先停再切换。
+ */
+bsp_status_t bsp_motor_hbridge_set_decay(bsp_motor_hbridge_t *self,
+                                         bool slow_decay);
 
 /**
  * @brief 让 H 桥两路输出低电平，电机滑行。

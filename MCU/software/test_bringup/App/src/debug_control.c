@@ -179,7 +179,8 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         if (c->hw.joint)
         {
-            c->hw.reply("CAPS JOINT 1\r\nCAPS JOINT_NOMINAL 1\r\n");
+            c->hw.reply("CAPS JOINT 1\r\nCAPS JOINT_NOMINAL 1\r\n"
+                        "CAPS JOINT_TUNE 1\r\nCAPS TRACE 1\r\n");
         }
         if (c->hw.manual)
         {
@@ -187,13 +188,13 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         if (c->hw.aux)
         {
-            c->hw.reply("CAPS LIGHT 1\r\nCAPS LINUX 1\r\n");
+            c->hw.reply("CAPS LIGHT 1\r\nCAPS LINUX 1\r\nCAPS MOTOR_PWM 1\r\n");
         }
         return;
     }
     if (!strcmp(tokens[0], "MSET") || !strcmp(tokens[0], "MOFF") ||
         !strcmp(tokens[0], "LSET") || !strcmp(tokens[0], "LMODE") ||
-        !strcmp(tokens[0], "LTX"))
+        !strcmp(tokens[0], "LTX") || !strcmp(tokens[0], "MPWM"))
     {
         bool off = !strcmp(tokens[0], "MOFF");
         if (!off && !has_heartbeat(c, now))
@@ -285,14 +286,19 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
     }
     if (!strcmp(tokens[0], "CAL") || !strcmp(tokens[0], "JMOVE") ||
         !strcmp(tokens[0], "JGET") || !strcmp(tokens[0], "JNOM") ||
-        !strcmp(tokens[0], "JLIM"))
+        !strcmp(tokens[0], "JLIM") || !strcmp(tokens[0], "JTUNE") ||
+        !strcmp(tokens[0], "JTRACE"))
     {
-        bool read = !strcmp(tokens[0], "JGET");
+        /* JGET、JTRACE 只读：不要求心跳，也不打断正在进行的运动。 */
+        bool trace = !strcmp(tokens[0], "JTRACE");
+        bool read = !strcmp(tokens[0], "JGET") || trace;
         bool nominal = !strcmp(tokens[0], "JNOM");
-        unsigned count = read                        ? 0U
-                         : !strcmp(tokens[0], "CAL") ? 7U
-                         : nominal                   ? MAX_JOINT_ARGS
-                                                     : 2U;
+        unsigned count = !strcmp(tokens[0], "JGET")    ? 0U
+                         : trace                       ? 1U
+                         : !strcmp(tokens[0], "CAL")   ? 7U
+                         : nominal                     ? MAX_JOINT_ARGS
+                         : !strcmp(tokens[0], "JTUNE") ? 4U
+                                                       : 2U;
         unsigned joint = (n >= 3U)
                              ? parse_motor_name(tokens[2], JOINT_MOTOR_COUNT)
                              : JOINT_MOTOR_COUNT;

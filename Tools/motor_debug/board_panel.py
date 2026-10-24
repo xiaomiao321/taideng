@@ -72,9 +72,9 @@ class BoardPanel:
         hint = case.hint
         if case.name.startswith("MOTOR_"):
             large = int(case.name[7]) >= 7
-            self.parameter_box.configure(from_=50, to=80 if large else 100)
-            self.parameter_title.set("大电机 50～80%" if large else "小电机 50～100%")
-            hint += " 运行范围：50～80%。" if large else " 运行范围：50～100%。"
+            self.parameter_box.configure(from_=10, to=80 if large else 100)
+            self.parameter_title.set("大电机 10～80%" if large else "小电机 10～100%")
+            hint += " 运行范围：10～80%。" if large else " 运行范围：10～100%。"
         self.hint.set(hint)
 
     def start(self):

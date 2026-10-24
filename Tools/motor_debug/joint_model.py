@@ -66,8 +66,8 @@ class Calibration:
             raise ValueError("A/B 读数需为 1～4094，且至少相差 100 个 ADC 计数")
         if not -360000 <= self.angle_a < self.angle_b <= 360000 or self.angle_b-self.angle_a < 1000:
             raise ValueError("B 点角度必须大于 A 点，且至少相差 1°")
-        if self.direction not in (-1, 1) or not 500 <= self.duty <= 1000:
-            raise ValueError("请选择电机正转方向，并设置 50～100% 占空比")
+        if self.direction not in (-1, 1) or not 100 <= self.duty <= 1000:
+            raise ValueError("请选择电机正转方向，并设置 10～100% 占空比")
         if not 100 <= self.tolerance <= 10000:
             raise ValueError("到位容差需为 0.1～10°")
         validate_limits(*self.limits, self.tolerance)
@@ -116,8 +116,8 @@ class Nominal:
             raise ValueError("参考角度需为 −360～360°")
         if self.sensor_direction not in (-1, 1) or self.direction not in (-1, 1):
             raise ValueError("请选择电位器读数方向和电机正转方向")
-        if not 500 <= self.duty <= 1000 or not 100 <= self.tolerance <= 10000:
-            raise ValueError("占空比需为 50～100%，容差需为 0.1～10°")
+        if not 100 <= self.duty <= 1000 or not 100 <= self.tolerance <= 10000:
+            raise ValueError("占空比需为 10～100%，容差需为 0.1～10°")
         validate_limits(self.limit_min, self.limit_max, self.tolerance)
         if self.pot_ohms and not POT_MIN_OHMS <= self.pot_ohms <= POT_MAX_OHMS:
             raise ValueError("电位器阻值需为 1kΩ～1MΩ，或留空采用 45kΩ")

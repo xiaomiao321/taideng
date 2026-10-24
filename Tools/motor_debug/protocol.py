@@ -29,9 +29,15 @@ def command(kind, seq, motor=1, duty=800, duration=500):
         if not isinstance(duty, bytes) or not 1 <= len(duty) <= 48:
             raise ValueError("每次转发须为 1～48 字节")
         return f"LTX {seq} {duty.hex().upper()}\n"
+    if kind == "MPWM":
+        if motor is None:
+            return f"MPWM {seq}\n"
+        if motor not in (1, 2, 4, 5, 10, 20) or duty not in (0, 1):
+            raise ValueError("PWM 频率须为 1、2、4、5、10、20kHz，衰减方式为 coast 或 brake")
+        return f"MPWM {seq} {motor} {duty}\n"
     if kind in ("PING", "STOP", "INFO"):
         return f"{kind} {seq}" + (" ALL\n" if kind == "STOP" else "\n")
-    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"):
+    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE"):
         if type(motor) is not int or not 1 <= motor <= 6:
             raise ValueError("只有 M1～M6 支持角度控制")
         if kind == "CAL":
@@ -52,6 +58,22 @@ def command(kind, seq, motor=1, duty=800, duration=500):
             return f"JLIM {seq} M{motor} {duty[0]} {duty[1]}\n"
         if kind == "JGET":
             return f"JGET {seq} M{motor}\n"
+        if kind == "JTRACE":
+            if duty not in (0, 1):
+                raise ValueError("数据记录参数须为 on 或 off")
+            return f"JTRACE {seq} M{motor} {duty}\n"
+        if kind == "JTUNE":
+            if not isinstance(duty, (tuple, list)) or len(duty) != 4:
+                raise ValueError("控制参数不完整")
+            mode, kp, low, brake = duty
+            if mode not in (0, 1) or type(kp) is not int or not 0 <= kp <= 1000:
+                raise ValueError("比例系数须为 0～100%/度")
+            if type(low) is not int or low <= 0:
+                raise ValueError("起转占空比须为正数")
+            validate_duty(motor, low)
+            if type(brake) is not int or not 0 <= brake <= 200:
+                raise ValueError("制动时长须为 0～200ms")
+            return f"JTUNE {seq} M{motor} {mode} {kp} {low} {brake}\n"
         if type(duty) is not int or not -360000 <= duty <= 360000 or type(duration) is not int or not 500 <= duration <= 60000:
             raise ValueError("目标角度或超时时间不正确（500～60000ms）")
         return f"JMOVE {seq} M{motor} {duty} {duration}\n"
@@ -79,6 +101,23 @@ def parse(line):
             data = bytes.fromhex(p[1])
             if not 1 <= len(data) <= 32: raise ValueError()
             return "LRX", data
+        if p[0] == "JT" and len(p) == 10 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
+            tick, raw, spread, angle, target, duty, brake = (int(p[1]), *map(int, p[3:9]))
+            if not 0 <= raw <= 4095 or not 0 <= spread <= 4095 or not -1000 <= duty <= 1000 or brake not in (0, 1):
+                raise ValueError()
+            if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT"):
+                raise ValueError()
+            return "JT", tick, int(p[2][1]), raw, spread, angle, target, duty, bool(brake), p[9]
+        if p[0] == "JTUNE" and len(p) == 7 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
+            mode, kp, low, brake = map(int, p[3:])
+            if mode not in (0, 1):
+                raise ValueError()
+            return "JTUNE", int(p[1]), int(p[2][1]), mode, kp, low, brake
+        if p[0] == "MPWM" and len(p) == 3:
+            khz, slow = int(p[1]), int(p[2])
+            if slow not in (0, 1):
+                raise ValueError()
+            return "MPWM", khz, bool(slow)
         if p[0] == "LERR" and len(p) == 2:
             return "LERR", p[1]
         if p[0] == "LSTATE" and len(p) == 10:

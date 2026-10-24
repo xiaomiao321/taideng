@@ -15,7 +15,7 @@ class MultiTests(unittest.TestCase):
         self.assertEqual(len(line.split()), 19)
         self.assertLess(len(line), 192)
         self.assertEqual(command("MOFF", 1), "MOFF 1\n")
-        for index, value in ((0, 499), (6, 801), (7, -1000)):
+        for index, value in ((0, 99), (6, 801), (7, -1000)):
             bad = list(values); bad[index] = value
             with self.assertRaises(ValueError): command("MSET", 0, 255, bad, (0,)*8)
         with self.assertRaises(ValueError): command("MSET", 0, 0, values, (0,)*8)

@@ -29,6 +29,10 @@ static const struct
 
 static bsp_motor_hbridge_t s_motors[BSP_MOTOR_COUNT];
 static bool s_is_initialized = false;
+/** @brief 初始化时各路定时器的预分频，对应 BSP_MOTOR_PWM_BASE_KHZ。 */
+static uint32_t s_base_prescaler[BSP_MOTOR_COUNT];
+static uint32_t s_pwm_khz = BSP_MOTOR_PWM_BASE_KHZ;
+static bool s_is_slow_decay = false;
 
 static bool is_valid_id(bsp_motor_id_t motor_id)
 {
@@ -51,6 +55,7 @@ bsp_status_t bsp_motor_init(void)
         {
             return status;
         }
+        s_base_prescaler[i] = k_mapping[i].htim->Instance->PSC;
     }
 
     s_is_initialized = true;
@@ -131,6 +136,53 @@ void bsp_motor_emergency_stop(void)
         __HAL_TIM_SET_COMPARE(htim, k_mapping[i].channel_fi, 0U);
         __HAL_TIM_SET_COMPARE(htim, k_mapping[i].channel_bi, 0U);
     }
+}
+
+bsp_status_t bsp_motor_set_pwm(uint32_t khz, bool slow_decay)
+{
+    if (!s_is_initialized)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+    if ((khz == 0U) || (khz > BSP_MOTOR_PWM_BASE_KHZ) ||
+        ((BSP_MOTOR_PWM_BASE_KHZ % khz) != 0U))
+    {
+        return BSP_ERR_PARAM;
+    }
+    for (uint32_t i = 0U; i < (uint32_t)BSP_MOTOR_COUNT; ++i)
+    {
+        if (s_motors[i].duty_permille != 0)
+        {
+            return BSP_ERR_CONFIG;
+        }
+    }
+
+    uint32_t divider = BSP_MOTOR_PWM_BASE_KHZ / khz;
+    for (uint32_t i = 0U; i < (uint32_t)BSP_MOTOR_COUNT; ++i)
+    {
+        uint32_t prescaler = (s_base_prescaler[i] + 1U) * divider - 1U;
+        if (prescaler > 0xFFFFU)
+        {
+            return BSP_ERR_PARAM;
+        }
+    }
+    for (uint32_t i = 0U; i < (uint32_t)BSP_MOTOR_COUNT; ++i)
+    {
+        TIM_HandleTypeDef *htim = k_mapping[i].htim;
+        /* 同一定时器上的两路电机会各写一次，值相同。 */
+        __HAL_TIM_SET_PRESCALER(htim, (s_base_prescaler[i] + 1U) * divider - 1U);
+        htim->Instance->EGR = TIM_EGR_UG;
+        (void)bsp_motor_hbridge_set_decay(&s_motors[i], slow_decay);
+    }
+    s_pwm_khz = khz;
+    s_is_slow_decay = slow_decay;
+    return BSP_OK;
+}
+
+void bsp_motor_get_pwm(uint32_t *khz, bool *slow_decay)
+{
+    *khz = s_pwm_khz;
+    *slow_decay = s_is_slow_decay;
 }
 
 bsp_motor_hbridge_t *bsp_motor_handle(bsp_motor_id_t motor_id)

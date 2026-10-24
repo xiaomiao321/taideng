@@ -7,6 +7,9 @@ from joint_model import Calibration, Nominal, millidegrees, encode_profile, deco
 from shell_commands import percent, kilohms
 
 DIRECTIONS = {"正转使角度增大": 1, "正转使角度减小": -1}
+MODES = {"开关式": 0, "比例式": 1}
+DECAYS = {"滑行": 0, "刹车": 1}
+PWM_KHZ = ("1", "2", "4", "5", "10", "20")
 SENSOR_DIRECTIONS = {"角度增大时 ADC 增大": 1, "角度增大时 ADC 减小": -1}
 FAULTS = {"NONE": "无", "SENSOR": "采样失败/过期", "LIMIT": "超出标定范围", "STALL": "运动无进展",
           "DIRECTION": "方向错误/误差增大", "TIMEOUT": "定位超时", "HARDWARE": "驱动失败"}
@@ -22,6 +25,11 @@ class JointPanel:
         self.pending = {}
         self.history = deque(maxlen=150)
         self.last_query = 0.
+        self.tunes = {}      # MCU 回报的控制参数（JTUNE），键为关节号
+        self.pwm = None      # MCU 回报的 (kHz, 刹车)
+        self.tracing = False
+        self.trace_at = 0.   # 最近一次收到当前关节 JT 行的时刻
+        self.spread = None
         self.notice = tk.StringVar(value="两点标定或理论标定任选其一，标定会保存在 MCU 中；M7/M8 为履带，不做角度控制。")
         head = ttk.Frame(parent)
         head.pack(fill="x", pady=(0, 8))
@@ -50,8 +58,8 @@ class JointPanel:
         ttk.Label(box, text="正转方向").grid(row=2, column=0, pady=5)
         ttk.Combobox(box, textvariable=self.fields["direction"], values=list(DIRECTIONS), state="readonly",
                      width=20).grid(row=2, column=1, columnspan=2, sticky="w")
-        ttk.Label(box, text="占空比 50～100%").grid(row=2, column=3)
-        ttk.Spinbox(box, from_=50, to=100, increment=1, textvariable=self.fields["duty"], width=9).grid(row=2, column=4)
+        ttk.Label(box, text="占空比 10～100%").grid(row=2, column=3)
+        ttk.Spinbox(box, from_=10, to=100, increment=1, textvariable=self.fields["duty"], width=9).grid(row=2, column=4)
         tolerance = ttk.Frame(box)
         tolerance.grid(row=2, column=5)
         ttk.Label(tolerance, text="容差 °").pack(side="left")
@@ -98,6 +106,42 @@ class JointPanel:
         self.limit_btn.pack(side="left", padx=8)
         self.preview = tk.StringVar(value="")
         ttk.Label(theory_actions, textvariable=self.preview).pack(side="left", padx=12)
+
+        tune = ttk.LabelFrame(parent, text="电机调试 · PWM 与控制参数只在 MCU 内存中，重新上电恢复 20kHz 滑行、开关式",
+                              padding=10)
+        tune.pack(fill="x", pady=(8, 0))
+        self.tune_fields = {"khz": tk.StringVar(value="20"), "decay": tk.StringVar(value="滑行"),
+                            "mode": tk.StringVar(value="开关式"), "kp": tk.StringVar(value="3"),
+                            "low": tk.StringVar(value="30"), "brake": tk.StringVar(value="50")}
+        ttk.Label(tune, text="PWM 频率 kHz").grid(row=0, column=0, padx=5, pady=4, sticky="w")
+        ttk.Combobox(tune, textvariable=self.tune_fields["khz"], values=PWM_KHZ, state="readonly",
+                     width=6).grid(row=0, column=1, sticky="w")
+        ttk.Label(tune, text="关断段").grid(row=0, column=2, padx=(12, 5))
+        ttk.Combobox(tune, textvariable=self.tune_fields["decay"], values=list(DECAYS), state="readonly",
+                     width=6).grid(row=0, column=3, sticky="w")
+        self.pwm_btn = ttk.Button(tune, text="应用到全部电机", command=self.apply_pwm)
+        self.pwm_btn.grid(row=0, column=4, padx=8)
+        self.pwm_status = tk.StringVar(value="MCU：—")
+        ttk.Label(tune, textvariable=self.pwm_status).grid(row=0, column=5, columnspan=4, sticky="w")
+        ttk.Label(tune, text="控制方式").grid(row=1, column=0, padx=5, pady=4, sticky="w")
+        ttk.Combobox(tune, textvariable=self.tune_fields["mode"], values=list(MODES), state="readonly",
+                     width=6).grid(row=1, column=1, sticky="w")
+        ttk.Label(tune, text="比例 %/°").grid(row=1, column=2, padx=(12, 5))
+        ttk.Entry(tune, textvariable=self.tune_fields["kp"], width=6).grid(row=1, column=3, sticky="w")
+        ttk.Label(tune, text="起转 %").grid(row=1, column=4, padx=(12, 5))
+        ttk.Entry(tune, textvariable=self.tune_fields["low"], width=6).grid(row=1, column=5, sticky="w")
+        ttk.Label(tune, text="制动 ms").grid(row=1, column=6, padx=(12, 5))
+        ttk.Entry(tune, textvariable=self.tune_fields["brake"], width=6).grid(row=1, column=7, sticky="w")
+        self.tune_btn = ttk.Button(tune, text="下发当前关节", command=self.apply_tune)
+        self.tune_btn.grid(row=1, column=8, padx=8)
+        self.tune_status = tk.StringVar(value="MCU：—")
+        ttk.Label(tune, textvariable=self.tune_status).grid(row=2, column=0, columnspan=9, sticky="w")
+        record = ttk.Frame(tune)
+        record.grid(row=3, column=0, columnspan=9, sticky="w", pady=(6, 0))
+        self.trace_btn = ttk.Button(record, text="开始记录", command=self.toggle_trace)
+        self.trace_btn.pack(side="left")
+        self.trace_status = tk.StringVar(value="每 10ms 记录当前关节的读数、噪声、角度、占空比，存为 records 目录下的 CSV")
+        ttk.Label(record, textvariable=self.trace_status).pack(side="left", padx=12)
 
         move = ttk.LabelFrame(parent, text="角度定位 · MCU 反馈闭环，到位后停止，不自动保持或恢复运动", padding=10)
         move.pack(fill="x", pady=8)
@@ -267,6 +311,40 @@ class JointPanel:
             self.notice.set("已请求定位；到位依据真实 POT 反馈与所设容差判定。")
         except ValueError as exc: messagebox.showerror("角度定位", str(exc))
 
+    def apply_pwm(self):
+        try:
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持电机调试的新固件")
+            if not self.app.confirm_exclusive(): return
+            self.app.stop()  # MCU 只在电机全部停止时允许切换
+            self.app.worker.submit("MPWM", int(self.tune_fields["khz"].get()), DECAYS[self.tune_fields["decay"].get()])
+            self.notice.set("已停止全部输出，等待 MCU 切换 PWM。")
+        except (KeyError, ValueError) as exc: messagebox.showerror("电机 PWM", str(exc))
+
+    def read_tune(self):
+        f = {k: v.get().strip() for k, v in self.tune_fields.items()}
+        mode = MODES[f["mode"]]
+        try: brake = int(f["brake"])
+        except ValueError: raise ValueError("制动时长须为 0～200ms 的整数") from None
+        return mode, percent(f["kp"]), percent(f["low"]), brake
+
+    def apply_tune(self):
+        try:
+            values = self.read_tune()
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持电机调试的新固件")
+            if not self.app.confirm_exclusive(): return
+            self.app.worker.submit("JTUNE", self.selected, values)
+            self.notice.set("下发控制参数会先停止全部电机；开关式只用标定里的占空比，其余参数留给比例式。")
+        except (KeyError, ValueError) as exc: messagebox.showerror("控制参数", str(exc))
+
+    def toggle_trace(self):
+        if not self.capable or not self.app.ready or not self.app.worker:
+            messagebox.showerror("数据记录", "请连接支持电机调试的新固件")
+            return
+        self.tracing = not self.tracing
+        self.app.worker.submit("JTRACE", self.selected, int(self.tracing))
+
     def save(self):
         try:
             self.forms[self.selected] = {k: v.get() for k, v in self.fields.items()}
@@ -295,13 +373,22 @@ class JointPanel:
         except (ValueError, OSError) as exc: messagebox.showerror("载入标定", str(exc))
 
     def sent(self, kind, seq, args):
-        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"): self.pending[seq] = (kind, args[0])
+        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "MPWM"): self.pending[seq] = (kind, args[0])
 
     def receive(self, msg):
         now = time.monotonic()
         if msg[0] == "JCAPS":
             self.capable = True
             self.query()
+            self.app.worker.submit("MPWM", None)
+        elif msg[0] == "MPWM":
+            self.pwm = (msg[1], msg[2])
+        elif msg[0] == "JTUNE":
+            self.tunes[msg[2]] = msg[3:]
+        elif msg[0] == "JT":
+            if msg[2] == self.selected:
+                self.trace_at, self.spread = now, msg[4]
+                self.history.append((now, msg[5]/1000, msg[6]/1000))
         elif msg[0] == "STATE": self.motion = (now, msg)
         elif msg[0] == "JCAL": self.device[msg[2]] = msg[3]
         elif msg[0] == "JLIM":
@@ -312,18 +399,20 @@ class JointPanel:
             if not msg[3]:
                 self.device.pop(msg[2], None)
                 self.limits.pop(msg[2], None)
-            if msg[2] == self.selected and msg[3] and msg[4]:
+            if msg[2] == self.selected and msg[3] and msg[4] and now - self.trace_at > .5:
                 self.history.append((now, msg[6]/1000, msg[7]/1000))
         elif msg[0] in ("ACK", "ERR") and msg[1] in self.pending:
             kind, joint = self.pending.pop(msg[1])
-            self.notice.set(f"M{joint} {kind}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
+            if kind == "JTRACE" and msg[0] == "ERR": self.tracing = False
+            label = {"MPWM": "电机 PWM", "JTUNE": f"M{joint} 控制参数", "JTRACE": f"M{joint} 数据记录"}.get(kind, f"M{joint} {kind}")
+            self.notice.set(f"{label}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
         elif msg[0] == "JRESULT":
             self.notice.set(f"M{msg[2]} 定位：" + {"REACHED": "已在容差内稳定 200ms，停止驱动",
                 "CANCELLED": "已取消"}.get(msg[3], "故障停止：" + FAULTS.get(msg[3], msg[3])))
 
     def disconnect(self):
         self.capable = False; self.device.clear(); self.limits.clear(); self.states.clear(); self.pending.clear()
-        self.motion = None
+        self.motion = None; self.tunes.clear(); self.pwm = None; self.tracing = False; self.spread = None
 
     def refresh(self):
         now = time.monotonic()
@@ -353,6 +442,24 @@ class JointPanel:
         ready = self.app.ready and self.capable and unlocked
         for button in (self.apply_btn, self.nominal_btn, self.limit_btn):
             button["state"] = "normal" if ready else "disabled"
+        self.pwm_btn["state"] = "normal" if ready else "disabled"
+        self.tune_btn["state"] = "normal" if ready else "disabled"
+        self.trace_btn["state"] = "normal" if self.app.ready and self.capable else "disabled"
+        self.trace_btn["text"] = "停止记录" if self.tracing else "开始记录"
+        self.pwm_status.set("MCU：—" if not self.pwm else
+                            f"MCU 当前：{self.pwm[0]}kHz {'刹车' if self.pwm[1] else '滑行'}")
+        t = self.tunes.get(self.selected)
+        self.tune_status.set(f"M{self.selected} MCU 当前：—" if not t else
+                             f"M{self.selected} MCU 当前：开关式，占空比用标定值" if t[0] == 0 else
+                             f"M{self.selected} MCU 当前：比例式 每度 {t[1]/10:g}% 起转 {t[2]/10:g}% 制动 {t[3]}ms")
+        rec = self.app.recorder
+        if self.tracing and rec.file:
+            noise = "" if self.spread is None else f"  本次采样极差 {self.spread}"
+            self.trace_status.set(f"记录中 {Path(rec.path).name}  {rec.rows} 行{noise}")
+        elif self.tracing:
+            self.trace_status.set("等待 MCU 数据")
+        elif rec.path:
+            self.trace_status.set(f"上次记录 {rec.path}")
         self.move_btn["state"] = "normal" if fresh and device and record[1][3] and record[1][4] and unlocked else "disabled"
         if fresh:
             m = record[1]

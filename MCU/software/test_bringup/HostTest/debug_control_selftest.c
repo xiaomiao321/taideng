@@ -12,6 +12,15 @@ static unsigned manual_calls;
 static char reply[128];
 static unsigned test_calls, confirm_calls;
 static unsigned joint_calls;
+static unsigned aux_calls;
+static const char *hw_aux(const char *op, const char *const *args,
+                          unsigned count)
+{
+    assert(!strcmp(op, "MPWM") && count == 2 && !strcmp(args[0], "5") &&
+           !strcmp(args[1], "1"));
+    ++aux_calls;
+    return NULL;
+}
 static const char *hw_joint(const char *op, unsigned seq, unsigned id,
                             const int32_t *v, unsigned count, uint32_t now)
 {
@@ -34,6 +43,15 @@ static const char *hw_joint(const char *op, unsigned seq, unsigned id,
     else if (!strcmp(op, "JLIM"))
     {
         assert(count == 2 && v[0] == -5000 && v[1] == 120000);
+    }
+    else if (!strcmp(op, "JTUNE"))
+    {
+        assert(count == 4 && v[0] == 1 && v[1] == 30 && v[2] == 300 &&
+               v[3] == 50);
+    }
+    else if (!strcmp(op, "JTRACE"))
+    {
+        assert(count == 1 && v[0] == 1);
     }
     else
     {
@@ -111,7 +129,7 @@ int main(void)
                        200);
     assert(outputs[0] == 500 && outputs[1] == 0 && outputs[7] == -800);
     unsigned before = manual_calls;
-    debug_control_line(&multi, "MSET 12 1 499 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+    debug_control_line(&multi, "MSET 12 1 99 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
                        210);
     assert(strstr(reply, "DUTY_RANGE") && manual_calls == before &&
            outputs[0] == 500);
@@ -160,9 +178,9 @@ int main(void)
     {
         int max = index < 6U ? 1000 : 800;
         assert(motor_duty_valid(index, 0));
-        assert(motor_duty_valid(index, 500) && motor_duty_valid(index, -500));
+        assert(motor_duty_valid(index, 100) && motor_duty_valid(index, -100));
         assert(motor_duty_valid(index, max) && motor_duty_valid(index, -max));
-        assert(!motor_duty_valid(index, 499) && !motor_duty_valid(index, -499));
+        assert(!motor_duty_valid(index, 99) && !motor_duty_valid(index, -99));
         assert(!motor_duty_valid(index, max + 1) &&
                !motor_duty_valid(index, -max - 1));
     }
@@ -216,7 +234,7 @@ int main(void)
         "RUN 2 M1 800 -1",      "RUN 2 M1 800 60001",
         "RUN 2 M1 80x 500",     "RUN 2 M1 800 500 extra",
         "RUN 65536 M1 800 500", "RUN 2 M1 99999999999999999999999 500",
-        "RUN 2 M1 +800 500",    "RUN 2 M1 499 500",
+        "RUN 2 M1 +800 500",    "RUN 2 M1 99 500",
         "RUN 2 M7 801 500",     "RUN 2 M8 -1000 500",
         "PING 3 extra",         "RUN"};
     for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
@@ -323,6 +341,30 @@ int main(void)
     c.locked = false;
     debug_control_line(&c, "INFO 45", 15);
     assert(strstr(reply, "CAPS JOINT_NOMINAL 1"));
+    assert(strstr(reply, "CAPS TRACE 1"));
+    /* JTUNE 要心跳并先停机；JTRACE 只读，不要心跳也不停机。 */
+    unsigned stops_before = stops;
+    debug_control_line(&c, "JTUNE 46 M1 1 30 300 50", 16);
+    assert(joint_calls == 6 && strstr(reply, "ACK 46 JTUNE") &&
+           stops == stops_before + 1);
+    debug_control_line(&c, "JTUNE 47 M1 1 30 300", 17);
+    assert(joint_calls == 6 && strstr(reply, "JOINT_PARAM"));
+    c.linked = false;
+    stops_before = stops;
+    debug_control_line(&c, "JTRACE 48 M1 1", 18);
+    assert(joint_calls == 7 && strstr(reply, "ACK 48 JTRACE") &&
+           stops == stops_before);
+    debug_control_line(&c, "JTUNE 49 M1 1 30 300 50", 19);
+    assert(joint_calls == 7 && strstr(reply, "NO_HEARTBEAT"));
+    /* MPWM 交给 aux，与 LSET 一样要心跳。 */
+    c.hw.aux = hw_aux;
+    debug_control_line(&c, "MPWM 50 5 1", 20);
+    assert(aux_calls == 0 && strstr(reply, "NO_HEARTBEAT"));
+    debug_control_line(&c, "PING 51", 21);
+    debug_control_line(&c, "MPWM 52 5 1", 22);
+    assert(aux_calls == 1 && strstr(reply, "ACK 52 MPWM"));
+    debug_control_line(&c, "INFO 53", 23);
+    assert(strstr(reply, "CAPS MOTOR_PWM 1"));
     printf("debug control: motor, board and joint protocol tests passed (%u "
            "stop calls)\n",
            stops);

@@ -49,8 +49,8 @@ class ChannelPanel:
                 ttk.Combobox(grid, textvariable=row["direction"], values=("正转", "反转"), state="readonly", width=6).grid(row=r, column=c)
                 c += 1
             maximum = 80 if motors and i >= 6 else 100
-            ttk.Spinbox(grid, from_=50 if motors else 0, to=maximum, textvariable=row["value"], width=7).grid(row=r, column=c, padx=7)
-            scale = ttk.Scale(grid, from_=50 if motors else 0, to=maximum, length=140,
+            ttk.Spinbox(grid, from_=10 if motors else 0, to=maximum, textvariable=row["value"], width=7).grid(row=r, column=c, padx=7)
+            scale = ttk.Scale(grid, from_=10 if motors else 0, to=maximum, length=140,
                               command=lambda v, item=row: item["value"].set(str(round(float(v)))))
             scale.set(80 if motors else 50)
             scale.grid(row=r, column=c+1, padx=7)
@@ -79,7 +79,7 @@ class ChannelPanel:
             ttk.Button(foot, text="保存预设", command=self.save).pack(side="right")
             ttk.Button(foot, text="载入预设", command=self.load).pack(side="right", padx=5)
         else:
-            ttk.Label(parent, text="M1～M6：50～100%；M7/M8：50～80%。每路独立计时，换向先停止 100ms。\n勾选用于成组启动；取消勾选后点击该行应用可停止该路。停止按钮随时可用。未勾选的其他路保持运行。").pack(anchor="w")
+            ttk.Label(parent, text="M1～M6：10～100%；M7/M8：10～80%。每路独立计时，换向先停止 100ms。\n勾选用于成组启动；取消勾选后点击该行应用可停止该路。停止按钮随时可用。未勾选的其他路保持运行。").pack(anchor="w")
         self.refresh()
 
     def send(self, kind, motor=1, duty=800, duration=500):

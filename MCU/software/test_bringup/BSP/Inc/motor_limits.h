@@ -20,8 +20,13 @@
 /** @brief 小关节电机数量；下标小于该值的是小电机，其余是履带大电机。 */
 #define MOTOR_SMALL_COUNT (6U)
 
-/** @brief 能可靠启动的最小占空比绝对值，千分比。 */
-#define MOTOR_DUTY_MIN (500)
+/**
+ * @brief 允许输出的最小占空比绝对值，千分比。
+ *
+ * 滑行 PWM 下低于约 50% 电机转不动；刹车 PWM 下能转的占空比更低，
+ * 调试时需要扫低占空比，所以这里只挡掉明显无意义的值。
+ */
+#define MOTOR_DUTY_MIN (100)
 
 /** @brief 小关节电机占空比绝对值上限，千分比。 */
 #define MOTOR_DUTY_SMALL_MAX (1000)

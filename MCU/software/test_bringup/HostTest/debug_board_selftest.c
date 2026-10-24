@@ -135,7 +135,7 @@ int main(void)
     assert(debug_board_start(&b, 1, "LAMP_UP1", 1001, 500, 0));
     assert(debug_board_start(&b, 1, "PWR", 0, 10001, 0));
     assert(debug_board_start(&b, 1, "LED", 1, 500, 0));
-    assert(debug_board_start(&b, 1, "MOTOR_M1_FI", 499, 500, 0));
+    assert(debug_board_start(&b, 1, "MOTOR_M1_FI", 99, 500, 0));
     assert(debug_board_start(&b, 1, "MOTOR_M7_FI", 801, 500, 0));
     assert(debug_board_start(&b, 1, "MOTOR_M8_BI", 1000, 500, 0));
     assert(b.phase == BOARD_IDLE);

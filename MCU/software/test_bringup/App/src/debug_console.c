@@ -47,6 +47,9 @@ _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
 /** @brief 单次六路 ADC 扫描的等待超时，单位毫秒。 */
 #define ADC_TIMEOUT_MS (5U)
 
+/** @brief 每个采样周期连续扫描的次数，合成一组读数以压低 PWM 干扰。 */
+#define ADC_OVERSAMPLE (16U)
+
 /** @brief 状态行上报周期，单位毫秒。 */
 #define STATUS_PERIOD_MS (100U)
 
@@ -97,7 +100,13 @@ static uint32_t s_seen_linux_errors = 0U;
 static uint32_t s_seen_linux_overflows = 0U;
 
 static uint16_t s_pot_cache[BSP_ADC_CHANNEL_COUNT];
+/** @brief 最近一次采样中每路样本的极差。 */
+static uint16_t s_pot_spread[BSP_ADC_CHANNEL_COUNT];
 static bool s_is_pot_valid = false;
+/** @brief JTRACE 打开时每次采样上报一行 JT。 */
+static bool s_is_trace_on = false;
+/** @brief 最近一次已上报的采样时刻，用来发现新采样。 */
+static uint32_t s_trace_sample_ms = 0U;
 static uint32_t s_last_adc_ms = 0U;
 static uint32_t s_last_status_ms = 0U;
 
@@ -378,12 +387,62 @@ static const char *send_linux_hex(const char *const *args, unsigned count)
                : "LINUX_TX_ERROR";
 }
 
+/** @brief MPWM：无参数时查询，否则设置电机 PWM 频率（kHz）和衰减方式。 */
+static const char *set_motor_pwm(const char *const *args, unsigned count)
+{
+    uint32_t khz;
+    bool is_slow;
+    if (count == 2U)
+    {
+        unsigned value = 0U;
+        for (const char *p = args[0]; *p; ++p)
+        {
+            if (*p < '0' || *p > '9' || value > BSP_MOTOR_PWM_BASE_KHZ)
+            {
+                return "PWM_PARAM";
+            }
+            value = value * 10U + (unsigned)(*p - '0');
+        }
+        if (strcmp(args[1], "0") && strcmp(args[1], "1"))
+        {
+            return "PWM_PARAM";
+        }
+        if (s_joints.active >= 0 || s_board.phase != BOARD_IDLE)
+        {
+            return "BUSY";
+        }
+        bsp_status_t status = bsp_motor_set_pwm(value, args[1][0] == '1');
+        if (status == BSP_ERR_CONFIG)
+        {
+            return "BUSY";
+        }
+        if (status != BSP_OK)
+        {
+            return "PWM_PARAM";
+        }
+    }
+    else if (count != 0U)
+    {
+        return "PWM_PARAM";
+    }
+    bsp_motor_get_pwm(&khz, &is_slow);
+    char out[32];
+    (void)snprintf(out, sizeof(out), "MPWM %lu %u\r\n", (unsigned long)khz,
+                   (unsigned)is_slow);
+    (void)send_line(out);
+    return NULL;
+}
+
 static const char *aux_command(const char *op, const char *const *args,
                                unsigned count)
 {
     if (!strcmp(op, "LSET"))
     {
         return set_lamps(args, count);
+    }
+    if (!strcmp(op, "MPWM"))
+    {
+        return set_motor_pwm(args, count);
     }
     if (!s_is_linux_ok)
     {
@@ -405,6 +464,11 @@ static bool joint_drive(unsigned index, int duty)
     return bsp_motor_set_duty((bsp_motor_id_t)index, (int16_t)duty) == BSP_OK;
 }
 
+static bool joint_brake(unsigned index)
+{
+    return bsp_motor_brake((bsp_motor_id_t)index) == BSP_OK;
+}
+
 /** @brief 上报焦点关节的状态；config 为 true 时先上报标定参数。 */
 static void joint_report(uint32_t now, bool config)
 {
@@ -421,6 +485,14 @@ static void joint_report(uint32_t now, bool config)
         (void)snprintf(out, sizeof(out), "JLIM %lu M%u %ld %ld\r\n",
                        (unsigned long)now, s_joint_focus + 1U,
                        (long)s->cal.limit_min, (long)s->cal.limit_max);
+        (void)send_line(out);
+    }
+    if (config)
+    {
+        (void)snprintf(out, sizeof(out), "JTUNE %lu M%u %u %u %u %u\r\n",
+                       (unsigned long)now, s_joint_focus + 1U,
+                       (unsigned)s->tune.mode, s->tune.kp, s->tune.duty_min,
+                       s->tune.brake_ms);
         (void)send_line(out);
     }
     bool is_fresh =
@@ -592,6 +664,30 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
     {
         return joint_move(&s_joints, seq, index, v[0], (uint32_t)v[1], now);
     }
+    if (!strcmp(op, "JTUNE") && count == 4U)
+    {
+        if (v[0] < 0 || v[1] < 0 || v[2] < 0 || v[3] < 0)
+        {
+            return "TUNE_PARAM";
+        }
+        joint_tune_t tune = {(joint_mode_t)v[0], (unsigned)v[1],
+                             (unsigned)v[2], (unsigned)v[3]};
+        const char *err = joint_set_tune(&s_joints, index, tune);
+        if (!err)
+        {
+            joint_report(now, true);
+        }
+        return err;
+    }
+    if (!strcmp(op, "JTRACE") && count == 1U)
+    {
+        if (v[0] != 0 && v[0] != 1)
+        {
+            return "JOINT_PARAM";
+        }
+        s_is_trace_on = v[0] == 1;
+        return NULL;
+    }
     return "JOINT_PARAM";
 }
 
@@ -638,10 +734,20 @@ static void check_control(void)
     if ((uint32_t)(now - s_last_adc_ms) >= ADC_PERIOD_MS)
     {
         s_last_adc_ms = now;
-        s_is_pot_valid =
-            s_is_adc_ok &&
-            bsp_adc_read_all(s_pot_cache, ADC_TIMEOUT_MS) == BSP_OK;
-        joint_feed(&s_joints, s_pot_cache, s_is_pot_valid, HAL_GetTick());
+        static uint16_t samples[ADC_OVERSAMPLE][BSP_ADC_CHANNEL_COUNT];
+        s_is_pot_valid = s_is_adc_ok;
+        for (unsigned i = 0; i < ADC_OVERSAMPLE && s_is_pot_valid; ++i)
+        {
+            s_is_pot_valid =
+                bsp_adc_read_all(samples[i], ADC_TIMEOUT_MS) == BSP_OK;
+        }
+        if (s_is_pot_valid)
+        {
+            joint_filter((const uint16_t(*)[JOINT_COUNT])samples,
+                         ADC_OVERSAMPLE, s_pot_cache, s_pot_spread);
+        }
+        joint_feed(&s_joints, s_pot_cache, s_pot_spread, s_is_pot_valid,
+                   HAL_GetTick());
     }
     if (!joint_tick(&s_joints, HAL_GetTick()))
     {
@@ -895,6 +1001,37 @@ static void report_status(uint32_t now)
     joint_report(HAL_GetTick(), false);
 }
 
+/**
+ * @brief JTRACE 打开时，每个新采样上报一行焦点关节的数据：
+ *        JT 采样时刻 M编号 读数 极差 角度 目标 占空比 制动 阶段。
+ *
+ * @note 占空比取 H 桥最近一次设定值，RUN、MSET 开环驱动时也有效；
+ *       115200 波特率下一行约 4ms，与周期状态合计约占带宽七成。
+ */
+static void report_trace(void)
+{
+    if (!s_is_trace_on || !s_joints.valid ||
+        s_joints.sample_ms == s_trace_sample_ms)
+    {
+        return;
+    }
+    s_trace_sample_ms = s_joints.sample_ms;
+    const joint_state_t *s = &s_joints.states[s_joint_focus];
+    int16_t duty = 0;
+    (void)bsp_motor_hbridge_get_duty(
+        bsp_motor_handle((bsp_motor_id_t)s_joint_focus), &duty);
+    bool is_braking =
+        s_joints.active == (int)s_joint_focus && s_joints.braking;
+    char out[96];
+    (void)snprintf(out, sizeof(out), "JT %lu M%u %u %u %ld %ld %d %u %s\r\n",
+                   (unsigned long)s_joints.sample_ms, s_joint_focus + 1U,
+                   (unsigned)s->raw, (unsigned)s->spread,
+                   s->calibrated ? (long)s->angle : 0L, (long)s->target,
+                   (int)duty, (unsigned)is_braking, joint_phase_name(s->phase));
+    (void)send_line(out);
+    check_control();
+}
+
 /* -------------------------------------------------------------------------- */
 /* 对外接口                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -911,7 +1048,7 @@ void debug_console_init(void)
 
     board_hw_t board_hw = {board_apply, outputs_off, reply_line};
     debug_board_init(&s_board, board_hw);
-    joint_hw_t joint_hw = {joint_drive, reply_line};
+    joint_hw_t joint_hw = {joint_drive, reply_line, joint_brake};
     joint_init(&s_joints, joint_hw);
     /* 在串口开始接收、看门狗启动之前加载：可能要擦除备用扇区，阻塞约 2 秒。 */
     unsigned restored = load_calibration();
@@ -956,6 +1093,8 @@ void debug_console_update(void)
     check_console_rx();
     process_console_rx();
     check_control();
+
+    report_trace();
 
     uint32_t now = HAL_GetTick();
     if ((uint32_t)(now - s_last_status_ms) >= STATUS_PERIOD_MS)

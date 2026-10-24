@@ -99,10 +99,32 @@ bsp_status_t bsp_motor_stop_all(void);
  *       不调用 HAL 函数，不改变驱动内部记录的占空比；可在任何上下文调用，
  *       包括 MX_TIMx_Init() 之前（此时什么都不做）。
  * @note 比较寄存器开启了预装载时，新值在下一个 PWM 周期生效（20kHz 下不超过
- *       50us）。
+ *       50us，切到 1kHz 时不超过 1ms）。
  * @note 只清比较值，不停止定时器，引脚保持确定的低电平而不是浮空。
  */
 void bsp_motor_emergency_stop(void);
+
+/** @brief CubeMX 配置的电机 PWM 频率，单位 kHz；bsp_motor_set_pwm 只能分频。 */
+#define BSP_MOTOR_PWM_BASE_KHZ (20U)
+
+/**
+ * @brief 设置全部电机的 PWM 频率和关断段衰减方式（调试用）。
+ *
+ * @param[in] khz PWM 频率，须能整除 BSP_MOTOR_PWM_BASE_KHZ：1、2、4、5、10、20。
+ * @param[in] slow_decay true 为刹车（慢衰减），false 为滑行（快衰减，上电默认）。
+ *
+ * @retval BSP_OK 已切换。
+ * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化。
+ * @retval BSP_ERR_PARAM 频率不在允许值内。
+ * @retval BSP_ERR_CONFIG 有电机还在转，先全部停下再切换。
+ *
+ * @note 只改预分频，ARR 和占空比换算不变；写完立即产生更新事件，使新频率
+ *       马上生效。电机定时器与灯板、蜂鸣器的定时器不重叠。
+ */
+bsp_status_t bsp_motor_set_pwm(uint32_t khz, bool slow_decay);
+
+/** @brief 读取当前电机 PWM 频率（kHz）和衰减方式。 */
+void bsp_motor_get_pwm(uint32_t *khz, bool *slow_decay);
 
 /**
  * @brief 取得某一路的底层 H 桥句柄，供需要直接操作时使用。

@@ -40,6 +40,7 @@ bsp_status_t bsp_motor_hbridge_init(bsp_motor_hbridge_t *self,
     self->channel_bi = channel_bi;
     self->arr = htim->Init.Period;
     self->duty_permille = 0;
+    self->is_slow_decay = false;
     self->is_initialized = true;
 
     /* 两路先清零再启动，使引脚确定输出低电平（滑行），而不是浮空。 */
@@ -76,20 +77,31 @@ bsp_status_t bsp_motor_hbridge_set_duty(bsp_motor_hbridge_t *self,
         return BSP_ERR_PARAM;
     }
 
+    uint32_t full =
+        duty_to_compare(self->arr, (uint32_t)BSP_MOTOR_HBRIDGE_DUTY_MAX);
     if (duty_permille > 0)
     {
-        /* 先把反转通道清零，再给正转通道赋值，避免两路同时导通。 */
+        uint32_t on = duty_to_compare(self->arr, (uint32_t)duty_permille);
+        /* 先把反转通道清零，再给正转通道赋值，避免两路同时导通。
+         * 刹车模式下 FI 常高、BI 在关断段拉高，两路同高为短路制动。 */
         __HAL_TIM_SET_COMPARE(self->htim, self->channel_bi, 0U);
-        __HAL_TIM_SET_COMPARE(
-            self->htim, self->channel_fi,
-            duty_to_compare(self->arr, (uint32_t)duty_permille));
+        __HAL_TIM_SET_COMPARE(self->htim, self->channel_fi,
+                              self->is_slow_decay ? full : on);
+        if (self->is_slow_decay)
+        {
+            __HAL_TIM_SET_COMPARE(self->htim, self->channel_bi, full - on);
+        }
     }
     else if (duty_permille < 0)
     {
+        uint32_t on = duty_to_compare(self->arr, (uint32_t)(-duty_permille));
         __HAL_TIM_SET_COMPARE(self->htim, self->channel_fi, 0U);
-        __HAL_TIM_SET_COMPARE(
-            self->htim, self->channel_bi,
-            duty_to_compare(self->arr, (uint32_t)(-duty_permille)));
+        __HAL_TIM_SET_COMPARE(self->htim, self->channel_bi,
+                              self->is_slow_decay ? full : on);
+        if (self->is_slow_decay)
+        {
+            __HAL_TIM_SET_COMPARE(self->htim, self->channel_fi, full - on);
+        }
     }
     else
     {
@@ -98,6 +110,26 @@ bsp_status_t bsp_motor_hbridge_set_duty(bsp_motor_hbridge_t *self,
     }
 
     self->duty_permille = duty_permille;
+    return BSP_OK;
+}
+
+bsp_status_t bsp_motor_hbridge_set_decay(bsp_motor_hbridge_t *self,
+                                         bool slow_decay)
+{
+    if (self == NULL)
+    {
+        return BSP_ERR_PARAM;
+    }
+    if (!self->is_initialized)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+    if (self->duty_permille != 0)
+    {
+        return BSP_ERR_CONFIG;
+    }
+
+    self->is_slow_decay = slow_decay;
     return BSP_OK;
 }
 

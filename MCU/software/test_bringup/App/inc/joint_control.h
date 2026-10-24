@@ -7,8 +7,10 @@
  * 也可以由电位器理论参数加一个实测参考点算出（joint_cal_from_nominal）。
  * 允许运动的范围 [limit_min, limit_max] 与标定点分开设置，
  * 应按机构实际能转的范围设定，避免顶到机械限位。
- * 远离目标时持续驱动，接近目标时改为短脉冲点动，进入容差后保持一段时间
- * 判定到达；传感器失效、超时、越限、反向或停滞都会停机并报故障。
+ * 两种控制方式由 joint_tune_t 选择：开关式（远离目标时持续驱动，接近目标时
+ * 改为短脉冲点动）和比例式（占空比 = 起转占空比 + kp × 误差，进入容差和换向
+ * 时先短路制动再滑行）。进入容差后保持一段时间判定到达；传感器失效、超时、
+ * 越限、反向或停滞都会停机并报故障。
  *
  * 本模块不依赖 HAL，硬件动作通过 joint_hw_t 回调交给调用者，可在 PC 上测试。
  */
@@ -80,6 +82,32 @@ typedef struct
     uint32_t pot_ohms;    /**< 电位器总阻值，欧姆；0 表示采用标称值。 */
 } joint_nominal_t;
 
+/** @brief 控制方式。 */
+typedef enum
+{
+    JOINT_MODE_BANG = 0, /**< 开关式：全速接近，近处点动，停止时滑行。 */
+    JOINT_MODE_P = 1,    /**< 比例式：起转占空比加比例项，停止时先制动。 */
+    JOINT_MODE_COUNT
+} joint_mode_t;
+
+/** @brief 控制参数；只在 RAM 中，上电恢复默认值（开关式）。 */
+typedef struct
+{
+    joint_mode_t mode;
+    unsigned kp;       /**< 每度误差增加的占空比，千分比/度。 */
+    unsigned duty_min; /**< 比例式的起转占空比，千分比；不超过 cal.duty。 */
+    unsigned brake_ms; /**< 比例式进入容差或换向时的制动时长，0 为不制动。 */
+} joint_tune_t;
+
+/** @brief 比例系数上限，千分比/度。 */
+#define JOINT_KP_MAX (1000U)
+
+/** @brief 制动时长上限，单位毫秒；不超过到达判定的保持时间。 */
+#define JOINT_BRAKE_MAX_MS (200U)
+
+/** @brief 一次采样最多参与滤波的样本数。 */
+#define JOINT_FILTER_MAX_SAMPLES (32U)
+
 /** @brief 关节状态。 */
 typedef enum
 {
@@ -100,6 +128,8 @@ typedef struct
     int32_t angle;  /**< 最近一次换算角度，毫度。 */
     int32_t target; /**< 目标角度，毫度。 */
     int duty;       /**< 当前输出占空比。 */
+    uint16_t spread; /**< 最近一次采样中各样本的极差，反映噪声。 */
+    joint_tune_t tune;
     joint_phase_t phase;
     const char *fault; /**< 最近一次故障名，没有故障时为 "NONE"。 */
 } joint_state_t;
@@ -111,6 +141,8 @@ typedef struct
     bool (*drive)(unsigned index, int duty);
     /** @brief 发送一行回复，内容已含 CRLF。 */
     void (*reply)(const char *line);
+    /** @brief 短路制动；可为 NULL，此时制动改为滑行。 */
+    bool (*brake)(unsigned index);
 } joint_hw_t;
 
 /** @brief 全部关节的控制状态。同一时刻最多一个关节在运动。调用者只读。 */
@@ -127,6 +159,7 @@ typedef struct
     uint32_t stable_ms;    /**< 进入容差的时刻。 */
     uint32_t switch_ms;    /**< 最近一次换向的时刻。 */
     uint32_t pulse_ms;     /**< 点动脉冲当前段开始的时刻。 */
+    uint32_t brake_ms;     /**< 本次制动开始的时刻。 */
     uint32_t timeout_ms;   /**< 本次运动的超时。 */
     int32_t initial_error; /**< 开始时的误差绝对值。 */
     int32_t best_error;    /**< 运动中达到过的最小误差。 */
@@ -134,6 +167,7 @@ typedef struct
     bool stable;           /**< 是否处于容差内。 */
     bool pulse_on;         /**< 点动脉冲是否处于驱动段。 */
     bool near_mode;        /**< 是否已进入接近目标的点动模式。 */
+    bool braking;          /**< 运动中的关节是否正在短路制动。 */
 } joint_control_t;
 
 /** @brief 初始化：全部关节未标定、空闲。 */
@@ -168,6 +202,25 @@ const char *joint_cal_from_nominal(const joint_nominal_t *n, joint_cal_t *out);
 const char *joint_set_limits(joint_control_t *j, unsigned index,
                              int32_t limit_min, int32_t limit_max);
 
+/**
+ * @brief 设置控制参数；不要求已标定。
+ *
+ * @return NULL 表示成功；"JOINT_ID"、"BUSY" 或 "TUNE_PARAM"。
+ */
+const char *joint_set_tune(joint_control_t *j, unsigned index,
+                           joint_tune_t tune);
+
+/**
+ * @brief 把多次扫描的读数合成一组：每路去掉最大、最小各四分之一后取平均。
+ *
+ * @param[in] samples count 组读数，每组 JOINT_COUNT 个。
+ * @param[in] count 样本组数，1 至 JOINT_FILTER_MAX_SAMPLES。
+ * @param[out] out 滤波结果。
+ * @param[out] spread 每路样本的极差（最大减最小）。
+ */
+void joint_filter(const uint16_t (*samples)[JOINT_COUNT], unsigned count,
+                  uint16_t out[JOINT_COUNT], uint16_t spread[JOINT_COUNT]);
+
 /** @brief 启动一次运动；返回 NULL 表示已接受，否则为错误名。 */
 const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
                        int32_t target, uint32_t timeout, uint32_t now);
@@ -176,10 +229,11 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
  * @brief 输入一组采样。
  *
  * @param[in] raw JOINT_COUNT 个 ADC 读数。
+ * @param[in] spread JOINT_COUNT 个样本极差；可为 NULL，记为 0。
  * @param[in] valid 本次采样是否成功；失败时不更新读数。
  */
-void joint_feed(joint_control_t *j, const uint16_t *raw, bool valid,
-                uint32_t now);
+void joint_feed(joint_control_t *j, const uint16_t *raw,
+                const uint16_t *spread, bool valid, uint32_t now);
 
 /**
  * @brief 周期调用：推进运动控制。

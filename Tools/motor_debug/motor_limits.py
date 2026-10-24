@@ -2,7 +2,7 @@
 def duty_limits(motor):
     if type(motor) is not int or not 1 <= motor <= 8:
         raise ValueError("电机编号须为 M1～M8")
-    return 500, 1000 if motor <= 6 else 800
+    return 100, 1000 if motor <= 6 else 800
 
 def validate_duty(motor, duty, allow_stop=False):
     low, high = duty_limits(motor)

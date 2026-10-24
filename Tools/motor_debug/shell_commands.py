@@ -8,7 +8,7 @@ from protocol import command
 from joint_model import millidegrees
 
 HELP = """命令（占空比用百分数，时长用 ms）：
-运行范围：M1～M6 小电机 50～100%；M7/M8 大电机 50～80%。停止使用 stop。
+运行范围：M1～M6 小电机 10～100%；M7/M8 大电机 10～80%。停止使用 stop。
   motor M1 80 500         正转点动；-80 反转；时长 0 持续运行
   angle M1 45 [10000]     使用已下发标定定位到 45°，默认超时 10 秒
   joint M1               查询关节状态、MCU 标定及允许范围
@@ -18,6 +18,12 @@ HELP = """命令（占空比用百分数，时长用 ms）：
                          down 减小 / up 增大，正转使角度 + 增大 / - 减小，
                          占空比 80%，容差 2°，允许 10～170°，阻值 47kΩ
                          （省略按 45kΩ）。电位器须 1:1 装在关节轴上
+  tune M1 p 3 30 50       比例式控制：每度误差加 3% 占空比，起转 30%，
+                         到位和换向时制动 50ms；tune M1 bang 恢复开关式
+  trace M1 on / off       每 10ms 上报 M1 的读数、噪声、角度、占空比，
+                         自动存成 records 目录下的 CSV
+  pwm [5 brake]          查询或设置电机 PWM：频率 1/2/4/5/10/20kHz，
+                         关断段 brake 刹车 / coast 滑行，须先停电机
   lamp UP1 50 1000        灯板 50%，保持 1000ms 后关闭
   buzzer 2700 1000        蜂鸣器 2700Hz，保持 1000ms
   power [200]            一次 Linux 电源键脉冲，会作用于连接的 Linux
@@ -37,7 +43,7 @@ HELP = """命令（占空比用百分数，时长用 ms）：
 ↑ ↓ 历史；Tab 补全；Ctrl+L 清屏；输入框 Ctrl+C 或 ESC 停止。
 序号与心跳自动处理。命令一次一行，不执行操作系统命令。"""
 
-COMMANDS = ("help", "motor", "angle", "joint", "jlim", "jnom", "lamp", "buzzer", "power", "led", "log", "adc", "key",
+COMMANDS = ("help", "motor", "angle", "joint", "jlim", "jnom", "tune", "trace", "pwm", "lamp", "buzzer", "power", "led", "log", "adc", "key",
             "status", "test", "pass", "fail", "stop", "info", "watch", "history", "clear")
 
 @dataclass(frozen=True)
@@ -117,6 +123,16 @@ def parse_shell(text):
                   percent(args[5]), millidegrees(args[6]), millidegrees(args[7]), millidegrees(args[8]),
                   kilohms(args[9]) if len(args) == 10 else 0)
         return send("JNOM", int(args[0][1]), values)
+    if name == "tune" and len(args) == 2 and args[1].lower() == "bang" and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JTUNE", int(args[0][1]), (0, 30, 500, 50))
+    if name == "tune" and len(args) == 5 and args[1].lower() == "p" and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JTUNE", int(args[0][1]), (1, percent(args[2]), percent(args[3]), integer(args[4])))
+    if name == "trace" and len(args) == 2 and args[1].lower() in ("on", "off") and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JTRACE", int(args[0][1]), int(args[1].lower() == "on"))
+    if name == "pwm" and not args:
+        return send("MPWM", None)
+    if name == "pwm" and len(args) == 2:
+        return send("MPWM", integer(args[0]), int(sign(args[1], ("brake",), ("coast",), "衰减方式须为 brake 或 coast") > 0))
     if name == "lamp" and len(args) == 3:
         return send("TEST", "LAMP_" + args[0].upper(), percent(args[1]), integer(args[2]))
     if name == "buzzer" and len(args) == 2:
@@ -158,6 +174,7 @@ def complete(text):
         options = {"motor": [f"M{i}" for i in range(1, 9)],
                    "angle": [f"M{i}" for i in range(1, 7)], "joint": [f"M{i}" for i in range(1, 7)],
                    "jlim": [f"M{i}" for i in range(1, 7)], "jnom": [f"M{i}" for i in range(1, 7)],
+                   "tune": [f"M{i}" for i in range(1, 7)], "trace": [f"M{i}" for i in range(1, 7)],
                    "lamp": ["UP1", "UP2", "UP3", "UP4", "DOWN1", "DOWN2", "DOWN3"],
                    "test": list(BY_NAME), "watch": ["on", "off"],
                    "adc": ["test"], "key": ["test"]}.get(words[0].lower(), [])

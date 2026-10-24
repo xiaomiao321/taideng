@@ -93,7 +93,7 @@ class TerminalPanel:
 
     def receive(self, line, msg):
         kind = msg[0]
-        if kind in ("POT", "KEY", "STATE", "BOARD", "JSTATE", "MSTATE", "LSTATE", "LRX"):
+        if kind in ("POT", "KEY", "STATE", "BOARD", "JSTATE", "MSTATE", "LSTATE", "LRX", "JT"):
             self.cached[kind] = (time.monotonic(), msg, line)
             requested = kind == "JSTATE" and msg[2] == self.pending_joint
             if requested: self.pending_joint = None

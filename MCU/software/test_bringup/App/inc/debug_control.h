@@ -6,7 +6,7 @@
  * PC 上用 HostTest/debug_control_selftest.c 完整测试。
  *
  * 安全规则：
- * - 除 PING、STOP、INFO、MOFF、JGET 外，任何会动输出的命令都要求
+ * - 除 PING、STOP、INFO、MOFF、JGET、JTRACE 外，任何会动输出的命令都要求
  *   DEBUG_CONTROL_HEARTBEAT_TIMEOUT_MS 内收到过 PING；
  * - 心跳超时、HOME 按下或硬件失败都会停止全部输出并锁定，
  *   只有显式 STOP ALL（且 HOME 已松开）才解锁；
@@ -52,7 +52,7 @@ typedef struct
                          const int32_t *values, unsigned count, uint32_t now);
     /** @brief 进入多路手动控制前取消其他控制者；返回 false 表示硬件失败。 */
     bool (*manual)(void);
-    /** @brief 其他命令（LSET、LMODE、LTX）；返回 NULL 或错误名。 */
+    /** @brief 其他命令（LSET、LMODE、LTX、MPWM）；返回 NULL 或错误名。 */
     const char *(*aux)(const char *op, const char *const *args, unsigned count);
 } debug_hw_t;
 
