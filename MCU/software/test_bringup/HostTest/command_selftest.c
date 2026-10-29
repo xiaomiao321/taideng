@@ -78,6 +78,15 @@ typedef struct
     uint8_t brightness;
     uint8_t motion;
     uint8_t speed;
+    uint8_t fault_flags;
+    uint32_t arm_move_calls;
+    uint32_t arm_home_calls;
+    uint32_t arm_status_calls;
+    uint8_t last_joint;
+    int32_t last_target;
+    int32_t last_arm_speed;
+    uint8_t last_query;
+    uint8_t arm_result;
 } fake_hw_t;
 
 static fake_hw_t s_fake;
@@ -91,7 +100,7 @@ static void fake_read_status(mcu_status_t *status)
     status->target_motion = s_fake.motion;
     status->speed = s_fake.speed;
     status->target_speed = s_fake.speed;
-    status->fault_flags = 0U;
+    status->fault_flags = s_fake.fault_flags;
 }
 
 static bool fake_apply_motion(uint8_t motion, uint8_t speed)
@@ -121,8 +130,44 @@ static void fake_safe_stop(void)
     s_fake.speed = 0U;
 }
 
-static const mcu_command_hw_t k_fake_hw = {fake_read_status, fake_apply_light,
-                                           fake_apply_motion, fake_safe_stop};
+static uint8_t fake_arm_move(uint8_t joint_id, int32_t target, int32_t speed)
+{
+    ++s_fake.arm_move_calls;
+    s_fake.last_joint = joint_id;
+    s_fake.last_target = target;
+    s_fake.last_arm_speed = speed;
+    return s_fake.arm_result;
+}
+
+static uint8_t fake_arm_home(uint8_t joint_id)
+{
+    ++s_fake.arm_home_calls;
+    s_fake.last_joint = joint_id;
+    return s_fake.arm_result;
+}
+
+static uint8_t fake_arm_status(uint8_t command, uint8_t joint_id,
+                               mcu_extended_status_t *status)
+{
+    ++s_fake.arm_status_calls;
+    s_fake.last_query = command;
+    s_fake.last_joint = joint_id;
+    status->faults = 0x10U;
+    status->actual = -45000;
+    status->target = 30000;
+    status->actual_speed = -1234;
+    status->target_speed = 20000;
+    return s_fake.arm_result;
+}
+
+/* 不带关节回调：关节命令按未知命令处理。 */
+static const mcu_command_hw_t k_fake_hw = {
+    fake_read_status, fake_apply_light, fake_apply_motion, fake_safe_stop,
+    NULL,             NULL,             NULL};
+
+static const mcu_command_hw_t k_arm_hw = {
+    fake_read_status, fake_apply_light, fake_apply_motion, fake_safe_stop,
+    fake_arm_move,    fake_arm_home,    fake_arm_status};
 
 static void fake_reset(void)
 {
@@ -352,7 +397,7 @@ static void test_unknown_command(void)
     check(!mcu_command_handle(&request, &reply, 20U),
           "unknown: silently dropped without ACK_REQUIRED");
 
-    /* 扩展命令 0x31 尚未实现，同样按未知命令处理。 */
+    /* 没有注册关节回调时，扩展命令 0x31 同样按未知命令处理。 */
     request =
         make_request(0x1DU, 0x31U, NULL, 0U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
     check(mcu_command_handle(&request, &reply, 30U), "extension: has a reply");
@@ -661,6 +706,231 @@ static void test_same_seq_new_payload_executes(void)
           "light same SEQ, new payload: ACK ok");
 }
 
+/** @brief 拼一条 SET_ARM_POSITION 的 payload。 */
+static void arm_payload(uint8_t out[12], uint8_t joint, int32_t target,
+                        int32_t speed)
+{
+    memset(out, 0, 12U);
+    out[0] = joint;
+    for (unsigned i = 0U; i < 4U; ++i)
+    {
+        out[4U + i] = (uint8_t)(((uint32_t)target >> (8U * i)) & 0xFFU);
+        out[8U + i] = (uint8_t)(((uint32_t)speed >> (8U * i)) & 0xFFU);
+    }
+}
+
+/** @brief SET_ARM_POSITION：参数校验、交给回调、结果码进 ACK。 */
+static void test_arm_position(void)
+{
+    uint8_t payload[12];
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_arm_hw, 0U);
+
+    arm_payload(payload, 3U, -30000, 20000);
+    mcu_frame_t request =
+        make_request(0x40U, MCU_PROTOCOL_CMD_SET_ARM_POSITION, payload, 12U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    check(mcu_command_handle(&request, &reply, 10U), "arm: has a reply");
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_ARM_POSITION,
+                 MCU_PROTOCOL_RESULT_OK) &&
+              (reply.seq == 0x40U),
+          "arm: ACK ok echoes SEQ");
+    check((s_fake.arm_move_calls == 1U) && (s_fake.last_joint == 3U) &&
+              (s_fake.last_target == -30000) &&
+              (s_fake.last_arm_speed == 20000),
+          "arm: joint, negative target and speed decoded");
+
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check(s_fake.arm_move_calls == 1U, "arm: retransmission not re-executed");
+
+    s_fake.arm_result = MCU_PROTOCOL_RESULT_BUSY;
+    arm_payload(payload, 3U, 10000, 20000);
+    request = make_request(0x41U, MCU_PROTOCOL_CMD_SET_ARM_POSITION, payload,
+                           12U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 30U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_ARM_POSITION,
+                 MCU_PROTOCOL_RESULT_BUSY),
+          "arm: callback result code is passed through");
+    s_fake.arm_result = MCU_PROTOCOL_RESULT_OK;
+
+    request = make_request(0x42U, MCU_PROTOCOL_CMD_SET_ARM_POSITION, payload,
+                           11U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 40U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_ARM_POSITION,
+                 MCU_PROTOCOL_RESULT_INVALID_LENGTH),
+          "arm: 11-byte payload is invalid length");
+
+    static const struct
+    {
+        uint8_t joint;
+        int32_t speed;
+        uint8_t reserved_index;
+        const char *what;
+    } bad[] = {
+        {0U, 20000, 0U, "arm: joint 0 is invalid"},
+        {7U, 20000, 0U, "arm: joint 7 is invalid"},
+        {1U, 0, 0U, "arm: zero speed is invalid"},
+        {1U, -5, 0U, "arm: negative speed is invalid"},
+        {1U, 20000, 2U, "arm: non-zero reserved byte is invalid"},
+    };
+    for (unsigned i = 0U; i < sizeof(bad) / sizeof(bad[0]); ++i)
+    {
+        arm_payload(payload, bad[i].joint, 10000, bad[i].speed);
+        if (bad[i].reserved_index != 0U)
+        {
+            payload[bad[i].reserved_index] = 1U;
+        }
+        request = make_request((uint8_t)(0x50U + i),
+                               MCU_PROTOCOL_CMD_SET_ARM_POSITION, payload, 12U,
+                               MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+        (void)mcu_command_handle(&request, &reply, 50U);
+        check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_ARM_POSITION,
+                     MCU_PROTOCOL_RESULT_INVALID_VALUE),
+              bad[i].what);
+    }
+    check(s_fake.arm_move_calls == 2U, "arm: invalid requests never reach hw");
+}
+
+/** @brief 有故障时拒绝关节动作，STOP 照常执行。 */
+static void test_arm_fault_gate(void)
+{
+    uint8_t payload[12];
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_arm_hw, 0U);
+    s_fake.fault_flags = 0x11U;
+
+    arm_payload(payload, 1U, 10000, 20000);
+    mcu_frame_t request =
+        make_request(0x60U, MCU_PROTOCOL_CMD_SET_ARM_POSITION, payload, 12U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 10U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_ARM_POSITION,
+                 MCU_PROTOCOL_RESULT_HARDWARE) &&
+              (reply.payload[2] == 0x11U),
+          "fault gate: move rejected, detail carries fault flags");
+
+    const uint8_t home[4] = {1U, 0U, 0U, 0U};
+    request = make_request(0x61U, MCU_PROTOCOL_CMD_HOME_ARM, home, 4U,
+                           MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_HOME_ARM,
+                 MCU_PROTOCOL_RESULT_HARDWARE),
+          "fault gate: HOME rejected");
+    check((s_fake.arm_move_calls == 0U) && (s_fake.arm_home_calls == 0U),
+          "fault gate: hardware untouched");
+
+    const uint8_t stop[4] = {MCU_PROTOCOL_MOTION_STOP, 0U, 0U, 0U};
+    request = make_request(0x62U, MCU_PROTOCOL_CMD_SET_MOTION, stop, 4U,
+                           MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 30U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_MOTION, MCU_PROTOCOL_RESULT_OK),
+          "fault gate: STOP still accepted");
+}
+
+/** @brief HOME_ARM：4 字节，只校验关节 ID 和保留字节。 */
+static void test_arm_home(void)
+{
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_arm_hw, 0U);
+
+    uint8_t payload[4] = {6U, 0U, 0U, 0U};
+    mcu_frame_t request = make_request(0x70U, MCU_PROTOCOL_CMD_HOME_ARM,
+                                       payload, 4U,
+                                       MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 10U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_HOME_ARM, MCU_PROTOCOL_RESULT_OK) &&
+              (s_fake.arm_home_calls == 1U) && (s_fake.last_joint == 6U),
+          "home: joint 6 accepted");
+
+    payload[0] = 1U;
+    payload[3] = 1U;
+    request = make_request(0x71U, MCU_PROTOCOL_CMD_HOME_ARM, payload, 4U,
+                           MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_HOME_ARM,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE) &&
+              (s_fake.arm_home_calls == 1U),
+          "home: non-zero reserved byte rejected");
+}
+
+/** @brief GET_EXTENDED_STATUS：回 EXTENDED_STATUS，小端，回显查询帧 SEQ。 */
+static void test_extended_status(void)
+{
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_arm_hw, 0U);
+
+    uint8_t payload[4] = {MCU_PROTOCOL_CMD_SET_ARM_POSITION, 2U, 0U, 0U};
+    mcu_frame_t request = make_request(
+        0x80U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS, payload, 4U, 0U);
+    check(mcu_command_handle(&request, &reply, 10U),
+          "ext status: replies without ACK_REQUIRED");
+    static const uint8_t expected[20] = {
+        0x31, 0x02, 0x10, 0x00, 0x38, 0x50, 0xFF, 0xFF, 0x30, 0x75,
+        0x00, 0x00, 0x2E, 0xFB, 0xFF, 0xFF, 0x20, 0x4E, 0x00, 0x00};
+    check((reply.cmd == MCU_PROTOCOL_CMD_EXTENDED_STATUS) &&
+              (reply.seq == 0x80U) &&
+              (reply.flags == MCU_PROTOCOL_FLAG_RESPONSE) &&
+              (reply.payload_length == 20U) &&
+              bytes_equal(reply.payload, expected, 20U),
+          "ext status: fields encoded little-endian");
+    check((s_fake.last_query == 0x31U) && (s_fake.last_joint == 2U),
+          "ext status: command and selector passed to hw");
+
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check(s_fake.arm_status_calls == 2U, "ext status: repeated query is fresh");
+
+    payload[0] = MCU_PROTOCOL_CMD_HOME_ARM;
+    request = make_request(0x81U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 30U);
+    check((reply.cmd == MCU_PROTOCOL_CMD_EXTENDED_STATUS) &&
+              (reply.payload[0] == 0x34U),
+          "ext status: HOME_ARM query supported");
+
+    payload[0] = 0x30U;
+    request = make_request(0x82U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 40U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "ext status: light mode query not supported");
+
+    payload[0] = MCU_PROTOCOL_CMD_SET_ARM_POSITION;
+    payload[1] = 9U;
+    request = make_request(0x83U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 50U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "ext status: joint 9 rejected");
+
+    payload[1] = 2U;
+    s_fake.arm_result = MCU_PROTOCOL_RESULT_INVALID_COMMAND;
+    request = make_request(0x84U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 60U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_COMMAND),
+          "ext status: callback error becomes an ACK");
+
+    /* 故障不影响查询。 */
+    s_fake.arm_result = MCU_PROTOCOL_RESULT_OK;
+    s_fake.fault_flags = 0x01U;
+    request = make_request(0x85U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 70U);
+    check(reply.cmd == MCU_PROTOCOL_CMD_EXTENDED_STATUS,
+          "ext status: allowed while faulted");
+}
+
 int main(void)
 {
     test_get_status_reply();
@@ -684,6 +954,10 @@ int main(void)
     test_set_light_length_error();
     test_duplicate_set_light();
     test_same_seq_new_payload_executes();
+    test_arm_position();
+    test_arm_fault_gate();
+    test_arm_home();
+    test_extended_status();
 
     printf("\n%u passed, %u failed\n", (unsigned int)s_passed,
            (unsigned int)s_failed);

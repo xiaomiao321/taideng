@@ -276,6 +276,39 @@ void mcu_protocol_make_status(mcu_frame_t *frame, uint8_t seq,
     frame->payload[15] = 0U;
 }
 
+/** @brief 把一个 i32 按小端写入 4 字节。 */
+static void put_i32(uint8_t *out, int32_t value)
+{
+    uint32_t bits = (uint32_t)value;
+    out[0] = (uint8_t)(bits & 0xFFU);
+    out[1] = (uint8_t)((bits >> 8) & 0xFFU);
+    out[2] = (uint8_t)((bits >> 16) & 0xFFU);
+    out[3] = (uint8_t)((bits >> 24) & 0xFFU);
+}
+
+void mcu_protocol_make_extended_status(mcu_frame_t *frame, uint8_t seq,
+                                       const mcu_extended_status_t *status)
+{
+    if ((frame == NULL) || (status == NULL))
+    {
+        return;
+    }
+
+    frame->version = MCU_PROTOCOL_VERSION;
+    frame->flags = MCU_PROTOCOL_FLAG_RESPONSE;
+    frame->seq = seq;
+    frame->cmd = MCU_PROTOCOL_CMD_EXTENDED_STATUS;
+    frame->payload_length = MCU_PROTOCOL_EXTENDED_STATUS_PAYLOAD_SIZE;
+    frame->payload[0] = status->command;
+    frame->payload[1] = status->selector;
+    frame->payload[2] = status->faults;
+    frame->payload[3] = 0U;
+    put_i32(&frame->payload[4], status->actual);
+    put_i32(&frame->payload[8], status->target);
+    put_i32(&frame->payload[12], status->actual_speed);
+    put_i32(&frame->payload[16], status->target_speed);
+}
+
 size_t mcu_protocol_encode(const mcu_frame_t *frame, uint8_t *out,
                            size_t out_size)
 {

@@ -71,6 +71,18 @@
 /** @brief 命令字：状态响应。 */
 #define MCU_PROTOCOL_CMD_STATUS (0x21U)
 
+/** @brief 扩展命令字：设定关节位置。 */
+#define MCU_PROTOCOL_CMD_SET_ARM_POSITION (0x31U)
+
+/** @brief 扩展命令字：查询扩展状态，不要求 ACK。 */
+#define MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS (0x32U)
+
+/** @brief 扩展命令字：扩展状态响应。 */
+#define MCU_PROTOCOL_CMD_EXTENDED_STATUS (0x33U)
+
+/** @brief 扩展命令字：关节回原点。 */
+#define MCU_PROTOCOL_CMD_HOME_ARM (0x34U)
+
 /** @brief 命令字：应答。 */
 #define MCU_PROTOCOL_CMD_ACK (0x7FU)
 
@@ -116,6 +128,16 @@
 /** @brief STATUS 报文的 PAYLOAD 字节数，固定 16。 */
 #define MCU_PROTOCOL_STATUS_PAYLOAD_SIZE (16U)
 
+/** @brief SET_ARM_POSITION 的 PAYLOAD 字节数，固定 12。 */
+#define MCU_PROTOCOL_ARM_POSITION_PAYLOAD_SIZE (12U)
+
+/** @brief EXTENDED_STATUS 的 PAYLOAD 字节数，固定 20。 */
+#define MCU_PROTOCOL_EXTENDED_STATUS_PAYLOAD_SIZE (20U)
+
+/** @brief extension-v2 的关节 ID 范围，1～6 对应 M1～M6。 */
+#define MCU_PROTOCOL_JOINT_ID_MIN (1U)
+#define MCU_PROTOCOL_JOINT_ID_MAX (6U)
+
 /**
  * @brief STATUS 报文要回读的 16 字节状态。
  *
@@ -135,6 +157,24 @@ typedef struct
     uint32_t uptime_seconds;  /**< 偏移 8～11：MCU 运行秒数，小端。 */
     uint16_t protocol_errors; /**< 偏移 12～13：协议错误累计数，小端。 */
 } mcu_status_t;
+
+/**
+ * @brief EXTENDED_STATUS 报文的 20 字节状态。
+ *
+ * 关节类（SET_ARM_POSITION、HOME_ARM）查询时：actual/target 为实际和目标位置
+ * （毫度），actual_speed/target_speed 为估计转速和当前运行目标速度（毫度/秒），
+ * 停止时两个速度都为 0。写入 PAYLOAD 时逐字段展开成小端字节。
+ */
+typedef struct
+{
+    uint8_t command;      /**< 偏移 0：被查询的控制命令。 */
+    uint8_t selector;     /**< 偏移 1：关节 ID 等，与控制 payload[0] 相同。 */
+    uint8_t faults;       /**< 偏移 2：该对象自身的故障位。 */
+    int32_t actual;       /**< 偏移 4～7：实际值。 */
+    int32_t target;       /**< 偏移 8～11：目标值。 */
+    int32_t actual_speed; /**< 偏移 12～15：实际速度。 */
+    int32_t target_speed; /**< 偏移 16～19：目标速度。 */
+} mcu_extended_status_t;
 
 /**
  * @brief 一条已解析出来的完整报文。
@@ -240,6 +280,16 @@ void mcu_protocol_make_ack(mcu_frame_t *frame, uint8_t seq, uint8_t acked_cmd,
  */
 void mcu_protocol_make_status(mcu_frame_t *frame, uint8_t seq,
                               const mcu_status_t *status);
+
+/**
+ * @brief 构造一条 EXTENDED_STATUS 应答报文。
+ * @param[out] frame 输出的报文，不允许为 NULL。
+ * @param[in] seq 沿用查询帧的序号。
+ * @param[in] status 要回读的状态，不允许为 NULL。
+ * @note FLAGS 恒为 RESPONSE；PAYLOAD 固定 20 字节，偏移 3 保留为 0。
+ */
+void mcu_protocol_make_extended_status(mcu_frame_t *frame, uint8_t seq,
+                                       const mcu_extended_status_t *status);
 
 /**
  * @brief 把一条报文编码成线路上要发送的字节。

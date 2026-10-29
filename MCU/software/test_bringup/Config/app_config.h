@@ -13,6 +13,7 @@
 #define AITAID_APP_CONFIG_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* -------------------------------------------------------------------------- */
 /* 运行模式                                                                    */
@@ -147,6 +148,24 @@
 #define JOINT_PULSE_ON_MS (30U)
 #define JOINT_PULSE_OFF_MS (100U)
 
+/**
+ * @brief 转速估计：取最近 JOINT_SPEED_WINDOW 次采样（10ms 一次，约 200ms），
+ *        最后 JOINT_SPEED_EDGE 次的平均角度减最早 JOINT_SPEED_EDGE 次的平均
+ *        角度，再除以两组的平均时间差。
+ *
+ * 静止噪声约 0.18° 时估计值的噪声约 0.75°/s（按样本独立估算，三点中值滤波
+ * 使样本相关，实际会大一些，上板后再调）。
+ */
+#define JOINT_SPEED_WINDOW (21U)
+#define JOINT_SPEED_EDGE (4U)
+
+/**
+ * @brief 零速判定的迟滞，毫度/秒：静止时超过 MOVE 才算开始转动，转动时低于
+ *        ZERO 才报 0，避免估计值在阈值附近来回跳。
+ */
+#define JOINT_SPEED_ZERO_MDEG_S (2000)
+#define JOINT_SPEED_MOVE_MDEG_S (4000)
+
 /* -------------------------------------------------------------------------- */
 /* 通信与安全时限                                                              */
 /* -------------------------------------------------------------------------- */
@@ -159,6 +178,26 @@
 
 /** @brief Android 协议失联保护：超过该时间没收到合法帧即停止全部电机，毫秒。 */
 #define MCU_COMMAND_LINK_TIMEOUT_MS (5000U)
+
+/**
+ * @brief Android SET_ARM_POSITION 的固件内部单次运动期限，单位毫秒。
+ *
+ * 超时置故障位 bit1；应长于 SDK 的关节观察期限（默认 10 秒）。
+ */
+#define MCU_ARM_MOVE_TIMEOUT_MS (15000U)
+
+/**
+ * @brief 各关节 HOME_ARM 的目标角度，毫度，依次为 M1～M6。
+ *
+ * MCU_ARM_HOME_NONE 表示该关节没有 HOME，HOME_ARM 回未知命令；装上机构实测后
+ * 再填，并与 App 端能力描述里的 homePositionMilliDegrees 保持一致。
+ */
+#define MCU_ARM_HOME_NONE (INT32_MIN)
+#define MCU_ARM_HOME_MDEG                                                      \
+    {                                                                          \
+        MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE,               \
+            MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE            \
+    }
 
 /** @brief HOME 键消抖时间，单位毫秒。 */
 #define BSP_KEY_DEBOUNCE_MS (20U)

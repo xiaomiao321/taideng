@@ -2,8 +2,8 @@
  * @file debug_console.c
  * @brief 调试终端：USART3 上的文本命令与周期状态上报，接到实际硬件。
  *
- * 命令解析和安全规则在 debug_control，全板测试在 debug_board，关节闭环在
- * joint_control；本文件只负责把它们的回调接到 BSP，并按行收发文本。
+ * 命令解析和安全规则在 debug_control，全板测试在 debug_board，电位器采样和
+ * 关节闭环在 joint_service；本文件只负责把它们的回调接到 BSP，并按行收发文本。
  * USART1 可切换为透传模式（LMODE 1），把 Linux 串口的字节转发给上位机。
  */
 
@@ -22,14 +22,10 @@
 #include "bsp_linux_power.h"
 #include "bsp_linux_uart.h"
 #include "bsp_motor.h"
-#include "bsp_param_flash.h"
 #include "debug_board.h"
 #include "debug_control.h"
-#include "joint_control.h"
+#include "joint_service.h"
 #include "main.h"
-
-_Static_assert(JOINT_COUNT == BSP_ADC_CHANNEL_COUNT,
-               "each joint needs one potentiometer channel");
 _Static_assert(DEBUG_BOARD_LAMP_COUNT == BSP_LIGHT_COUNT,
                "board test lamp count must match the light driver");
 _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
@@ -61,17 +57,15 @@ _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
 /* -------------------------------------------------------------------------- */
 
 static bool s_is_initialized = false;
-static bool s_is_adc_ok = false;
 static bool s_is_light_ok = false;
 static bool s_is_buzzer_ok = false;
 static bool s_is_power_ok = false;
 static bool s_is_linux_ok = false;
-/** @brief 标定参数的 Flash 存储是否可用。 */
-static bool s_is_cal_store_ok = false;
 
 static debug_control_t s_control;
 static debug_board_t s_board;
-static joint_control_t s_joints;
+/** @brief joint_service 持有的关节状态。 */
+static joint_control_t *s_joints = NULL;
 /** @brief JGET/CAL 等最近操作的关节（JMOVE 除外），JTRACE 记录它，周期 JSTATE 每次都报告它。 */
 static unsigned s_joint_focus = 0U;
 /** @brief 周期 JSTATE 轮流补报的关节，使空闲关节约每 600ms 刷新一次。 */
@@ -92,18 +86,10 @@ static uint32_t s_tx_error_count = 0U;
 static uint32_t s_seen_linux_errors = 0U;
 static uint32_t s_seen_linux_overflows = 0U;
 
-static uint16_t s_pot_cache[BSP_ADC_CHANNEL_COUNT];
-/** @brief 最近一次采样中每路样本的极差。 */
-static uint16_t s_pot_spread[BSP_ADC_CHANNEL_COUNT];
-/** @brief 前两次过采样结果，做时间上的三点中值；计数为已有的有效次数。 */
-static uint16_t s_pot_history[2][BSP_ADC_CHANNEL_COUNT];
-static unsigned s_pot_history_count = 0U;
-static bool s_is_pot_valid = false;
 /** @brief JTRACE 打开时每次采样上报一行 JT。 */
 static bool s_is_trace_on = false;
 /** @brief 最近一次已上报的采样时刻，用来发现新采样。 */
 static uint32_t s_trace_sample_ms = 0U;
-static uint32_t s_last_adc_ms = 0U;
 static uint32_t s_last_status_ms = 0U;
 
 /** @brief LSET 设定的各路灯板占空比，用于 LSTATE 上报。 */
@@ -201,7 +187,7 @@ static bool stop_all(void)
     {
         (void)bsp_linux_uart_stream_stop();
     }
-    bool ok = joint_cancel(&s_joints);
+    bool ok = joint_cancel(s_joints);
     debug_board_cancel(&s_board);
     return outputs_off() && ok;
 }
@@ -225,7 +211,7 @@ static bool board_apply(board_kind_t kind, unsigned index, int value)
         case BOARD_ADC:
         {
             uint16_t values[BSP_ADC_CHANNEL_COUNT];
-            return s_is_adc_ok &&
+            return joint_service_adc_ok() &&
                    bsp_adc_read_all(values, ADC_TIMEOUT_MS) == BSP_OK;
         }
         case BOARD_LAMP:
@@ -264,7 +250,7 @@ static bool manual_control(void)
     {
         debug_board_cancel(&s_board);
     }
-    return joint_cancel(&s_joints);
+    return joint_cancel(s_joints);
 }
 
 static int hex_digit(char ch)
@@ -403,7 +389,7 @@ static const char *set_motor_pwm(const char *const *args, unsigned count)
         {
             return "PWM_PARAM";
         }
-        if (joint_any_active(&s_joints) || s_board.phase != BOARD_IDLE)
+        if (joint_any_active(s_joints) || s_board.phase != BOARD_IDLE)
         {
             return "BUSY";
         }
@@ -455,20 +441,10 @@ static const char *aux_command(const char *op, const char *const *args,
     return "UNSUPPORTED";
 }
 
-static bool joint_drive(unsigned index, int duty)
-{
-    return bsp_motor_set_duty((bsp_motor_id_t)index, (int16_t)duty) == BSP_OK;
-}
-
-static bool joint_brake(unsigned index)
-{
-    return bsp_motor_brake((bsp_motor_id_t)index) == BSP_OK;
-}
-
 /** @brief 上报一个关节的状态；config 为 true 时先上报标定参数。 */
 static void joint_report(unsigned index, uint32_t now, bool config)
 {
-    const joint_state_t *s = &s_joints.states[index];
+    const joint_state_t *s = &s_joints->states[index];
     char out[128];
     if (config && s->calibrated)
     {
@@ -492,8 +468,8 @@ static void joint_report(unsigned index, uint32_t now, bool config)
         (void)send_line(out);
     }
     bool is_fresh =
-        s_joints.valid &&
-        (uint32_t)(HAL_GetTick() - s_joints.sample_ms) <= JOINT_SENSOR_STALE_MS;
+        s_joints->valid &&
+        (uint32_t)(HAL_GetTick() - s_joints->sample_ms) <= JOINT_SENSOR_STALE_MS;
     (void)snprintf(
         out, sizeof(out), "JSTATE %lu M%u %u %u %u %ld %ld %d %s %s\r\n",
         (unsigned long)now, index + 1U, (unsigned)s->calibrated,
@@ -502,54 +478,12 @@ static void joint_report(unsigned index, uint32_t now, bool config)
     (void)send_line(out);
 }
 
-/** @brief 把全部关节的当前标定写入 Flash；返回是否成功。 */
-static bool save_calibration(void)
-{
-    uint8_t blob[JOINT_CAL_BLOB_SIZE];
-    joint_cal_export(&s_joints, blob);
-    return s_is_cal_store_ok && bsp_param_flash_save(blob) == BSP_OK;
-}
-
-/**
- * @brief 初始化 Flash 参数存储并恢复上次保存的标定和控制参数。
- *
- * 只有旧格式（版本 2）记录时，恢复其中的标定并立即按新格式保存。
- *
- * @return 恢复的关节数。
- * @note 需要擦除备用扇区时会阻塞约 2 秒，只在初始化阶段调用。
- */
-static unsigned load_calibration(void)
-{
-    /* 必须在 init 之前读旧记录：init 换用新长度后可能擦掉旧记录所在扇区。 */
-    static uint8_t old[JOINT_CAL_BLOB_V2_SIZE];
-    bool has_old = bsp_param_flash_peek(JOINT_CAL_BLOB_V2_SIZE, old) == BSP_OK;
-    bsp_status_t status = bsp_param_flash_init(JOINT_CAL_BLOB_SIZE);
-    s_is_cal_store_ok = (status == BSP_OK);
-    /* 备用扇区擦除失败（ERR_HAL）时已有记录仍可读，只是之后保存可能失败。 */
-    uint8_t blob[JOINT_CAL_BLOB_SIZE];
-    if ((status != BSP_OK) && (status != BSP_ERR_HAL))
-    {
-        return 0U;
-    }
-    if (bsp_param_flash_load(blob) == BSP_OK)
-    {
-        return joint_cal_import(&s_joints, blob, sizeof(blob));
-    }
-    unsigned restored =
-        has_old ? joint_cal_import(&s_joints, old, sizeof(old)) : 0U;
-    if (restored > 0U)
-    {
-        (void)save_calibration();
-    }
-    return restored;
-}
-
 /** @brief 上报全部已标定关节的参数和状态，供上位机同步。 */
 static void report_calibrations(void)
 {
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        if (s_joints.states[i].calibrated)
+        if (s_joints->states[i].calibrated)
         {
             joint_report(i, HAL_GetTick(), true);
         }
@@ -570,7 +504,7 @@ static bool is_raw_usable(int32_t raw)
  */
 static void commit_calibration(uint32_t now)
 {
-    if (!save_calibration())
+    if (!joint_service_save())
     {
         (void)send_line("EVENT CAL_SAVE_ERROR\r\n");
     }
@@ -599,7 +533,7 @@ static const char *calibrate_joint(unsigned index, const int32_t *v,
         .limit_min = v[1],
         .limit_max = v[3],
     };
-    const char *err = joint_calibrate(&s_joints, index, cal);
+    const char *err = joint_calibrate(s_joints, index, cal);
     if (!err)
     {
         commit_calibration(now);
@@ -633,7 +567,7 @@ static const char *calibrate_joint_nominal(unsigned index, const int32_t *v,
     const char *err = joint_cal_from_nominal(&nominal, &cal);
     if (!err)
     {
-        err = joint_calibrate(&s_joints, index, cal);
+        err = joint_calibrate(s_joints, index, cal);
     }
     if (!err)
     {
@@ -665,7 +599,7 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
     }
     if (!strcmp(op, "JLIM") && count == 2U)
     {
-        const char *err = joint_set_limits(&s_joints, index, v[0], v[1]);
+        const char *err = joint_set_limits(s_joints, index, v[0], v[1]);
         if (!err)
         {
             commit_calibration(now);
@@ -676,7 +610,7 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
     {
         /* 全板测试会直接驱动电机，关节运动前先取消。 */
         debug_board_cancel(&s_board);
-        return joint_move(&s_joints, seq, index, v[0], (uint32_t)v[1], now);
+        return joint_move(s_joints, seq, index, v[0], (uint32_t)v[1], now);
     }
     /* 第 5 个参数可选，为最高占空比；任一项被拒绝时两项都不改。 */
     if (!strcmp(op, "JTUNE") && (count == 4U || count == 5U))
@@ -686,16 +620,16 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
         {
             return "TUNE_PARAM";
         }
-        joint_tune_t old = s_joints.states[index].tune;
+        joint_tune_t old = s_joints->states[index].tune;
         joint_tune_t tune = {(joint_mode_t)v[0], (unsigned)v[1], (unsigned)v[2],
                              (unsigned)v[3]};
-        const char *err = joint_set_tune(&s_joints, index, tune);
+        const char *err = joint_set_tune(s_joints, index, tune);
         if (!err && count == 5U)
         {
-            err = joint_set_duty_max(&s_joints, index, (unsigned)v[4]);
+            err = joint_set_duty_max(s_joints, index, (unsigned)v[4]);
             if (err)
             {
-                s_joints.states[index].tune = old;
+                s_joints->states[index].tune = old;
             }
         }
         if (!err)
@@ -721,7 +655,7 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief 读 HOME、推进各状态机、采样电位器、推进关节闭环。
+ * @brief 读 HOME、推进各状态机，再由 joint_service 采样电位器、推进关节闭环。
  *
  * @note 在一次 update 中被多次调用：每次阻塞发送之后都调一次，
  *       使 HOME 急停和心跳检查不会被状态上报拖延。
@@ -755,46 +689,7 @@ static void check_control(void)
     {
         debug_board_update(&s_board, HAL_GetTick(), false);
     }
-    now = HAL_GetTick();
-    if ((uint32_t)(now - s_last_adc_ms) >= POT_SAMPLE_PERIOD_MS)
-    {
-        s_last_adc_ms = now;
-        static uint16_t samples[POT_OVERSAMPLE][BSP_ADC_CHANNEL_COUNT];
-        s_is_pot_valid = s_is_adc_ok;
-        for (unsigned i = 0; i < POT_OVERSAMPLE && s_is_pot_valid; ++i)
-        {
-            s_is_pot_valid =
-                bsp_adc_read_all(samples[i], ADC_TIMEOUT_MS) == BSP_OK;
-        }
-        if (s_is_pot_valid)
-        {
-            uint16_t now_raw[BSP_ADC_CHANNEL_COUNT];
-            joint_filter((const uint16_t (*)[JOINT_COUNT])samples,
-                         POT_OVERSAMPLE, now_raw, s_pot_spread);
-            /* 再和前两次取中值，去掉单次 2～3° 的尖峰，代价是 10ms 延迟。 */
-            for (unsigned i = 0; i < BSP_ADC_CHANNEL_COUNT; ++i)
-            {
-                s_pot_cache[i] =
-                    (s_pot_history_count >= 2U)
-                        ? joint_median3(s_pot_history[0][i],
-                                        s_pot_history[1][i], now_raw[i])
-                        : now_raw[i];
-                s_pot_history[0][i] = s_pot_history[1][i];
-                s_pot_history[1][i] = now_raw[i];
-            }
-            if (s_pot_history_count < 2U)
-            {
-                ++s_pot_history_count;
-            }
-        }
-        else
-        {
-            s_pot_history_count = 0U;
-        }
-        joint_feed(&s_joints, s_pot_cache, s_pot_spread, s_is_pot_valid,
-                   HAL_GetTick());
-    }
-    if (!joint_tick(&s_joints, HAL_GetTick()))
+    if (!joint_service_update())
     {
         debug_control_fault(&s_control, "EVENT JOINT_FAULT\r\n");
     }
@@ -940,7 +835,7 @@ static void active_motor(unsigned *motor, int *duty, bool *is_pending)
     }
     for (unsigned i = JOINT_COUNT; i-- > 0U;)
     {
-        const joint_state_t *s = &s_joints.states[i];
+        const joint_state_t *s = &s_joints->states[i];
         if (s->motion.active)
         {
             *motor = i + 1U;
@@ -957,13 +852,14 @@ static void report_status(uint32_t now)
     size_t used = 0U;
 
     check_control();
-    if (s_is_pot_valid)
+    if (joint_service_pot_valid())
     {
+        const uint16_t *pot = joint_service_pot();
         append(out, sizeof(out), &used, "POT %lu",
                (unsigned long)HAL_GetTick());
         for (unsigned i = 0; i < BSP_ADC_CHANNEL_COUNT; ++i)
         {
-            append(out, sizeof(out), &used, " %u", (unsigned)s_pot_cache[i]);
+            append(out, sizeof(out), &used, " %u", (unsigned)pot[i]);
         }
         append(out, sizeof(out), &used, "\r\n");
     }
@@ -1005,9 +901,9 @@ static void report_status(uint32_t now)
     }
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        if (s_joints.states[i].motion.active)
+        if (s_joints->states[i].motion.active)
         {
-            duties[i] = s_joints.states[i].duty;
+            duties[i] = s_joints->states[i].duty;
         }
     }
     used = 0U;
@@ -1061,7 +957,7 @@ static void report_status(uint32_t now)
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         if (i == s_joint_focus || i == s_joint_round ||
-            s_joints.states[i].motion.active)
+            s_joints->states[i].motion.active)
         {
             joint_report(i, HAL_GetTick(), false);
             check_control();
@@ -1078,20 +974,20 @@ static void report_status(uint32_t now)
  */
 static void report_trace(void)
 {
-    if (!s_is_trace_on || !s_joints.valid ||
-        s_joints.sample_ms == s_trace_sample_ms)
+    if (!s_is_trace_on || !s_joints->valid ||
+        s_joints->sample_ms == s_trace_sample_ms)
     {
         return;
     }
-    s_trace_sample_ms = s_joints.sample_ms;
-    const joint_state_t *s = &s_joints.states[s_joint_focus];
+    s_trace_sample_ms = s_joints->sample_ms;
+    const joint_state_t *s = &s_joints->states[s_joint_focus];
     int16_t duty = 0;
     (void)bsp_motor_hbridge_get_duty(
         bsp_motor_handle((bsp_motor_id_t)s_joint_focus), &duty);
     bool is_braking = s->motion.active && s->motion.braking;
     char out[96];
     (void)snprintf(out, sizeof(out), "JT %lu M%u %u %u %ld %ld %d %u %s\r\n",
-                   (unsigned long)s_joints.sample_ms, s_joint_focus + 1U,
+                   (unsigned long)s_joints->sample_ms, s_joint_focus + 1U,
                    (unsigned)s->raw, (unsigned)s->spread,
                    s->calibrated ? (long)s->angle : 0L, (long)s->target,
                    (int)duty, (unsigned)is_braking, joint_phase_name(s->phase));
@@ -1115,10 +1011,9 @@ void debug_console_init(void)
 
     board_hw_t board_hw = {board_apply, outputs_off, reply_line};
     debug_board_init(&s_board, board_hw);
-    joint_hw_t joint_hw = {joint_drive, reply_line, joint_brake};
-    joint_init(&s_joints, joint_hw);
     /* 在串口开始接收、看门狗启动之前加载：可能要擦除备用扇区，阻塞约 2 秒。 */
-    unsigned restored = load_calibration();
+    unsigned restored = joint_service_init(reply_line);
+    s_joints = joint_service_joints();
     s_is_linux_ok = bsp_linux_uart_init() == BSP_OK;
     debug_hw_t hw = {
         .stop = stop_all,
@@ -1131,7 +1026,6 @@ void debug_console_init(void)
         .aux = aux_command,
     };
     debug_control_init(&s_control, hw);
-    s_is_adc_ok = bsp_adc_init() == BSP_OK;
 
     if (bsp_debug_uart_init() != BSP_OK)
     {
@@ -1139,7 +1033,7 @@ void debug_console_init(void)
     }
     s_is_initialized = true;
     (void)send_line("READY BOARD_DEBUG 2\r\n");
-    if (!s_is_cal_store_ok)
+    if (!joint_service_store_ok())
     {
         (void)send_line("EVENT CAL_STORE_ERROR\r\n");
     }

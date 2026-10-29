@@ -222,6 +222,43 @@ static void report_result(joint_control_t *j, unsigned i, unsigned seq,
                    result);
     j->hw.reply(line);
 }
+/** @brief 故障名对应的故障位；不是故障时为 0。 */
+static uint8_t fault_bit(const char *result)
+{
+    static const struct
+    {
+        const char *name;
+        uint8_t bit;
+    } bits[] = {
+        {"STALL", JOINT_FAULT_STALL},     {"TIMEOUT", JOINT_FAULT_TIMEOUT},
+        {"DIRECTION", JOINT_FAULT_DIRECTION}, {"LIMIT", JOINT_FAULT_LIMIT},
+        {"SENSOR", JOINT_FAULT_SENSOR},   {"HARDWARE", JOINT_FAULT_HARDWARE},
+    };
+    for (unsigned k = 0; k < sizeof(bits) / sizeof(bits[0]); ++k)
+    {
+        if (!strcmp(result, bits[k].name))
+        {
+            return bits[k].bit;
+        }
+    }
+    return 0U;
+}
+
+/** @brief 该关节当前读数是否可信：采样新鲜，且不是断线或短路的读数。 */
+static bool sensor_ok(const joint_control_t *j, unsigned i, uint32_t now)
+{
+    uint16_t raw = j->states[i].raw;
+    return j->valid && (uint32_t)(now - j->sample_ms) <= JOINT_SENSOR_STALE_MS &&
+           raw != 0 && raw < ADC_RAW_FULL;
+}
+
+/** @brief 角度是否超出允许范围（含一个容差的余量）。 */
+static bool out_of_limits(const joint_state_t *s)
+{
+    return s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
+           s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance;
+}
+
 static bool finish(joint_control_t *j, unsigned i, const char *result,
                    joint_phase_t phase)
 {
@@ -237,9 +274,54 @@ static bool finish(joint_control_t *j, unsigned i, const char *result,
     }
     s->phase = phase;
     s->fault = phase == JOINT_FAULT ? result : "NONE";
+    if (phase == JOINT_FAULT)
+    {
+        s->faults |= fault_bit(result);
+    }
     report_result(j, i, s->motion.seq, result);
     return ok && phase != JOINT_FAULT;
 }
+uint8_t joint_fault_flags(const joint_control_t *j)
+{
+    uint8_t flags = 0U;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        flags |= j->states[i].faults;
+    }
+    return flags;
+}
+
+void joint_clear_faults(joint_control_t *j, uint32_t now)
+{
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        joint_state_t *s = &j->states[i];
+        if (s->faults == 0U || s->motion.active)
+        {
+            continue;
+        }
+        uint8_t keep = 0U;
+        if ((s->faults & JOINT_FAULT_SENSOR) && !sensor_ok(j, i, now))
+        {
+            keep |= JOINT_FAULT_SENSOR;
+        }
+        if ((s->faults & JOINT_FAULT_LIMIT) && s->calibrated && out_of_limits(s))
+        {
+            keep |= JOINT_FAULT_LIMIT;
+        }
+        if ((s->faults & JOINT_FAULT_HARDWARE) && !j->hw.drive(i, 0))
+        {
+            keep |= JOINT_FAULT_HARDWARE;
+        }
+        s->faults = keep;
+        if (keep == 0U && s->phase == JOINT_FAULT)
+        {
+            s->phase = JOINT_IDLE;
+            s->fault = "NONE";
+        }
+    }
+}
+
 bool joint_cancel(joint_control_t *j)
 {
     bool ok = true;
@@ -272,6 +354,11 @@ const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c)
         s->angle = joint_angle(&c, s->raw);
     }
     s->target = s->angle;
+    s->has_target = j->valid;
+    /* 换算关系变了，旧角度样本不能再用来估计转速。 */
+    s->est.count = 0U;
+    s->est.moving = false;
+    s->speed = 0;
     return NULL;
 }
 const char *joint_set_limits(joint_control_t *j, unsigned index,
@@ -448,9 +535,68 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
     m->near_mode = false;
     m->pulse_ms = now;
     s->target = target;
+    s->has_target = true;
     s->phase = JOINT_SETTLE;
     s->fault = "NONE";
     return NULL;
+}
+
+/** @brief est 中从最旧样本数起第 k 个样本的下标。 */
+static unsigned speed_index(const joint_speed_t *e, unsigned k)
+{
+    return (e->head + JOINT_SPEED_WINDOW - e->count + k) % JOINT_SPEED_WINDOW;
+}
+
+/**
+ * @brief 加入一次角度采样并更新转速估计。
+ *
+ * 窗口未满时转速报 0；窗口满后用两端各 JOINT_SPEED_EDGE 个样本的平均角度
+ * 和平均时刻求斜率，再按迟滞阈值判定是否静止。
+ */
+static void update_speed(joint_state_t *s, uint32_t now)
+{
+    joint_speed_t *e = &s->est;
+    e->angle[e->head] = s->angle;
+    e->ms[e->head] = now;
+    e->head = (e->head + 1U) % JOINT_SPEED_WINDOW;
+    if (e->count < JOINT_SPEED_WINDOW)
+    {
+        ++e->count;
+    }
+    if (e->count < JOINT_SPEED_WINDOW)
+    {
+        s->speed = 0;
+        return;
+    }
+    /* 时刻相对最旧样本计算，避免 HAL_GetTick() 回绕。 */
+    uint32_t base = e->ms[speed_index(e, 0U)];
+    int64_t old_angle = 0, new_angle = 0, old_ms = 0, new_ms = 0;
+    for (unsigned k = 0; k < JOINT_SPEED_EDGE; ++k)
+    {
+        unsigned a = speed_index(e, k);
+        unsigned b = speed_index(e, JOINT_SPEED_WINDOW - JOINT_SPEED_EDGE + k);
+        old_angle += e->angle[a];
+        new_angle += e->angle[b];
+        old_ms += (uint32_t)(e->ms[a] - base);
+        new_ms += (uint32_t)(e->ms[b] - base);
+    }
+    int64_t span = new_ms - old_ms; /* 两组时刻之和的差，同样放大了 EDGE 倍 */
+    int64_t speed = span > 0 ? (new_angle - old_angle) * 1000 / span : 0;
+    int64_t size = speed < 0 ? -speed : speed;
+    if (e->moving ? size < JOINT_SPEED_ZERO_MDEG_S
+                  : size > JOINT_SPEED_MOVE_MDEG_S)
+    {
+        e->moving = !e->moving;
+    }
+    s->speed = e->moving ? (int32_t)speed : 0;
+}
+
+/** @brief 样本中断：清空窗口，转速报 0。 */
+static void reset_speed(joint_state_t *s)
+{
+    s->est.count = 0U;
+    s->est.moving = false;
+    s->speed = 0;
 }
 void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
                 bool valid, uint32_t now)
@@ -458,16 +604,36 @@ void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
     j->valid = valid;
     if (!valid)
     {
+        for (unsigned i = 0; i < JOINT_COUNT; ++i)
+        {
+            reset_speed(&j->states[i]);
+        }
         return;
     }
     j->sample_ms = now;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        j->states[i].raw = raw[i];
-        j->states[i].spread = spread ? spread[i] : 0U;
-        if (j->states[i].calibrated)
+        joint_state_t *s = &j->states[i];
+        s->raw = raw[i];
+        s->spread = spread ? spread[i] : 0U;
+        if (!s->calibrated)
         {
-            j->states[i].angle = joint_angle(&j->states[i].cal, raw[i]);
+            reset_speed(s);
+            continue;
+        }
+        s->angle = joint_angle(&s->cal, raw[i]);
+        if (!s->has_target)
+        {
+            s->target = s->angle;
+            s->has_target = true;
+        }
+        if (raw[i] == 0 || raw[i] >= ADC_RAW_FULL)
+        {
+            reset_speed(s);
+        }
+        else
+        {
+            update_speed(s, now);
         }
     }
 }
@@ -476,8 +642,7 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
 {
     joint_state_t *s = &j->states[i];
     joint_motion_t *m = &s->motion;
-    if (!j->valid || (uint32_t)(now - j->sample_ms) > JOINT_SENSOR_STALE_MS ||
-        s->raw == 0 || s->raw >= ADC_RAW_FULL)
+    if (!sensor_ok(j, i, now))
     {
         return finish(j, i, "SENSOR", JOINT_FAULT);
     }
@@ -485,8 +650,7 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
     {
         return finish(j, i, "TIMEOUT", JOINT_FAULT);
     }
-    if (s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
-        s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance)
+    if (out_of_limits(s))
     {
         return finish(j, i, "LIMIT", JOINT_FAULT);
     }

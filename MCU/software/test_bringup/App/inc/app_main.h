@@ -8,7 +8,8 @@
  *              -> mcu_protocol_encode() -> 经 USART1 发出
  *
  * 协议层和命令层都不认识 HAL；真正碰灯和电机的动作由本文件里的 hw_* 回调
- * 绑定到 bsp_light / bsp_motor。这样换板子或换驱动时，只需要改这一处。
+ * 绑定到 bsp_light / bsp_motor / joint_service。这样换板子或换驱动时，只需要
+ * 改这一处。
  */
 
 #ifndef AITAID_APP_MAIN_H
@@ -18,7 +19,9 @@
  * @brief 应用层初始化。
  *
  * @note 调用前必须完成各 MX_TIMx_Init() 与 MX_USART1_UART_Init()。
- * @note 内部会初始化灯板与电机驱动、注册命令层回调并启动 USART1 接收。
+ * @note 内部会初始化灯板、电机、HOME 键和关节服务，注册命令层回调并启动
+ *       USART1 接收。关节服务会从 Flash 恢复标定，可能阻塞约 2 秒，必须在
+ *       看门狗启动之前调用。
  * @note 任一初始化失败时按项目约定点亮错误灯并进入 Error_Handler()。
  */
 void app_init(void);

@@ -62,6 +62,138 @@ static void feed(joint_control_t *j, uint16_t raw, uint32_t now)
     uint16_t values[6] = {raw, 2000, 2000, 2000, 2000, 2000};
     joint_feed(j, values, NULL, true, now);
 }
+/* 标定为每个读数 0.09°：读数每 10ms 加 n 即 9n °/s。 */
+static void speed_test(void)
+{
+    joint_control_t j = fresh(normal());
+    uint32_t now = 0;
+    for (; now < 200; now += 10)
+    {
+        feed(&j, 2000, now);
+    }
+    /* 窗口未满时报 0。 */
+    assert(j.states[0].est.count == 20 && j.states[0].speed == 0);
+    feed(&j, 2000, now);
+    assert(j.states[0].speed == 0 && !j.states[0].est.moving);
+    /* 静止时 ±1 个读数的噪声不能被当成转动。 */
+    uint32_t seed = 12345;
+    for (int k = 0; k < 1000; ++k, now += 10)
+    {
+        seed = seed * 1103515245U + 12345U;
+        feed(&j, (uint16_t)(2000 + (int)((seed >> 16) % 3U) - 1), now);
+        assert(j.states[0].speed == 0);
+    }
+    /* 约 3°/s 的缓慢爬行低于转动阈值，仍报 0。 */
+    double raw = 2000;
+    for (int k = 0; k < 100; ++k, now += 10)
+    {
+        raw += 1.0 / 3.0;
+        feed(&j, (uint16_t)raw, now);
+        assert(j.states[0].speed == 0);
+    }
+    /* 45°/s：窗口填满新速度后估计准确。 */
+    for (int k = 0; k < 30; ++k, now += 10)
+    {
+        raw += 5;
+        feed(&j, (uint16_t)raw, now);
+    }
+    assert(j.states[0].speed >= 44000 && j.states[0].speed <= 46000);
+    /* 降到约 3°/s：在迟滞带内，继续报非零。 */
+    for (int k = 0; k < 30; ++k, now += 10)
+    {
+        raw += 1.0 / 3.0;
+        feed(&j, (uint16_t)raw, now);
+    }
+    assert(j.states[0].speed > 2000 && j.states[0].speed < 4000);
+    /* 停住：最多一个窗口后报 0。 */
+    for (int k = 0; k < 21; ++k, now += 10)
+    {
+        feed(&j, (uint16_t)raw, now);
+    }
+    assert(j.states[0].speed == 0);
+    /* 反向 45°/s 为负数。 */
+    for (int k = 0; k < 30; ++k, now += 10)
+    {
+        raw -= 5;
+        feed(&j, (uint16_t)raw, now);
+    }
+    assert(j.states[0].speed <= -44000 && j.states[0].speed >= -46000);
+    /* 采样失败或读数断线：清空窗口，报 0；未标定关节始终为 0。 */
+    joint_feed(&j, (uint16_t[6]){0}, NULL, false, now);
+    assert(j.states[0].speed == 0 && j.states[0].est.count == 0);
+    feed(&j, 0, now + 10);
+    assert(j.states[0].speed == 0 && j.states[0].est.count == 0);
+    assert(j.states[1].speed == 0 && j.states[1].est.count == 0);
+    /* 上电恢复标定时角度未知，首次有效采样补上目标。 */
+    joint_control_t k;
+    joint_init(&k, (joint_hw_t){drive, emit, brake_motor});
+    assert(!joint_calibrate(&k, 0, normal()) && !k.states[0].has_target);
+    feed(&k, 2000, 0);
+    assert(k.states[0].has_target && k.states[0].target == 90000);
+}
+
+/* 故障锁存为故障位；清除时只保留原因仍在的。 */
+static void fault_latch_test(void)
+{
+    /* 传感器：读数断线时停机置位，读数恢复前清不掉。 */
+    joint_control_t j = fresh(normal());
+    feed(&j, 2000, 0);
+    assert(!joint_move(&j, 1, 0, 150000, 10000, 0));
+    feed(&j, 0, 10);
+    assert(!joint_tick(&j, 10));
+    assert(j.states[0].faults == JOINT_FAULT_SENSOR &&
+           joint_fault_flags(&j) == JOINT_FAULT_SENSOR);
+    joint_clear_faults(&j, 20);
+    assert(j.states[0].faults == JOINT_FAULT_SENSOR &&
+           j.states[0].phase == JOINT_FAULT);
+    feed(&j, 2000, 30);
+    joint_clear_faults(&j, 30);
+    assert(j.states[0].faults == 0 && j.states[0].phase == JOINT_IDLE &&
+           !strcmp(j.states[0].fault, "NONE"));
+
+    /* 越限：角度回到允许范围内才清除。 */
+    assert(!joint_move(&j, 2, 0, 170000, 10000, 30));
+    feed(&j, 3100, 40); /* 189° */
+    assert(!joint_tick(&j, 40) && j.states[0].faults == JOINT_FAULT_LIMIT);
+    joint_clear_faults(&j, 50);
+    assert(j.states[0].faults == JOINT_FAULT_LIMIT);
+    feed(&j, 2000, 60);
+    joint_clear_faults(&j, 60);
+    assert(j.states[0].faults == 0);
+
+    /* 超时随运动结束消失，STOP 直接清除。 */
+    assert(!joint_move(&j, 3, 0, 150000, 500, 60));
+    feed(&j, 2000, 600);
+    assert(!joint_tick(&j, 600) && j.states[0].faults == JOINT_FAULT_TIMEOUT);
+    joint_clear_faults(&j, 600);
+    assert(j.states[0].faults == 0);
+
+    /* 驱动失败：再次停机仍失败就保留。 */
+    feed(&j, 2000, 700);
+    assert(!joint_move(&j, 4, 0, 150000, 10000, 700));
+    assert(joint_tick(&j, 700));
+    hardware_ok = false;
+    feed(&j, 2000, 800);
+    assert(!joint_tick(&j, 800) && j.states[0].faults == JOINT_FAULT_HARDWARE);
+    joint_clear_faults(&j, 800);
+    assert(j.states[0].faults == JOINT_FAULT_HARDWARE);
+    hardware_ok = true;
+    joint_clear_faults(&j, 800);
+    assert(j.states[0].faults == 0);
+
+    /* 全局故障为各关节按位或；正在运动的关节不清除。 */
+    j.states[2].faults = JOINT_FAULT_STALL;
+    j.states[0].faults = JOINT_FAULT_DIRECTION;
+    assert(joint_fault_flags(&j) ==
+           (JOINT_FAULT_STALL | JOINT_FAULT_DIRECTION));
+    feed(&j, 2000, 900);
+    assert(!joint_move(&j, 5, 0, 150000, 10000, 900));
+    joint_clear_faults(&j, 900);
+    assert(j.states[0].faults == JOINT_FAULT_DIRECTION &&
+           j.states[2].faults == 0);
+    assert(joint_cancel(&j));
+}
+
 static void plant_test(bool reversed)
 {
     joint_cal_t cal = normal();
@@ -560,10 +692,12 @@ int main(void)
     tune_test();
     filter_test();
     multi_test();
+    speed_test();
+    fault_latch_test();
     puts("joint control: calibration, inverse sensor, simulated plant, "
          "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
          "rollover, calibration export/import, nominal calibration, limits, "
-         "proportional mode with braking, ADC filter and concurrent joints "
-         "passed");
+         "proportional mode with braking, ADC filter, concurrent joints, "
+         "speed estimate and fault latching passed");
     return 0;
 }

@@ -11,7 +11,13 @@
  *   - SET_LIGHT         -> 七路灯板一起开关与调亮度，回成功 ACK；
  *   - SET_MOTION STOP   -> 安全停止 + 成功 ACK；
  *   - PING              -> 成功 ACK；
- *   - 其余命令（前进/后退/左右转、扩展命令）-> 带"未知命令"的 ACK，不改输出。
+ *   - SET_ARM_POSITION、HOME_ARM -> 校验后交给 arm_move / arm_home；
+ *   - GET_EXTENDED_STATUS（关节类）-> EXTENDED_STATUS；
+ *   - 其余命令（前进/后退/左右转、其他扩展命令），以及没有注册对应回调的
+ *     关节命令 -> 带"未知命令"的 ACK，不改输出。
+ *
+ * 全局 fault_flags 非 0 时拒绝 SET_ARM_POSITION 和 HOME_ARM（硬件故障 ACK，
+ * detail 为故障位），STOP 和查询不受限制。
  */
 
 #ifndef AITAID_MCU_COMMAND_H
@@ -26,7 +32,8 @@
 /**
  * @brief 命令层需要的硬件动作，由上层实现并在初始化时注册。
  *
- * @note 三个函数指针都必须有效，且都由主循环串行调用，不需要考虑重入。
+ * @note 前四个函数指针必须有效，关节相关的三个可为 NULL（表示不支持），
+ *       都由主循环串行调用，不需要考虑重入。
  */
 typedef struct
 {
@@ -69,6 +76,33 @@ typedef struct
 
     /** @brief 失联时的安全停止：立即停止全部运动输出。 */
     void (*safe_stop)(void);
+
+    /**
+     * @brief 启动一个关节的定位（SET_ARM_POSITION）。
+     *
+     * @param[in] joint_id 关节 ID 1～6，已校验。
+     * @param[in] target 目标位置，毫度。
+     * @param[in] speed 本次运动的速度上限，毫度/秒，已校验为正数。
+     *
+     * @return 结果码 MCU_PROTOCOL_RESULT_*，原样放进 ACK。
+     */
+    uint8_t (*arm_move)(uint8_t joint_id, int32_t target, int32_t speed);
+
+    /** @brief 关节回原点（HOME_ARM）；参数和返回值同 arm_move。 */
+    uint8_t (*arm_home)(uint8_t joint_id);
+
+    /**
+     * @brief 读取一个关节的扩展状态，供 GET_EXTENDED_STATUS 回读。
+     *
+     * @param[in] command 被查询的控制命令，SET_ARM_POSITION 或 HOME_ARM。
+     * @param[in] joint_id 关节 ID 1～6，已校验。
+     * @param[out] status 填 faults、actual、target、actual_speed、target_speed；
+     *             command 和 selector 由命令层填。
+     *
+     * @return MCU_PROTOCOL_RESULT_OK 时回 EXTENDED_STATUS，否则回该结果码的 ACK。
+     */
+    uint8_t (*arm_status)(uint8_t command, uint8_t joint_id,
+                          mcu_extended_status_t *status);
 } mcu_command_hw_t;
 
 /**
@@ -92,10 +126,11 @@ void mcu_command_init(const mcu_command_hw_t *hw, uint32_t now_ms);
  * @retval false 本条报文按协议不需要回复，reply 内容未定义。
  *
  * @note 收到任何合法请求都会刷新失联计时，重复帧也算。
- * @note 只有会改变硬件状态的命令（SET_LIGHT、SET_MOTION）参与去重：与上一条
+ * @note 只有会改变硬件状态的命令（SET_LIGHT、SET_MOTION、SET_ARM_POSITION、
+ *       HOME_ARM）参与去重：与上一条
  *       控制帧的 SEQ、CMD、VERSION、FLAGS 和 PAYLOAD 全部相同才算重发，
  *       重发帧不会重复执行，但会重发上一次的 ACK。
- * @note 查询类命令（PING、GET_STATUS）不去重，每次查询都返回当前状态，
+ * @note 查询类命令（PING、GET_STATUS、GET_EXTENDED_STATUS）不去重，每次查询都返回当前状态，
  *       否则重复查询会一直读到缓存的旧状态、运行秒数看起来不涨。
  */
 bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,

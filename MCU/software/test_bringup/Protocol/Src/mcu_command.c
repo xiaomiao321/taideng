@@ -55,7 +55,31 @@ static bool is_valid_motion(uint8_t motion)
 static bool has_side_effect(uint8_t cmd)
 {
     return (cmd == MCU_PROTOCOL_CMD_SET_LIGHT) ||
-           (cmd == MCU_PROTOCOL_CMD_SET_MOTION);
+           (cmd == MCU_PROTOCOL_CMD_SET_MOTION) ||
+           (cmd == MCU_PROTOCOL_CMD_SET_ARM_POSITION) ||
+           (cmd == MCU_PROTOCOL_CMD_HOME_ARM);
+}
+
+/** @brief 关节 ID 是否在 extension-v2 的 1～6 内。 */
+static bool is_valid_joint(uint8_t joint_id)
+{
+    return (joint_id >= MCU_PROTOCOL_JOINT_ID_MIN) &&
+           (joint_id <= MCU_PROTOCOL_JOINT_ID_MAX);
+}
+
+/** @brief 按小端读一个 i32。 */
+static int32_t get_i32(const uint8_t *in)
+{
+    return (int32_t)((uint32_t)in[0] | ((uint32_t)in[1] << 8) |
+                     ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24));
+}
+
+/** @brief 当前全局故障位；关节动作在非 0 时被拒绝。 */
+static uint8_t current_faults(void)
+{
+    mcu_status_t status = {0};
+    s_hw->read_status(&status);
+    return status.fault_flags;
 }
 
 /**
@@ -96,6 +120,97 @@ static void build_error_ack(mcu_frame_t *reply, const mcu_frame_t *request,
                             uint8_t result)
 {
     mcu_protocol_make_ack(reply, request->seq, request->cmd, result, 0U);
+}
+
+/**
+ * @brief 处理关节动作（SET_ARM_POSITION、HOME_ARM）：校验参数、故障门控，
+ *        再交给回调。
+ */
+static void handle_arm_action(const mcu_frame_t *request, mcu_frame_t *reply)
+{
+    bool is_move = request->cmd == MCU_PROTOCOL_CMD_SET_ARM_POSITION;
+    uint8_t length = is_move ? MCU_PROTOCOL_ARM_POSITION_PAYLOAD_SIZE : 4U;
+    if (request->payload_length != length)
+    {
+        build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_LENGTH);
+        return;
+    }
+
+    const uint8_t *p = request->payload;
+    int32_t target = is_move ? get_i32(&p[4]) : 0;
+    int32_t speed = is_move ? get_i32(&p[8]) : 0;
+    if (!is_valid_joint(p[0]) || (p[1] != 0U) || (p[2] != 0U) ||
+        (p[3] != 0U) || (is_move && (speed <= 0)))
+    {
+        build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_VALUE);
+        return;
+    }
+
+    /* 有故障时固件自己也要拒绝危险动作，不能只靠主机门控。 */
+    uint8_t faults = current_faults();
+    if (faults != 0U)
+    {
+        mcu_protocol_make_ack(reply, request->seq, request->cmd,
+                              MCU_PROTOCOL_RESULT_HARDWARE, faults);
+        return;
+    }
+
+    uint8_t result = is_move ? s_hw->arm_move(p[0], target, speed)
+                             : s_hw->arm_home(p[0]);
+    mcu_protocol_make_ack(reply, request->seq, request->cmd, result, 0U);
+}
+
+/** @brief 处理 GET_EXTENDED_STATUS：只支持关节类查询。 */
+static void handle_extended_query(const mcu_frame_t *request,
+                                  mcu_frame_t *reply)
+{
+    if (request->payload_length != 4U)
+    {
+        build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_LENGTH);
+        return;
+    }
+
+    const uint8_t *p = request->payload;
+    bool is_joint_query = (p[0] == MCU_PROTOCOL_CMD_SET_ARM_POSITION) ||
+                          (p[0] == MCU_PROTOCOL_CMD_HOME_ARM);
+    if (!is_joint_query || !is_valid_joint(p[1]) || (p[2] != 0U) ||
+        (p[3] != 0U))
+    {
+        build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_VALUE);
+        return;
+    }
+
+    mcu_extended_status_t status = {0};
+    uint8_t result = s_hw->arm_status(p[0], p[1], &status);
+    if (result != MCU_PROTOCOL_RESULT_OK)
+    {
+        build_error_ack(reply, request, result);
+        return;
+    }
+    status.command = p[0];
+    status.selector = p[1];
+    mcu_protocol_make_extended_status(reply, request->seq, &status);
+}
+
+/** @brief 该命令是否有已注册的处理；关节命令没有回调时按未知命令处理。 */
+static bool is_supported(uint8_t cmd)
+{
+    switch (cmd)
+    {
+        case MCU_PROTOCOL_CMD_PING:
+        case MCU_PROTOCOL_CMD_GET_STATUS:
+        case MCU_PROTOCOL_CMD_SET_LIGHT:
+        case MCU_PROTOCOL_CMD_SET_MOTION:
+            return true;
+        case MCU_PROTOCOL_CMD_SET_ARM_POSITION:
+            return s_hw->arm_move != NULL;
+        case MCU_PROTOCOL_CMD_HOME_ARM:
+            return s_hw->arm_home != NULL;
+        case MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS:
+            return s_hw->arm_status != NULL;
+        default:
+            return false;
+    }
 }
 
 /** @brief 记录一次链路活动，刷新失联计时。 */
@@ -174,7 +289,8 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
         return true;
     }
 
-    switch (request->cmd)
+    /* 没有对应处理的命令一律走 default；0x00 不是任何命令。 */
+    switch (is_supported(request->cmd) ? request->cmd : 0x00U)
     {
         case MCU_PROTOCOL_CMD_PING:
             /* Payload 预留，当前不校验内容。 */
@@ -266,6 +382,15 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
                                   MCU_PROTOCOL_RESULT_OK, 0U);
             break;
         }
+
+        case MCU_PROTOCOL_CMD_SET_ARM_POSITION:
+        case MCU_PROTOCOL_CMD_HOME_ARM:
+            handle_arm_action(request, reply);
+            break;
+
+        case MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS:
+            handle_extended_query(request, reply);
+            break;
 
         default:
             /* 尚未实现的命令：要求 ACK 才回，否则静默丢弃。 */

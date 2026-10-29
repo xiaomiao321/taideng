@@ -10,7 +10,8 @@
  * 两种控制方式由 joint_tune_t 选择：开关式（远离目标时持续驱动，接近目标时
  * 改为短脉冲点动）和比例式（占空比 = 起转占空比 + kp × 误差，进入容差和换向
  * 时先短路制动再滑行）。进入容差后保持一段时间判定到达；传感器失效、超时、
- * 越限、反向或停滞都会停机并报故障。
+ * 越限、反向或停滞都会停机并报故障，故障同时锁存为故障位，由
+ * joint_clear_faults() 按原因是否消失清除。每次采样还会估计各关节转速。
  *
  * 本模块不依赖 HAL，硬件动作通过 joint_hw_t 回调交给调用者，可在 PC 上测试。
  */
@@ -41,6 +42,23 @@
 
 /** @brief 旧格式（版本 2，只有标定、没有控制参数）的总字节数，用于迁移。 */
 #define JOINT_CAL_BLOB_V2_SIZE (4U + JOINT_COUNT * 28U)
+
+/**
+ * @brief 锁存的故障位，与 Android 协议 fault_flags 的位定义一致。
+ *
+ * bit6 底盘故障、bit7 保留，不由关节产生。
+ */
+#define JOINT_FAULT_STALL (0x01U)     /**< 运动中持续没有进展。 */
+#define JOINT_FAULT_TIMEOUT (0x02U)   /**< 超过单次运动期限。 */
+#define JOINT_FAULT_DIRECTION (0x04U) /**< 误差持续增大。 */
+#define JOINT_FAULT_LIMIT (0x08U)     /**< 超出允许范围。 */
+#define JOINT_FAULT_SENSOR (0x10U)    /**< 电位器读数过期、断线或短路。 */
+#define JOINT_FAULT_HARDWARE (0x20U)  /**< H 桥输出设置失败。 */
+
+_Static_assert(2U * JOINT_SPEED_EDGE <= JOINT_SPEED_WINDOW,
+               "speed window must hold both edge groups");
+_Static_assert(JOINT_SPEED_ZERO_MDEG_S < JOINT_SPEED_MOVE_MDEG_S,
+               "speed hysteresis needs ZERO below MOVE");
 
 /** @brief 一个关节的标定参数。 */
 typedef struct
@@ -127,6 +145,16 @@ typedef struct
     bool braking;          /**< 是否正在短路制动。 */
 } joint_motion_t;
 
+/** @brief 转速估计用的最近若干次角度采样，环形缓冲。 */
+typedef struct
+{
+    int32_t angle[JOINT_SPEED_WINDOW]; /**< 角度，毫度。 */
+    uint32_t ms[JOINT_SPEED_WINDOW];   /**< 采样时刻。 */
+    unsigned head;                     /**< 下一次写入的位置。 */
+    unsigned count;                    /**< 已有的连续有效样本数。 */
+    bool moving;                       /**< 迟滞判定的当前结果。 */
+} joint_speed_t;
+
 /** @brief 单个关节的运行状态。 */
 typedef struct
 {
@@ -140,6 +168,12 @@ typedef struct
     joint_tune_t tune;
     joint_phase_t phase;
     const char *fault; /**< 最近一次故障名，没有故障时为 "NONE"。 */
+    uint8_t faults;    /**< 锁存的故障位，见 JOINT_FAULT_*。 */
+    /** @brief 估计转速，毫度/秒；判定为静止或样本不足时为 0。 */
+    int32_t speed;
+    joint_speed_t est;
+    /** @brief target 是否有意义；上电恢复标定时角度未知，首次采样后补上。 */
+    bool has_target;
     joint_motion_t motion;
 } joint_state_t;
 
@@ -262,6 +296,18 @@ bool joint_tick(joint_control_t *j, uint32_t now);
 
 /** @brief 取消全部关节的运动并停机；返回 false 表示停机时硬件失败。 */
 bool joint_cancel(joint_control_t *j);
+
+/** @brief 全部关节锁存故障位的按位或。 */
+uint8_t joint_fault_flags(const joint_control_t *j);
+
+/**
+ * @brief 清除原因已消失的锁存故障，供 STOP 调用；调用前应已停止全部关节。
+ *
+ * 停滞、超时、方向错误随运动结束而消失，直接清除；电位器读数仍无效时保留
+ * 传感器位，角度仍在允许范围外时保留越限位，再次停机仍失败时保留驱动位。
+ * 某关节故障位全部清除后回到空闲阶段。
+ */
+void joint_clear_faults(joint_control_t *j, uint32_t now);
 
 /** @brief 阶段的短名称，用于状态上报。 */
 const char *joint_phase_name(joint_phase_t phase);
