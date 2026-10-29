@@ -79,6 +79,7 @@ typedef struct
     uint8_t motion;
     uint8_t speed;
     uint8_t fault_flags;
+    bool motion_fails;
     uint32_t arm_move_calls;
     uint32_t arm_home_calls;
     uint32_t arm_status_calls;
@@ -108,6 +109,10 @@ static bool fake_apply_motion(uint8_t motion, uint8_t speed)
     ++s_fake.apply_motion_calls;
     s_fake.last_motion = motion;
     s_fake.last_speed = speed;
+    if (s_fake.motion_fails)
+    {
+        return false;
+    }
     s_fake.motion = motion;
     s_fake.speed = speed;
     return true;
@@ -291,10 +296,10 @@ static void test_stop(void)
           "stop: applied to hardware");
 }
 
-/** @brief 还没实现的动作要明确拒绝，不能假装接受。 */
-static void test_unimplemented_motion_is_rejected(void)
+/** @brief 底盘动作交给硬件，回读的实际与目标都等于命令，SDK 据此判定到位。 */
+static void test_motion_applied(void)
 {
-    const uint8_t payload[4] = {MCU_PROTOCOL_MOTION_FORWARD, 100U, 0U, 0U};
+    const uint8_t payload[4] = {MCU_PROTOCOL_MOTION_TURN_LEFT, 60U, 0U, 0U};
     mcu_frame_t request =
         make_request(0x15U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
                      MCU_PROTOCOL_FLAG_ACK_REQUIRED);
@@ -303,11 +308,52 @@ static void test_unimplemented_motion_is_rejected(void)
     fake_reset();
     mcu_command_init(&k_fake_hw, 0U);
 
-    check(mcu_command_handle(&request, &reply, 10U), "forward: has a reply");
+    check(mcu_command_handle(&request, &reply, 10U), "turn left: has a reply");
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_MOTION, MCU_PROTOCOL_RESULT_OK),
+          "turn left: ACK ok");
+    check((s_fake.apply_motion_calls == 1U) &&
+              (s_fake.last_motion == MCU_PROTOCOL_MOTION_TURN_LEFT) &&
+              (s_fake.last_speed == 60U),
+          "turn left: applied to hardware");
+
+    request = make_request(0x16U, MCU_PROTOCOL_CMD_GET_STATUS, NULL, 0U, 0U);
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check((reply.payload[2] == MCU_PROTOCOL_MOTION_TURN_LEFT) &&
+              (reply.payload[3] == MCU_PROTOCOL_MOTION_TURN_LEFT) &&
+              (reply.payload[4] == 60U) && (reply.payload[5] == 60U),
+          "turn left: status reads back motion and speed");
+}
+
+/** @brief 有故障时拒绝非 STOP 底盘动作，驱动失败回硬件故障。 */
+static void test_motion_fault_gate(void)
+{
+    uint8_t payload[4] = {MCU_PROTOCOL_MOTION_FORWARD, 100U, 0U, 0U};
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_fake_hw, 0U);
+    s_fake.fault_flags = 0x40U;
+
+    mcu_frame_t request =
+        make_request(0x17U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 10U);
     check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_MOTION,
-                 MCU_PROTOCOL_RESULT_INVALID_COMMAND),
-          "forward: rejected as not implemented");
-    check(s_fake.apply_motion_calls == 0U, "forward: hardware untouched");
+                 MCU_PROTOCOL_RESULT_HARDWARE) &&
+              (reply.payload[2] == 0x40U),
+          "motion fault gate: forward rejected, detail carries fault flags");
+    check(s_fake.apply_motion_calls == 0U,
+          "motion fault gate: hardware untouched");
+
+    s_fake.fault_flags = 0U;
+    s_fake.motion_fails = true;
+    payload[0] = MCU_PROTOCOL_MOTION_BACKWARD;
+    request = make_request(0x18U, MCU_PROTOCOL_CMD_SET_MOTION, payload, 4U,
+                           MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_SET_MOTION,
+                 MCU_PROTOCOL_RESULT_HARDWARE),
+          "motion: drive failure becomes a hardware ACK");
 }
 
 /** @brief 参数越界、保留位非 0、STOP 带速度都要回参数错误。 */
@@ -937,7 +983,8 @@ int main(void)
     test_status_uptime_and_errors();
     test_ping();
     test_stop();
-    test_unimplemented_motion_is_rejected();
+    test_motion_applied();
+    test_motion_fault_gate();
     test_motion_parameter_errors();
     test_length_errors();
     test_unknown_command();

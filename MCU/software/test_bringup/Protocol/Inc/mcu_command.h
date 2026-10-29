@@ -9,15 +9,15 @@
  * 当前实现范围：
  *   - GET_STATUS        -> STATUS，回读实际灯光、运动和故障状态；
  *   - SET_LIGHT         -> 七路灯板一起开关与调亮度，回成功 ACK；
- *   - SET_MOTION STOP   -> 安全停止 + 成功 ACK；
+ *   - SET_MOTION        -> STOP 安全停止，其余动作交给底盘，回 ACK；
  *   - PING              -> 成功 ACK；
  *   - SET_ARM_POSITION、HOME_ARM -> 校验后交给 arm_move / arm_home；
  *   - GET_EXTENDED_STATUS（关节类）-> EXTENDED_STATUS；
- *   - 其余命令（前进/后退/左右转、其他扩展命令），以及没有注册对应回调的
- *     关节命令 -> 带"未知命令"的 ACK，不改输出。
+ *   - 其余命令（其他扩展命令），以及没有注册对应回调的关节命令
+ *     -> 带"未知命令"的 ACK，不改输出。
  *
- * 全局 fault_flags 非 0 时拒绝 SET_ARM_POSITION 和 HOME_ARM（硬件故障 ACK，
- * detail 为故障位），STOP 和查询不受限制。
+ * 全局 fault_flags 非 0 时拒绝 SET_ARM_POSITION、HOME_ARM 和非 STOP 的
+ * SET_MOTION（硬件故障 ACK，detail 为故障位），STOP 和查询不受限制。
  */
 
 #ifndef AITAID_MCU_COMMAND_H

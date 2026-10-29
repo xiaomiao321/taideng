@@ -2,9 +2,9 @@
  * @file app_main.c
  * @brief 应用层实现：串口收发、协议解析与命令分派的接线。
  *
- * Android 模式：支持灯光开关/亮度、PING、状态查询、全电机 STOP，以及
- * extension-v2 的关节定位、回原点和关节状态查询。非 STOP 的宏观运动需要底盘
- * 映射后才能启用。HOME 键按下立即停止全部电机。
+ * Android 模式：支持灯光开关/亮度、PING、状态查询、底盘前进/后退/左右转和
+ * 全电机 STOP，以及 extension-v2 的关节定位、回原点和关节状态查询。
+ * HOME 键按下立即停止全部电机。
  *
  * @note 调试日志继续走 USART3；USART1 只跑二进制协议，不再发文本。
  */
@@ -20,6 +20,7 @@
 #include "bsp_linux_uart.h"
 #include "bsp_log.h"
 #include "bsp_motor.h"
+#include "chassis.h"
 #include "joint_service.h"
 #include "main.h"
 #include "mcu_command.h"
@@ -75,6 +76,8 @@ static int32_t s_arm_speed[JOINT_COUNT];
 static const int32_t k_arm_home[JOINT_COUNT] = MCU_ARM_HOME_MDEG;
 /** @brief 交给 joint_move 的命令序号，只出现在日志里。 */
 static unsigned s_arm_seq = 0U;
+/** @brief 底盘 M7/M8 的动作状态与故障锁存。 */
+static chassis_t s_chassis;
 
 /* -------------------------------------------------------------------------- */
 /* 命令层的硬件回调                                                            */
@@ -83,25 +86,33 @@ static unsigned s_arm_seq = 0U;
 /**
  * @brief 回读当前实际状态。
  *
- * @note 灯光读的是本文件保存的实际状态；运动部分还没接底盘映射，固定回读
- *       停止和 0 速度。故障位为全部关节锁存故障的按位或。
+ * @note 灯光读的是本文件保存的实际状态。底盘开环，实际与目标都是最近一次
+ *       成功应用的动作和速度。故障位为全部关节锁存故障与底盘故障的按位或。
  */
 static void hw_read_status(mcu_status_t *status)
 {
     status->light_enabled = s_light_enabled;
     status->brightness = s_brightness;
-    status->motion = MCU_PROTOCOL_MOTION_STOP;
-    status->target_motion = MCU_PROTOCOL_MOTION_STOP;
-    status->speed = 0U;
-    status->target_speed = 0U;
-    status->fault_flags = joint_fault_flags(joint_service_joints());
+    status->motion = s_chassis.motion;
+    status->target_motion = s_chassis.motion;
+    status->speed = s_chassis.speed;
+    status->target_speed = s_chassis.speed;
+    status->fault_flags = joint_fault_flags(joint_service_joints()) |
+                          chassis_fault_flags(&s_chassis);
 }
 
-/** @brief 取消全部关节运动并停止八路电机；返回是否全部成功。 */
+/** @brief 取消全部关节运动、停下底盘并让八路电机滑行；返回是否全部成功。 */
 static bool stop_all_motors(void)
 {
     bool ok = joint_cancel(joint_service_joints());
+    ok = chassis_stop(&s_chassis) && ok;
     return (bsp_motor_stop_all() == BSP_OK) && ok;
+}
+
+/** @brief 底盘回调：设置一台电机的占空比。 */
+static bool chassis_drive(unsigned motor, int duty)
+{
+    return bsp_motor_set_duty((bsp_motor_id_t)motor, (int16_t)duty) == BSP_OK;
 }
 
 /**
@@ -143,20 +154,25 @@ static bool hw_apply_light(uint8_t light_flags, uint8_t brightness)
 /**
  * @brief 应用一个宏观运动动作。
  *
- * @note 当前只接受 STOP：取消全部关节运动、八路电机滑行，再清除原因已消失
- *       的关节故障锁存（电位器仍断线等持续故障保留）。速度参数等底盘动作
- *       映射定下来以后再使用。
+ * @note 非 STOP 只驱动底盘，不影响关节；驱动失败时底盘停下并锁存故障。
+ *       STOP 取消全部关节运动、八路电机滑行，再清除原因已消失的关节和底盘
+ *       故障锁存（电位器仍断线等持续故障保留）。
  */
 static bool hw_apply_motion(uint8_t motion, uint8_t speed)
 {
-    (void)speed;
-
     if (motion != MCU_PROTOCOL_MOTION_STOP)
     {
-        return false;
+        bool ok = chassis_apply(&s_chassis, motion, speed);
+        if (!ok)
+        {
+            LOG_WARN("APP", "chassis drive failed, motion %u speed %u",
+                     (unsigned)motion, (unsigned)speed);
+        }
+        return ok;
     }
     bool ok = stop_all_motors();
     joint_clear_faults(joint_service_joints(), HAL_GetTick());
+    chassis_clear_fault(&s_chassis);
     return ok;
 }
 
@@ -443,6 +459,7 @@ void app_init(void)
     {
         fail_hard();
     }
+    chassis_init(&s_chassis, chassis_drive);
     unsigned restored = joint_service_init(joint_log);
     LOG_INFO("APP", "joints: %u calibrated, flash %s", restored,
              joint_service_store_ok() ? "ok" : "unavailable");

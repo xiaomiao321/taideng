@@ -74,7 +74,7 @@ static int32_t get_i32(const uint8_t *in)
                      ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24));
 }
 
-/** @brief 当前全局故障位；关节动作在非 0 时被拒绝。 */
+/** @brief 当前全局故障位；关节动作和非 STOP 底盘动作在非 0 时被拒绝。 */
 static uint8_t current_faults(void)
 {
     mcu_status_t status = {0};
@@ -364,11 +364,14 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
                 break;
             }
 
-            if (motion != MCU_PROTOCOL_MOTION_STOP)
+            /* 有故障时只放行 STOP，与关节动作同样由固件自己门控。 */
+            uint8_t faults = (motion != MCU_PROTOCOL_MOTION_STOP)
+                                 ? current_faults()
+                                 : 0U;
+            if (faults != 0U)
             {
-                /* 底盘动作映射还没定，先明确拒绝，不假装接受。 */
-                build_error_ack(reply, request,
-                                MCU_PROTOCOL_RESULT_INVALID_COMMAND);
+                mcu_protocol_make_ack(reply, request->seq, request->cmd,
+                                      MCU_PROTOCOL_RESULT_HARDWARE, faults);
                 break;
             }
 

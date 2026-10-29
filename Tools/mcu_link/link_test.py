@@ -1,4 +1,4 @@
-"""Android 主机替身：电脑经 USB 转 TTL 直连 MCU 的 USART1，测试 0x02 协议和关节扩展命令。
+"""Android 主机替身：电脑经 USB 转 TTL 直连 MCU 的 USART1，测试 0x02 协议、底盘动作和关节扩展命令。
 
 接线：USB 转 TTL 模块的 TX 接 PA10（USART1_RX），RX 接 PA9（USART1_TX），GND 相连，
 不接 VCC；也就是板上原本接 RK3566 的那组串口。固件须按 APP_MODE_ANDROID 编译，
@@ -9,9 +9,11 @@ USART3 只出日志，可另开串口看。
     python link_test.py COM6 move M1 30       M1 转到 30°，按 SDK 规则判断是否到位
     python link_test.py COM6 move M1 -15 --rel  相对当前角度转 -15°
     python link_test.py COM6 watch M1 10      静止观察 10 秒，统计转速误报
+    python link_test.py COM6 drive forward 30 2  底盘前进，速度 30%，2 秒后 STOP
     python link_test.py COM6 stop             STOP，清除原因已消失的故障
     python link_test.py COM6 silence 7        7 秒不发任何帧，验证 5 秒失联停车
 
+drive 的动作是 forward、backward、left、right；左右转为原地转。
 每 0.1 秒查询一次，命令之间的间隔远小于固件 5 秒的失联期限。
 """
 import argparse
@@ -27,6 +29,7 @@ CMD_SET_ARM, CMD_GET_EXT, CMD_EXT, CMD_HOME = 0x31, 0x32, 0x33, 0x34
 CMD_ACK = 0x7F
 RESULTS = {0x00: "OK", 0x01: "INVALID_COMMAND", 0x02: "INVALID_LENGTH", 0x03: "INVALID_VALUE",
            0x04: "BUSY", 0x05: "HARDWARE", 0xFF: "INTERNAL"}
+MOTIONS = {"stop": 0, "forward": 1, "backward": 2, "left": 3, "right": 4}
 FAULT_NAMES = ("停滞", "超时", "方向错误", "越限", "电位器", "驱动", "底盘", "保留")
 TOLERANCE_MDEG = 2000   # 与固件标定容差、SDK positionToleranceMilliDegrees 一致
 OBSERVE_S = 10.0        # SDK 关节观察期限默认 10000ms
@@ -136,8 +139,11 @@ class Link:
     def move(self, joint_id, target, speed):
         return self.command(CMD_SET_ARM, struct.pack("<BBBBii", joint_id, 0, 0, 0, target, speed))
 
+    def motion(self, code, speed):
+        return self.command(CMD_SET_MOTION, bytes((code, speed, 0, 0)))
+
     def stop(self):
-        return self.command(CMD_SET_MOTION, bytes(4))
+        return self.motion(0, 0)
 
 
 def joint_text(j):
@@ -155,6 +161,18 @@ def applied(link, joint_id, target, j):
             and link.status()["faults"] == 0)
 
 
+def motion_applied(s, code, speed):
+    """按 SDK 规则判断底盘动作到位：实际和目标动作、实际和目标速度都等于命令；STOP 不看故障。"""
+    return (s["motion"] == code and s["target_motion"] == code and s["speed"] == speed
+            and s["target_speed"] == speed and (code == 0 or s["faults"] == 0))
+
+
+def motion_text(s):
+    names = {code: name for name, code in MOTIONS.items()}
+    return (f"动作 {names.get(s['motion'], s['motion'])}/{names.get(s['target_motion'], s['target_motion'])}  "
+            f"速度 {s['speed']}%/{s['target_speed']}%  故障 {faults_text(s['faults'])}")
+
+
 def run_basic(link):
     print("PING:", link.command(CMD_PING))
     s = link.status()
@@ -165,7 +183,7 @@ def run_basic(link):
     time.sleep(1)
     print("关灯:", link.command(CMD_SET_LIGHT, bytes((0, 30, 0, 0))))
     print("亮度 101 应被拒绝:", link.command(CMD_SET_LIGHT, bytes((1, 101, 0, 0))))
-    print("前进应被拒绝（底盘映射未做）:", link.command(CMD_SET_MOTION, bytes((1, 50, 0, 0))))
+    print("前进速度 101 应被拒绝:", link.motion(1, 101))
     print("STOP:", link.stop())
     print("关节 7 应被拒绝:", link.move(7, 0, 20000))
 
@@ -173,7 +191,7 @@ def run_basic(link):
 def run_status(link):
     s = link.status()
     print(f"基本状态：运行 {s['uptime']}s  灯 {s['light']} {s['brightness']}%  "
-          f"协议错误 {s['errors']}  故障 {faults_text(s['faults'])}")
+          f"协议错误 {s['errors']}  底盘 {motion_text(s)}")
     for joint_id in range(1, 7):
         print(f"M{joint_id}  {joint_text(link.joint(joint_id))}")
 
@@ -215,6 +233,38 @@ def run_watch(link, joint_id, seconds):
           f"角度 {j['actual'] / 1000:.2f}°")
 
 
+def wait_motion(link, code, speed, timeout=2.0):
+    """等到状态回读满足到位规则，返回用时；超时返回 None。"""
+    begin = time.monotonic()
+    while time.monotonic() - begin < timeout:
+        if motion_applied(link.status(), code, speed):
+            return time.monotonic() - begin
+        time.sleep(0.1)
+    return None
+
+
+def run_drive(link, name, speed, seconds):
+    code = MOTIONS[name]
+    print(f"底盘 {name} 速度 {speed}%，持续 {seconds:g}s")
+    result = link.motion(code, speed)
+    print("ACK:", result)
+    if not result.startswith("OK"):
+        return
+    try:
+        took = wait_motion(link, code, speed)
+        print(f"APPLIED：{took:.1f}s" if took is not None else "STATE_TIMEOUT：状态回读与命令不一致")
+        begin = time.monotonic()
+        while time.monotonic() - begin < seconds:
+            s = link.status()
+            print(f"{time.monotonic() - begin:5.1f}s  {motion_text(s)}")
+            time.sleep(0.2)
+    finally:
+        print("STOP:", link.stop())
+    took = wait_motion(link, 0, 0)
+    print(f"停止确认：{took:.1f}s" if took is not None else "停止确认超时")
+    print(motion_text(link.status()))
+
+
 def run_silence(link, seconds):
     print(f"{seconds:g}s 内不发任何帧；固件 5s 后应停掉全部电机（看电机或 USART3 日志）")
     time.sleep(seconds)
@@ -224,7 +274,7 @@ def run_silence(link, seconds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("port")
-    parser.add_argument("action", choices=("basic", "status", "move", "watch", "stop", "silence"))
+    parser.add_argument("action", choices=("basic", "status", "move", "watch", "drive", "stop", "silence"))
     parser.add_argument("args", nargs="*")
     parser.add_argument("--speed", type=float, default=20, help="move 的速度上限，°/s，默认 20")
     parser.add_argument("--rel", action="store_true", help="move 的角度相对当前位置")
@@ -242,6 +292,13 @@ def main():
             run_status(link)
         elif a.action == "silence":
             run_silence(link, float(a.args[0]) if a.args else 7)
+        elif a.action == "drive":
+            if not 2 <= len(a.args) <= 3 or a.args[0] not in MOTIONS or a.args[0] == "stop":
+                sys.exit("用法：drive forward 30 2，动作为 forward、backward、left、right")
+            speed = int(a.args[1])
+            if not 0 <= speed <= 100:
+                sys.exit("速度为 0～100")
+            run_drive(link, a.args[0], speed, float(a.args[2]) if len(a.args) > 2 else 1)
         else:
             if not a.args or a.args[0].upper() not in tuple(f"M{i}" for i in range(1, 7)):
                 sys.exit("需要关节名 M1～M6")

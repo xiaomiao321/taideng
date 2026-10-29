@@ -3,7 +3,7 @@ import time
 import unittest
 
 from link_test import (CMD_ACK, CMD_EXT, CMD_GET_EXT, CMD_SET_ARM, CMD_STATUS, Decoder, Link, applied,
-                       crc16, encode, faults_text)
+                       crc16, encode, faults_text, motion_applied)
 
 
 class FakeMcu:
@@ -14,17 +14,21 @@ class FakeMcu:
         self.decoder = Decoder()
         self.joint = [0, 30000, 30000, 0, 0, 0]  # 关节号 实际 目标 转速 目标速度 故障
         self.faults = 0
+        self.motion = (0, 0)  # 动作 速度
 
     def write(self, data):
         for flags, seq, cmd, p in self.decoder.feed(data):
             if cmd == 0x20:
-                payload = bytes((0, 0, 0, 0, 0, 0, self.faults, 0)) + struct.pack("<IH", 5, 0) + bytes(2)
+                m, v = self.motion
+                payload = bytes((0, 0, m, m, v, v, self.faults, 0)) + struct.pack("<IH", 5, 0) + bytes(2)
                 self.out += encode(seq, CMD_STATUS, payload, 0x01)
             elif cmd == CMD_GET_EXT:
                 j = self.joint
                 payload = bytes((p[0], p[1], j[5], 0)) + struct.pack("<iiii", *j[1:5])
                 self.out += encode(seq, CMD_EXT, payload, 0x01)
             else:
+                if cmd == 0x11:
+                    self.motion = (p[0], p[1])
                 self.out += encode(seq, CMD_ACK, bytes((cmd, 0, 0, 0)), 0x01)
 
     def read(self, n):
@@ -67,6 +71,17 @@ class LinkTest(unittest.TestCase):
         mcu.joint[3] = 0
         mcu.faults = 0x10     # 全局故障
         self.assertFalse(applied(link, 1, 30000, link.joint(1)))
+
+    def test_motion_applied_rule(self):
+        mcu = FakeMcu()
+        link = Link(mcu)
+        self.assertEqual(link.motion(3, 40), "OK")
+        self.assertTrue(motion_applied(link.status(), 3, 40))
+        self.assertFalse(motion_applied(link.status(), 3, 41))
+        mcu.faults = 0x40
+        self.assertFalse(motion_applied(link.status(), 3, 40))
+        self.assertEqual(link.stop(), "OK")
+        self.assertTrue(motion_applied(link.status(), 0, 0))  # STOP 只确认停住，不要求无故障
 
     def test_timeout_when_silent(self):
         class Silent:
