@@ -1,5 +1,6 @@
 import unittest
-from joint_model import Calibration, Nominal, millidegrees, encode_profile, decode_profile
+from joint_model import (Calibration, Nominal, millidegrees, encode_profile, decode_profile, device_profile,
+                         query_order)
 from protocol import command, parse
 from shell_commands import parse_shell
 
@@ -18,6 +19,19 @@ class JointTests(unittest.TestCase):
         self.assertEqual(decode_profile(encode_profile(configs)), configs)
         for text in ('{"version":2,"joints":{}}', '{"version":1,"joints":{"7":{}}}'):
             with self.assertRaises(ValueError): decode_profile(text)
+
+    def test_device_profile(self):
+        # 理论标定在 MCU 里也是两点加允许范围，导出与标定方式无关。
+        configs = {1: self.cal.with_limits(-20000, 80000), 3: Calibration(96, 0, 3977, 270000, 1)}
+        self.assertEqual(decode_profile(device_profile(configs, [1, 3])), configs)
+        with self.assertRaisesRegex(ValueError, "M2、M5"):
+            device_profile(configs, [1, 2, 3, 5])
+        with self.assertRaisesRegex(ValueError, "还没有关节标定"):
+            device_profile({}, [])
+
+    def test_query_order_ends_on_selected(self):
+        self.assertEqual(query_order(3), [1, 2, 4, 5, 6, 3])
+        self.assertEqual(sorted(query_order(1)), [1, 2, 3, 4, 5, 6])
 
     def test_invalid_calibration(self):
         for values in ((0,0,3000,90000,1), (1000,0,1001,90000,1), (1000,90000,3000,0,1),

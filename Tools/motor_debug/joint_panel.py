@@ -3,7 +3,7 @@ from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from joint_model import Calibration, Nominal, millidegrees, encode_profile, decode_profile
+from joint_model import Calibration, Nominal, millidegrees, decode_profile, device_profile, query_order
 from shell_commands import percent, kilohms
 
 DIRECTIONS = {"正转使角度增大": 1, "正转使角度减小": -1}
@@ -15,6 +15,11 @@ FAULTS = {"NONE": "无", "SENSOR": "采样失败/过期", "LIMIT": "超出标定
           "DIRECTION": "方向错误/误差增大", "TIMEOUT": "定位超时", "HARDWARE": "驱动失败"}
 PHASES = {"IDLE": "空闲", "SETTLE": "准备", "MOVE": "运动", "DONE": "到位", "FAULT": "故障"}
 STATE_FRESH_S = 1.0  # 非焦点空闲关节的 JSTATE 约每 600ms 轮到一次
+# MCU 写 Flash 失败时只发一行 EVENT，终端里容易漏看，改为弹窗。
+STORE_ERRORS = {
+    "CAL_SAVE_ERROR": "MCU 把标定写入 Flash 失败：新参数已经生效，但断电后会丢失。请重新下发一次，仍失败就记下终端日志。",
+    "CAL_STORE_ERROR": "MCU 的标定存储不可用：本次上电期间做的标定和参数修改断电后都会丢失。",
+}
 
 class JointPanel:
     def __init__(self, parent, app):
@@ -43,7 +48,7 @@ class JointPanel:
         choice.bind("<<ComboboxSelected>>", self.select)
         self.live = tk.StringVar(value="ADC：—  实测角度：—")
         ttk.Label(head, textvariable=self.live, font=("Segoe UI", 13)).pack(side="left", padx=10)
-        ttk.Button(head, text="保存标定文件", command=self.save).pack(side="right")
+        ttk.Button(head, text="导出 MCU 标定", command=self.save).pack(side="right")
         ttk.Button(head, text="载入标定文件", command=self.load).pack(side="right", padx=8)
 
         # 标定和调试参数放进子标签页，一次只显示一个，给下面的曲线留出高度。
@@ -254,6 +259,13 @@ class JointPanel:
             self.app.worker.submit("JGET", self.selected)
             self.last_query = time.monotonic()
 
+    def query_all(self):
+        """读回六个关节的标定：开机时 MCU 上报的 JCAL 在打开串口前就发完了。"""
+        if self.capable and self.app.ready and self.app.worker:
+            for joint in query_order(self.selected):
+                self.app.worker.submit("JGET", joint)
+            self.last_query = time.monotonic()
+
     def use_device(self):
         if self.selected in self.device:
             self.set_fields(self.device[self.selected])
@@ -381,15 +393,16 @@ class JointPanel:
         self.app.worker.submit("JTRACE", self.selected, int(self.tracing))
 
     def save(self):
+        """导出 MCU 里实际生效的标定和允许范围，与用哪种方式标定、表单里填了什么无关。"""
         try:
-            self.forms[self.selected] = {k: v.get() for k, v in self.fields.items()}
-            configs = {}
-            for joint, f in self.forms.items():
-                if not f.get("raw_a") and not f.get("raw_b"): continue
-                configs[joint] = Calibration(int(f["raw_a"]), millidegrees(f["angle_a"]), int(f["raw_b"]),
-                    millidegrees(f["angle_b"]), DIRECTIONS[f["direction"]], percent(f["duty"]), millidegrees(f["tolerance"])).validate()
-            if not configs: raise ValueError("尚无完整标定")
-            text = encode_profile(configs)
+            if not self.capable or not self.app.ready:
+                raise ValueError("请先连接 MCU：导出的是 MCU 中保存的标定")
+            calibrated = [j for j, (_, m) in self.states.items() if m[3]]
+            configs = {j: self.device_calibration(j) for j in range(1, 7) if j in self.device}
+            try: text = device_profile(configs, calibrated)
+            except ValueError:
+                self.query_all()
+                raise
             path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("标定文件", "*.json")])
             if path: Path(path).write_text(text, encoding="utf-8")
         except (ValueError, KeyError, OSError) as exc: messagebox.showerror("保存标定", str(exc))
@@ -414,7 +427,7 @@ class JointPanel:
         now = time.monotonic()
         if msg[0] == "JCAPS":
             self.capable = True
-            self.query()
+            self.query_all()
             self.app.worker.submit("MPWM", None)
         elif msg[0] == "MPWM":
             self.pwm = (msg[1], msg[2])
@@ -428,6 +441,9 @@ class JointPanel:
                 self.history.append((now, msg[5]/1000, msg[6]/1000))
         elif msg[0] == "STATE": self.motion = (now, msg)
         elif msg[0] == "JCAL": self.device[msg[2]] = msg[3]
+        elif msg[0] == "EVENT" and msg[1] in STORE_ERRORS:
+            self.notice.set(STORE_ERRORS[msg[1]])
+            self.app.root.after(0, lambda text=STORE_ERRORS[msg[1]]: messagebox.showerror("标定保存", text))
         elif msg[0] == "JLIM":
             self.limits[msg[2]] = (msg[3], msg[4])
             if msg[2] == self.selected: self.fill_limits()
@@ -441,7 +457,8 @@ class JointPanel:
         elif msg[0] in ("ACK", "ERR") and msg[1] in self.pending:
             kind, joint = self.pending.pop(msg[1])
             if kind == "JTRACE" and msg[0] == "ERR": self.tracing = False
-            if kind == "JMOVE" and msg[0] == "ACK": return  # 同时下发多个时不让 ACK 盖掉别的关节的拒绝原因
+            # 同时下发多个定位、连上后一次读六个关节时，不让 ACK 盖掉别的提示。
+            if kind in ("JMOVE", "JGET") and msg[0] == "ACK": return
             label = {"MPWM": "电机 PWM", "JTUNE": f"M{joint} 控制参数", "JTRACE": f"M{joint} 数据记录"}.get(kind, f"M{joint} {kind}")
             self.notice.set(f"{label}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
         elif msg[0] == "JRESULT":

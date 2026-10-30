@@ -155,6 +155,21 @@ def encode_profile(configs):
     return json.dumps({"version": 1, "joints": {str(k): asdict(v) for k, v in configs.items()}},
                       ensure_ascii=False, indent=2)
 
+def device_profile(calibrations, calibrated):
+    """用 MCU 回读的标定生成标定文件；calibrated 是 MCU 状态里已标定的关节号。"""
+    missing = sorted(set(calibrated) - set(calibrations))
+    if missing:
+        raise ValueError("、".join(f"M{j}" for j in missing) + " 的标定参数还没有从 MCU 读回")
+    if not calibrations:
+        raise ValueError("MCU 中还没有关节标定")
+    return encode_profile(calibrations)
+
+
+def query_order(selected):
+    """连上后读取全部关节的顺序：JGET 会把 MCU 的焦点切到被查询的关节，当前关节放最后。"""
+    return [j for j in range(1, 7) if j != selected] + [selected]
+
+
 def decode_profile(text):
     try:
         data = json.loads(text)
