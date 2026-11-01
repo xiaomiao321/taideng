@@ -2,7 +2,7 @@ import struct
 import time
 import unittest
 
-from link_test import (CMD_ACK, CMD_EXT, CMD_GET_EXT, CMD_SET_ARM, CMD_STATUS, Decoder, Link, applied,
+from link_test import (CMD_ACK, CMD_EXT, CMD_GET_EXT, CMD_HOME, CMD_SET_ARM, CMD_STATUS, Decoder, Link, applied,
                        crc16, encode, faults_text, motion_applied)
 
 
@@ -15,9 +15,11 @@ class FakeMcu:
         self.joint = [0, 30000, 30000, 0, 0, 0]  # 关节号 实际 目标 转速 目标速度 故障
         self.faults = 0
         self.motion = (0, 0)  # 动作 速度
+        self.last = None      # 最近一条命令 (cmd, payload)
 
     def write(self, data):
         for flags, seq, cmd, p in self.decoder.feed(data):
+            self.last = (cmd, p)
             if cmd == 0x20:
                 m, v = self.motion
                 payload = bytes((0, 0, m, m, v, v, self.faults, 0)) + struct.pack("<IH", 5, 0) + bytes(2)
@@ -71,6 +73,11 @@ class LinkTest(unittest.TestCase):
         mcu.joint[3] = 0
         mcu.faults = 0x10     # 全局故障
         self.assertFalse(applied(link, 1, 30000, link.joint(1)))
+
+    def test_home_frame(self):
+        mcu = FakeMcu()
+        self.assertEqual(Link(mcu).home(3), "OK")
+        self.assertEqual(mcu.last, (CMD_HOME, bytes((3, 0, 0, 0))))
 
     def test_motion_applied_rule(self):
         mcu = FakeMcu()

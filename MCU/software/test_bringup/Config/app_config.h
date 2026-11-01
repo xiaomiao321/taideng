@@ -204,14 +204,15 @@
 /**
  * @brief 各关节 HOME_ARM 的目标角度，毫度，依次为 M1～M6。
  *
- * MCU_ARM_HOME_NONE 表示该关节没有 HOME，HOME_ARM 回未知命令；装上机构实测后
- * 再填，并与 App 端能力描述里的 homePositionMilliDegrees 保持一致。
+ * 2026-11-01 定为电位器行程中点 135°，前提是关节按电位器转角 0～270° 标定；
+ * 135° 不在某关节允许范围内时 HOME_ARM 回 INVALID_VALUE，不会运动。
+ * MCU_ARM_HOME_NONE 表示该关节没有 HOME，HOME_ARM 回未知命令。
+ * 须与 App 端能力描述里的 homePositionMilliDegrees 保持一致。
  */
 #define MCU_ARM_HOME_NONE (INT32_MIN)
 #define MCU_ARM_HOME_MDEG                                                      \
     {                                                                          \
-        MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE,               \
-            MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE, MCU_ARM_HOME_NONE            \
+        135000, 135000, 135000, 135000, 135000, 135000                         \
     }
 
 /** @brief HOME 键消抖时间，单位毫秒。 */

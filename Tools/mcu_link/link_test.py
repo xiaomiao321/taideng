@@ -8,6 +8,7 @@ USART3 只出日志，可另开串口看。
     python link_test.py COM6 status           基本状态和 M1～M6 关节状态
     python link_test.py COM6 move M1 30       M1 转到 30°，按 SDK 规则判断是否到位
     python link_test.py COM6 move M1 -15 --rel  相对当前角度转 -15°
+    python link_test.py COM6 home M1          M1 回固件配置的 HOME 角度，按 SDK 规则判断是否到位
     python link_test.py COM6 watch M1 10      静止观察 10 秒，统计转速误报
     python link_test.py COM6 drive forward 30 2  底盘前进，速度 30%，2 秒后 STOP
     python link_test.py COM6 stop             STOP，清除原因已消失的故障
@@ -139,6 +140,9 @@ class Link:
     def move(self, joint_id, target, speed):
         return self.command(CMD_SET_ARM, struct.pack("<BBBBii", joint_id, 0, 0, 0, target, speed))
 
+    def home(self, joint_id):
+        return self.command(CMD_HOME, bytes((joint_id, 0, 0, 0)))
+
     def motion(self, code, speed):
         return self.command(CMD_SET_MOTION, bytes((code, speed, 0, 0)))
 
@@ -204,8 +208,24 @@ def run_move(link, joint_id, text, speed, relative):
     print(f"M{joint_id} 从 {start['actual'] / 1000:.2f}° 转到 {target / 1000:.2f}°，速度上限 {speed / 1000:g}°/s")
     result = link.move(joint_id, target, speed)
     print("ACK:", result)
+    if result.startswith("OK"):
+        observe(link, joint_id, target)
+
+
+def run_home(link, joint_id):
+    result = link.home(joint_id)
+    print(f"HOME M{joint_id} ACK:", result)
     if not result.startswith("OK"):
         return
+    # HOME 不带目标角度，从扩展状态回读固件配置的原点。
+    j = link.joint(joint_id)
+    if isinstance(j, str):
+        sys.exit(f"M{joint_id} 不可用：{j}")
+    print(f"原点 {j['target'] / 1000:.2f}°")
+    observe(link, joint_id, j["target"])
+
+
+def observe(link, joint_id, target):
     begin = time.monotonic()
     while time.monotonic() - begin < OBSERVE_S:
         j = link.joint(joint_id)
@@ -274,7 +294,7 @@ def run_silence(link, seconds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("port")
-    parser.add_argument("action", choices=("basic", "status", "move", "watch", "drive", "stop", "silence"))
+    parser.add_argument("action", choices=("basic", "status", "move", "home", "watch", "drive", "stop", "silence"))
     parser.add_argument("args", nargs="*")
     parser.add_argument("--speed", type=float, default=20, help="move 的速度上限，°/s，默认 20")
     parser.add_argument("--rel", action="store_true", help="move 的角度相对当前位置")
@@ -307,6 +327,8 @@ def main():
                 if len(a.args) != 2:
                     sys.exit("用法：move M1 30 或 move M1 -15 --rel")
                 run_move(link, joint_id, a.args[1], round(a.speed * 1000), a.rel)
+            elif a.action == "home":
+                run_home(link, joint_id)
             else:
                 run_watch(link, joint_id, float(a.args[1]) if len(a.args) > 1 else 10)
 
