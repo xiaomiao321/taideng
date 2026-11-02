@@ -54,10 +54,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     {
         bsp_debug_uart_on_rx_cplt_from_isr();
     }
-    else if (huart->Instance == USART1)
-    {
-        bsp_linux_uart_on_rx_cplt_from_isr();
-    }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)

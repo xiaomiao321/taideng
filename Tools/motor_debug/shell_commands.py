@@ -9,7 +9,8 @@ from joint_model import millidegrees
 
 HELP = """命令（占空比用百分数，时长用 ms）：
 运行范围：M1～M6 小电机 10～100%；M7/M8 大电机 10～80%。停止使用 stop。
-  motor M1 80 500         正转点动；-80 反转；时长 0 持续运行
+  motor M1 80 500         只驱动 M1：正转 80%，-80 反转；时长 0 持续运行，
+                         其他电机保持原输出
   angle M1 45 [10000]     使用已下发标定定位到 45°，默认超时 10 秒
   joint M1               查询关节状态、MCU 标定及允许范围
   jlim M1 10 170         修改允许运动范围为 10～170°（不改标定）
@@ -108,7 +109,12 @@ def parse_shell(text):
     if name in ("pass", "fail") and not args:
         return send("CONFIRM", name.upper())
     if name == "motor" and len(args) == 3 and re.fullmatch(r"[Mm][1-8]", args[0]):
-        return send("RUN", int(args[0][1]), percent(args[1]), integer(args[2]))
+        index, duty, duration = int(args[0][1]) - 1, percent(args[1]), integer(args[2])
+        if duty == 0:
+            raise ValueError("停止请用 stop")
+        duties, durations = [0] * 8, [0] * 8
+        duties[index], durations[index] = duty, duration
+        return send("MSET", 1 << index, tuple(duties), tuple(durations))
     if name == "angle" and len(args) in (2, 3) and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JMOVE", int(args[0][1]), millidegrees(args[1]), integer(args[2]) if len(args) == 3 else 10000)
     if name == "joint" and len(args) == 1 and re.fullmatch(r"[Mm][1-6]", args[0]):

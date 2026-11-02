@@ -116,16 +116,14 @@ class SerialWorker(threading.Thread):
         self.emit("CAPS JOINT_NOMINAL 1")
         self.emit("CAPS MULTI 1")
         self.emit("CAPS LIGHT 1")
-        self.emit("CAPS LINUX 1")
         multi = [0]*8
         targets = [0]*8
         due = [0.]*8
         waiting = [0.]*8
         durations = [0]*8
         lamps = [0]*7
-        bridge = False
         joints = DemoJoints(self.emit)
-        motor, duty, end = 0, 0, 0
+        motor, duty = 0, 0
         board = None
         vals = [1000., 1500., 2000., 2500., 3000., 3500.]
         start = time.monotonic()
@@ -140,13 +138,12 @@ class SerialWorker(threading.Thread):
                 kind, selected, speed, duration = self.commands.get_nowait()
                 self.seq = (self.seq + 1) & 65535
                 self.events.put(("sent", (kind, self.seq, (selected, speed, duration))))
-                if kind in ("STOP", "RUN", "TEST", "CAL", "JMOVE", "JNOM", "JLIM"):
+                if kind in ("STOP", "TEST", "CAL", "JMOVE", "JNOM", "JLIM"):
                     if kind != "JMOVE": joints.cancel()  # 与固件一致：定位不打断其他关节
                     if board:
                         finish("CANCELLED")
                     motor, duty = 0, 0
                     multi[:] = [0]*8; targets[:] = [0]*8; waiting[:] = [0.]*8; lamps[:] = [0]*7
-                    bridge = False
                 if kind in ("MSET", "MOFF"):
                     joints.cancel()
                     if board: finish("CANCELLED")
@@ -163,22 +160,12 @@ class SerialWorker(threading.Thread):
                         self.emit(f"ERR {self.seq} BOARD_BUSY")
                         continue
                     lamps[:] = speed
-                elif kind == "LMODE": bridge = bool(selected)
-                elif kind == "LTX":
-                    if not bridge:
-                        self.emit(f"ERR {self.seq} BRIDGE_OFF")
-                        continue
-                    self.emit("LRX "+speed[:32].hex())
-                    if len(speed) > 32: self.emit("LRX "+speed[32:].hex())
                 if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"):
                     error = joints.request(kind, self.seq, selected, speed, duration, vals, int((now-start)*1000))
                     if error:
                         self.emit(f"ERR {self.seq} {error}")
                         continue
-                if kind == "RUN":
-                    motor, duty = selected, speed
-                    end = now + duration / 1000 if duration else 0
-                elif kind == "TEST":
+                if kind == "TEST":
                     board = dict(seq=self.seq, name=selected, value=speed, duration=duration,
                                  start=now, phase="SETTLE")
                 elif kind == "CONFIRM":
@@ -186,7 +173,7 @@ class SerialWorker(threading.Thread):
                         finish("PASS" if selected == "PASS" else "FAIL_MANUAL")
                     else:
                         self.emit(f"ERR {self.seq} NOT_WAITING")
-                self.emit(f"ACK {self.seq} {'QUEUED' if kind == 'RUN' else kind}")
+                self.emit(f"ACK {self.seq} {kind}")
             except queue.Empty:
                 pass
             if board:
@@ -203,14 +190,10 @@ class SerialWorker(threading.Thread):
                     if name.startswith('MOTOR_'):
                         motor = int(name[7])
                         duty = board['value'] * (1 if name.endswith('FI') else -1)
-                        end = 0
                 elif elapsed >= .1 + board['duration'] / 1000 * (4 if name == "LED" else 1) and board['phase'] == 'DRIVE':
                     board['phase'] = 'WAIT'
                     motor, duty = 0, 0
                     self.emit(f"TESTWAIT {board['seq']} {name}")
-            if end and now >= end and motor and not board:
-                motor, duty = 0, 0
-                self.emit("EVENT DONE")
             for i in range(8):
                 if waiting[i] and now >= waiting[i]:
                     multi[i] = targets[i]; waiting[i] = 0
@@ -233,7 +216,7 @@ class SerialWorker(threading.Thread):
             light_values = list(lamps)
             if board and board['phase'] == 'DRIVE' and board['name'].startswith('LAMP_'):
                 light_values[("UP1", "UP2", "UP3", "UP4", "DOWN1", "DOWN2", "DOWN3").index(board['name'][5:])] = board['value']
-            self.emit(f"LSTATE {tick} "+" ".join(map(str, light_values))+f" {int(bridge)}")
+            self.emit(f"LSTATE {tick} "+" ".join(map(str, light_values)))
             self.emit(f"BOARD {tick} {board['name'] if board else '-'} {board['phase'] if board else 'IDLE'}")
             self.emit(f"KEY {tick} 0 0")
         self.events.put(("disconnected", ""))
@@ -434,7 +417,6 @@ class App:
                 self.joint_panel.disconnect()
                 self.motor_panel.disconnect()
                 self.light_panel.disconnect()
-                self.linux_panel.mcu_disconnect()
                 self.connection.set("未连接")
                 self.motion.set("已断开；MCU 心跳超时后关闭全部测试输出")
                 self.connect_btn.configure(text="连接", state="normal")
@@ -443,7 +425,6 @@ class App:
                 self.joint_panel.sent(*value)
                 self.motor_panel.sent(*value)
                 self.light_panel.sent(*value)
-                self.linux_panel.sent(*value)
             elif kind in ("error", "log"):
                 self.terminal.write(value, "error" if kind == "error" else None)
                 self.add_log(value)
@@ -453,7 +434,6 @@ class App:
                 self.joint_panel.receive(msg)
                 self.motor_panel.receive(msg)
                 self.light_panel.receive(msg)
-                self.linux_panel.receive(msg)
                 self.terminal.receive(value, msg)
                 if msg[0] == "POT":
                     self.pot.update(msg[2], time.monotonic())
@@ -475,7 +455,7 @@ class App:
                     self.pot.valid = False
                     self.adc_status.set(f"ADC 采样错误 {msg[2]}")
                     self.add_log(value)
-                elif msg[0] not in ("MSTATE", "LSTATE", "LRX", "JT"):
+                elif msg[0] not in ("MSTATE", "LSTATE", "JT"):
                     self.add_log(value)
         self.record(None)
         now = time.monotonic()

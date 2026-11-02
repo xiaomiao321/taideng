@@ -5,16 +5,22 @@ from board_catalog import test_parameters
 from joint_model import Calibration
 from shell_commands import parse_shell
 
+def mset(motor, duty):
+    duties = [0] * 8
+    duties[motor - 1] = duty
+    return command("MSET", 1, 1 << (motor - 1), duties, (500,) * 8)
+
 class MotorLimitsTests(unittest.TestCase):
     def test_all_motors_and_directions(self):
         for motor in range(1, 9):
             high = 1000 if motor <= 6 else 800
             validate_duty(motor, 0, allow_stop=True)
+            self.assertTrue(mset(motor, 0))
             for sign in (-1, 1):
                 for value in (100, high):
-                    self.assertTrue(command("RUN", 1, motor, sign*value, 500))
-                for value in (0, 1, 99, high+1):
-                    with self.assertRaises(ValueError): command("RUN", 1, motor, sign*value, 500)
+                    self.assertTrue(mset(motor, sign*value))
+                for value in (1, 99, high+1):
+                    with self.assertRaises(ValueError): mset(motor, sign*value)
 
     def test_board_tests_and_terminal(self):
         for motor in range(1, 9):
@@ -28,8 +34,8 @@ class MotorLimitsTests(unittest.TestCase):
         for text in ("motor M7 81 500", "motor M8 -100 500", "motor M1 9.9 500",
                      "test MOTOR_M8_FI 100 500"):
             with self.assertRaises(ValueError): parse_shell(text)
-        self.assertEqual(parse_shell("motor M1 100 500").request[2], 1000)
-        self.assertEqual(parse_shell("motor M7 -80 500").request[2], -800)
+        self.assertEqual(parse_shell("motor M1 100 500").request[2][0], 1000)
+        self.assertEqual(parse_shell("motor M7 -80 500").request[2][6], -800)
 
     def test_joint_calibration_and_lamps(self):
         for duty in (100, 800, 1000): Calibration(1000,0,3000,180000,1,duty).validate()

@@ -22,13 +22,6 @@ def command(kind, seq, motor=1, duty=800, duration=500):
         if len(duty) != 7 or any(type(v) is not int or not 0 <= v <= 1000 for v in duty):
             raise ValueError("七路灯光亮度须为 0～100%")
         return f"LSET {seq} " + " ".join(map(str, duty)) + "\n"
-    if kind == "LMODE":
-        if motor not in (0, 1): raise ValueError("转发模式参数错误")
-        return f"LMODE {seq} {motor}\n"
-    if kind == "LTX":
-        if not isinstance(duty, bytes) or not 1 <= len(duty) <= 48:
-            raise ValueError("每次转发须为 1～48 字节")
-        return f"LTX {seq} {duty.hex().upper()}\n"
     if kind == "MPWM":
         if motor is None:
             return f"MPWM {seq}\n"
@@ -86,12 +79,7 @@ def command(kind, seq, motor=1, duty=800, duration=500):
         return f"TEST {seq} {motor} {duty} {duration}\n"
     if kind == "CONFIRM" and motor in ("PASS", "FAIL"):
         return f"CONFIRM {seq} {motor}\n"
-    if kind != "RUN" or not 1 <= motor <= 8 or not -1000 <= duty <= 1000 or duty == 0:
-        raise ValueError("Invalid motor or duty")
-    validate_duty(motor, duty)
-    if not 0 <= duration <= 60000:
-        raise ValueError("Invalid duration")
-    return f"RUN {seq} M{motor} {duty} {duration}\n"
+    raise ValueError("Unknown command")
 
 
 def parse(line):
@@ -99,12 +87,8 @@ def parse(line):
     if not p:
         return ("LOG", line)
     try:
-        if len(p) == 3 and p[0] == "CAPS" and p[1] in ("MULTI", "LIGHT", "LINUX") and p[2] == "1":
+        if len(p) == 3 and p[0] == "CAPS" and p[1] in ("MULTI", "LIGHT") and p[2] == "1":
             return "XCAPS", p[1]
-        if p[0] == "LRX" and len(p) == 2:
-            data = bytes.fromhex(p[1])
-            if not 1 <= len(data) <= 32: raise ValueError()
-            return "LRX", data
         if p[0] == "JT" and len(p) == 10 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
             tick, raw, spread, angle, target, duty, brake = (int(p[1]), *map(int, p[3:9]))
             if not 0 <= raw <= 4095 or not 0 <= spread <= 4095 or not -1000 <= duty <= 1000 or brake not in (0, 1):
@@ -123,12 +107,10 @@ def parse(line):
             if slow not in (0, 1):
                 raise ValueError()
             return "MPWM", khz, bool(slow)
-        if p[0] == "LERR" and len(p) == 2:
-            return "LERR", p[1]
-        if p[0] == "LSTATE" and len(p) == 10:
+        if p[0] == "LSTATE" and len(p) == 9:
             values = tuple(map(int, p[2:9]))
-            if any(not 0 <= v <= 1000 for v in values) or p[9] not in ("0", "1"): raise ValueError()
-            return "LSTATE", int(p[1]), values, p[9] == "1"
+            if any(not 0 <= v <= 1000 for v in values): raise ValueError()
+            return "LSTATE", int(p[1]), values
         if p[0] == "MSTATE" and len(p) == 20:
             values = tuple(map(int, p[2:10])); remaining = tuple(map(int, p[10:18]))
             if any(not -1000 <= v <= 1000 for v in values) or any(not 0 <= t <= 60000 for t in remaining): raise ValueError()

@@ -185,98 +185,83 @@ int main(void)
                !motor_duty_valid(index, -max - 1));
     }
     assert(!motor_duty_valid(MOTOR_COUNT, 0));
+    /* 以下安全规则用 MSET 验证：M1 单路，800‰，持续运行。 */
+    const char *m1_on = "MSET 2 1 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0";
     debug_control_t c = fresh(0);
-    debug_control_line(&c, "RUN 2 M1 800 500", 0);
-    assert(c.pending && running_motor == 0);
-    debug_control_update(&c, 99, false);
-    assert(running_motor == 0);
+    c.hw.manual = hw_manual;
+    debug_control_line(&c, m1_on, 0);
     debug_control_update(&c, 100, false);
-    assert(running_motor == 1 && running_duty == 800);
-    debug_control_update(&c, 599, false);
-    assert(running_motor == 1);
-    debug_control_update(&c, 600, false);
-    assert(running_motor == 0 && !c.locked);
-
-    c = fresh(100);
-    debug_control_line(&c, "RUN 2 M8 -800 0", 100);
-    debug_control_update(&c, 200, false);
-    assert(running_motor == 8 && running_duty == -800);
-    debug_control_line(&c, "RUN 3 M1 800 500", 210);
-    assert(running_motor == 0);
-    debug_control_update(&c, 309, false);
-    assert(running_motor == 0);
-    debug_control_update(&c, 310, false);
-    assert(running_motor == 1);
-    debug_control_update(&c, 320, true);
-    assert(c.locked && !c.pending && running_motor == 0);
-    debug_control_line(&c, "RUN 4 M1 800 500", 321);
+    assert(outputs[0] == 800);
+    /* HOME 按下停机并锁定；HOME 未松开时 STOP 不解锁。 */
+    debug_control_update(&c, 110, true);
+    assert(c.locked && !outputs[0] && !c.multi_pending);
+    debug_control_line(&c, m1_on, 111);
     assert(strstr(reply, "LOCKED"));
-    debug_control_line(&c, "STOP 5 ALL", 322);
-    assert(c.locked);
-    debug_control_update(&c, 330, false);
-    debug_control_line(&c, "STOP 6 ALL", 331);
-    assert(!c.locked);
+    debug_control_line(&c, "STOP 5 ALL", 112);
+    assert(c.locked && strstr(reply, "STOP_LOCKED"));
+    debug_control_update(&c, 120, false);
+    debug_control_line(&c, "STOP 6 ALL", 121);
+    assert(!c.locked && strstr(reply, "ACK 6 STOP"));
 
+    /* 心跳超时停机锁定；恢复心跳后仍需 STOP 解锁。 */
     c = fresh(0);
-    debug_control_line(&c, "RUN 2 M1 800 0", 0);
+    c.hw.manual = hw_manual;
+    debug_control_line(&c, m1_on, 0);
     debug_control_update(&c, 100, false);
     debug_control_update(&c, 1000, false);
-    assert(c.locked && running_motor == 0 && !c.linked);
+    assert(c.locked && !outputs[0] && !c.linked);
     debug_control_line(&c, "PING 3", 1010);
-    debug_control_line(&c, "RUN 4 M1 800 0", 1011);
-    assert(!c.pending);
+    debug_control_line(&c, m1_on, 1011);
+    assert(strstr(reply, "LOCKED") && !c.multi_pending);
     debug_control_line(&c, "STOP 5 ALL", 1012);
     assert(!c.locked);
 
     const char *bad[] = {
-        "RUN 2 M0 800 500",     "RUN 2 M9 800 500",
-        "RUN 2 M1 1001 500",    "RUN 2 M1 0 500",
-        "RUN 2 M1 800 -1",      "RUN 2 M1 800 60001",
-        "RUN 2 M1 80x 500",     "RUN 2 M1 800 500 extra",
-        "RUN 65536 M1 800 500", "RUN 2 M1 99999999999999999999999 500",
-        "RUN 2 M1 +800 500",    "RUN 2 M1 99 500",
-        "RUN 2 M7 801 500",     "RUN 2 M8 -1000 500",
-        "PING 3 extra",         "RUN"};
+        "MSET 2 0 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 256 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 1 1001 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 1 800 0 0 0 0 0 0 0 -1 0 0 0 0 0 0 0",
+        "MSET 2 1 800 0 0 0 0 0 0 0 60001 0 0 0 0 0 0 0",
+        "MSET 2 1 80x 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 1 +800 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 1 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 1 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 64 0 0 0 0 0 0 801 0 0 0 0 0 0 0 0 0",
+        "MSET 65536 1 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "MSET 2 1 99999999999999999999999 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+        "RUN 2 M1 800 500",
+        "PING 3 extra",
+        "MSET"};
     for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
     {
         c = fresh(0);
+        c.hw.manual = hw_manual;
         debug_control_line(&c, bad[i], 1);
-        assert(!c.pending && !strncmp(reply, "ERR", 3));
+        assert(!c.multi_pending && !strncmp(reply, "ERR", 3));
     }
     c = fresh(0);
-    debug_control_line(&c, "RUN 2 M1 800 0", 1000);
-    assert(strstr(reply, "NO_HEARTBEAT"));
+    c.hw.manual = hw_manual;
+    debug_control_line(&c, m1_on, 1000);
+    assert(strstr(reply, "NO_HEARTBEAT") && !c.multi_pending);
+    /* 故障停机会取消还在等待启动的电机。 */
     c = fresh(0);
-    debug_control_line(&c, "RUN 2 M1 800 0", 0);
+    c.hw.manual = hw_manual;
+    debug_control_line(&c, m1_on, 0);
     debug_control_fault(&c, "EVENT UART_ERROR\r\n");
     debug_control_update(&c, 100, false);
-    assert(!c.pending && !running_motor && c.locked);
-    c = fresh(0);
-    stop_ok = false;
-    debug_control_line(&c, "RUN 2 M1 800 0", 0);
-    assert(c.locked && !c.pending);
-    c = fresh(0);
-    run_ok = false;
-    debug_control_line(&c, "RUN 2 M1 800 0", 0);
-    debug_control_update(&c, 100, false);
-    assert(c.locked && !running_motor);
-
-    c = fresh(UINT32_MAX - 150U);
-    debug_control_line(&c, "RUN 2 M1 -800 200", UINT32_MAX - 150U);
-    debug_control_update(&c, UINT32_MAX - 50U, false);
-    assert(running_motor == 1);
-    debug_control_update(&c, 149U, false);
-    assert(running_motor == 0);
+    assert(!c.multi_pending && !outputs[0] && c.locked);
     c = fresh(0);
     c.hw.test = hw_test;
     c.hw.confirm = hw_confirm;
     debug_control_line(&c, "INFO 10", 1);
     assert(strstr(reply, "CAPS BOARD_TEST 2"));
-    debug_control_line(&c, "RUN 2 M1 800 0", 2);
+    c.hw.manual = hw_manual;
+    debug_control_line(&c, m1_on, 2);
     debug_control_update(&c, 102, false);
     assert(running_motor == 1);
+    /* TEST 先停掉手动输出。 */
     debug_control_line(&c, "TEST 20 BUZZER 2700 500", 103);
-    assert(test_calls == 1 && !c.pending && running_motor == 0);
+    assert(test_calls == 1 && !c.multi_duty[0] && running_motor == 0);
     assert(strstr(reply, "ACK 20 TEST"));
     debug_control_line(&c, "CONFIRM 21 PASS", 104);
     assert(confirm_calls == 1);
@@ -377,12 +362,15 @@ int main(void)
     debug_control_line(&c, "JMOVE 55 M1 45000 10000", 25);
     assert(joint_calls == calls_before + 2 && stops == stops_before &&
            strstr(reply, "ACK 55 JMOVE"));
-    /* 单路 RUN 占用电机时，JMOVE 先全部停下再接管。 */
-    c.motor = 2;
-    c.duty = 800;
-    debug_control_line(&c, "JMOVE 56 M1 45000 10000", 26);
-    assert(stops == stops_before + 1 && c.motor == 0 &&
-           strstr(reply, "ACK 56 JMOVE"));
+    /* 多路手动占用电机时，JMOVE 先全部停下再接管。 */
+    c.hw.manual = hw_manual;
+    debug_control_line(&c, "MSET 56 2 0 800 0 0 0 0 0 0 0 0 0 0 0 0 0 0", 26);
+    debug_control_update(&c, 126, false);
+    assert(c.multi_duty[1] == 800);
+    stops_before = stops;
+    debug_control_line(&c, "JMOVE 57 M1 45000 10000", 27);
+    assert(stops == stops_before + 1 && !c.multi_duty[1] &&
+           strstr(reply, "ACK 57 JMOVE"));
     printf("debug control: motor, board and joint protocol tests passed (%u "
            "stop calls)\n",
            stops);

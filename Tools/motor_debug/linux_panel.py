@@ -1,4 +1,4 @@
-"""A second, independent serial session or explicit USART1 bridge."""
+"""A second, independent serial session to Linux or to the MCU USART1."""
 import codecs
 from collections import deque
 import queue
@@ -54,10 +54,6 @@ class LinuxPanel:
         self.app = app
         self.worker = None
         self.events = queue.Queue(maxsize=2048)
-        self.capable = self.bridge = False
-        self.bridge_request = None
-        self.bridge_want = None
-        self.pending = {}
         self.frames = {}
         self.seq = 0
         self.decoder = Decoder()
@@ -65,25 +61,22 @@ class LinuxPanel:
         self.history = deque(maxlen=200)
         self.tx_count = self.rx_count = 0
         self.logs = deque(maxlen=10000)
-        self.source = tk.StringVar(value="经 MCU 转发")
         self.port = tk.StringVar()
         self.baud = tk.StringVar(value="115200")
         self.bits = tk.StringVar(value="8")
         self.parity = tk.StringVar(value="N")
         self.stops = tk.StringVar(value="1")
         top = ttk.Frame(parent); top.pack(fill="x", pady=5)
-        ttk.Combobox(top, textvariable=self.source, values=("经 MCU 转发", "独立 COM 口"), state="readonly", width=15).pack(side="left")
         self.ports = ttk.Combobox(top, textvariable=self.port, width=12, state="readonly"); self.ports.pack(side="left", padx=5)
         ttk.Button(top, text="刷新", command=self.refresh_ports).pack(side="left")
         for variable, choices, width in ((self.baud, ("9600", "19200", "38400", "57600", "115200", "230400"), 8),
                                           (self.bits, ("7", "8"), 2), (self.parity, ("N", "E", "O"), 2), (self.stops, ("1", "2"), 2)):
             ttk.Combobox(top, textvariable=variable, values=choices, width=width, state="readonly").pack(side="left", padx=3)
-        ttk.Button(top, text="连接 / 开启转发", command=self.connect).pack(side="left", padx=5)
-        ttk.Button(top, text="断开 / 关闭转发", command=self.disconnect).pack(side="left")
-        self.source.trace_add("write", self.source_changed)
-        self.status = tk.StringVar(value="未连接；转发固定 115200 / 8N1，仅 DEBUG 固件可用。")
+        ttk.Button(top, text="连接", command=self.connect).pack(side="left", padx=5)
+        ttk.Button(top, text="断开", command=self.disconnect).pack(side="left")
+        self.status = tk.StringVar(value="未连接")
         ttk.Label(parent, textvariable=self.status).pack(anchor="w", pady=5)
-        ttk.Label(parent, text="独立 COM 口可连接 Linux 串口，或直连 MCU USART1 测试 Android 协议；转发模式把数据原样发往 USART1。\n协议主机模式需要对端提供 MCU 协议响应；Linux 控制台通常使用普通文本。同一条链路只保留一个控制主机。").pack(anchor="w")
+        ttk.Label(parent, text="另用一个 USB 转串口，连接 Linux 串口控制台，或直连 MCU USART1 测试 Android 协议。\n协议主机模式需要对端提供 MCU 协议响应；Linux 控制台通常使用普通文本。同一条链路只保留一个控制主机。").pack(anchor="w")
         self.output = tk.Text(parent, height=14, bg="#101923", fg="#d9e5ef", font=("Consolas", 10), state="disabled")
         self.output.pack(fill="both", expand=True, pady=8)
         options = ttk.Frame(parent); options.pack(fill="x")
@@ -123,9 +116,6 @@ class LinuxPanel:
         self.refresh_ports()
         self.refresh()
 
-    def source_changed(self, *_):
-        self.disconnect()
-
     def refresh_ports(self):
         try:
             from serial.tools import list_ports
@@ -139,36 +129,21 @@ class LinuxPanel:
 
     def connect(self):
         try:
-            if self.worker or self.bridge or self.bridge_want is not None: raise ValueError("请先断开当前会话")
+            if self.worker: raise ValueError("请先断开当前会话")
             self.reset_stream()
-            if self.source.get() == "经 MCU 转发":
-                if not self.capable or not self.app.ready or not self.app.worker: raise ValueError("请先连接支持 Linux 转发的新 DEBUG 固件")
-                self.bridge_want = True
-                self.app.worker.submit("LMODE", 1)
-                self.status.set("等待 MCU 开启 USART1 转发…")
-            else:
-                port = self.port.get()
-                if not port: raise ValueError("请选择 Linux 串口")
-                if self.app.worker and port.casefold() == self.app.worker.port.casefold(): raise ValueError("此 COM 口已用于 MCU 调试，请选另一串口")
-                settings = dict(baudrate=int(self.baud.get()), bytesize=int(self.bits.get()), parity=self.parity.get(), stopbits=int(self.stops.get()))
-                self.worker = RawSerial(port, settings, self.events)
-                self.worker.start()
-                self.status.set("正在打开独立串口…")
+            port = self.port.get()
+            if not port: raise ValueError("请选择 Linux 串口")
+            if self.app.worker and port.casefold() == self.app.worker.port.casefold(): raise ValueError("此 COM 口已用于 MCU 调试，请选另一串口")
+            settings = dict(baudrate=int(self.baud.get()), bytesize=int(self.bits.get()), parity=self.parity.get(), stopbits=int(self.stops.get()))
+            self.worker = RawSerial(port, settings, self.events)
+            self.worker.start()
+            self.status.set("正在打开独立串口…")
         except ValueError as exc: messagebox.showerror("Linux 串口", str(exc))
 
     def disconnect(self):
         if self.worker: self.worker.quit.set()
-        if (self.bridge or self.bridge_want is not None) and self.app.worker and self.app.ready:
-            self.bridge_want = False
-            self.app.worker.submit("LMODE", 0)
-        self.bridge = False
         self.reset_stream()
         self.status.set("已断开；等待中的协议请求已清除。")
-
-    def mcu_disconnect(self):
-        self.capable = self.bridge = False; self.bridge_want = None; self.bridge_request = None; self.pending.clear()
-        if self.source.get() == "经 MCU 转发":
-            self.reset_stream(); self.status.set("MCU 已断开，转发关闭；不会自动重新开启。")
 
     def write(self, text):
         line = time.strftime("%H:%M:%S ") + text
@@ -198,16 +173,10 @@ class LinuxPanel:
 
     def send_bytes(self, data):
         if not data: raise ValueError("消息不能为空")
-        if self.source.get() == "独立 COM 口":
-            if not self.worker or not self.worker.is_alive(): raise ValueError("请先连接独立串口")
-            if len(data) > 4096: raise ValueError("每次最多发送 4096 字节")
-            try: self.worker.commands.put_nowait(data)
-            except queue.Full: raise ValueError("发送队列已满") from None
-        else:
-            if not self.bridge or not self.app.ready or not self.app.worker: raise ValueError("请先开启 MCU 转发")
-            if len(data) > 512: raise ValueError("转发单次最多 512 字节")
-            for offset in range(0, len(data), 48): self.app.worker.submit("LTX", duty=data[offset:offset+48])
-            self.write("已排队转发；TX 统计在 MCU 接受发送后更新。")
+        if not self.worker or not self.worker.is_alive(): raise ValueError("请先连接独立串口")
+        if len(data) > 4096: raise ValueError("每次最多发送 4096 字节")
+        try: self.worker.commands.put_nowait(data)
+        except queue.Full: raise ValueError("发送队列已满") from None
 
     def send_raw(self):
         try:
@@ -245,33 +214,6 @@ class LinuxPanel:
             self.frames[self.seq] = (time.monotonic(), data[5])
             self.preview_text.set(data.hex(" ").upper())
         except ValueError as exc: messagebox.showerror("协议发送", str(exc))
-
-    def sent(self, kind, seq, args):
-        if kind == "STOP":
-            self.bridge = False; self.bridge_want = None; self.bridge_request = None; self.pending.clear()
-            if self.source.get() == "经 MCU 转发":
-                self.reset_stream(); self.status.set("全部停止已发送，转发关闭；需要手动重新开启。")
-        if kind == "LMODE": self.bridge_request = seq
-        if kind == "LTX": self.pending[seq] = args[1]
-
-    def receive(self, msg):
-        if msg[0] == "XCAPS" and msg[1] == "LINUX": self.capable = True
-        elif msg[0] == "LSTATE":
-            if self.bridge and not msg[3]:
-                self.bridge = False; self.reset_stream(); self.status.set("MCU 已关闭转发，请重新开启。")
-        elif msg[0] == "LRX" and self.source.get() == "经 MCU 转发": self.traffic("RX", msg[1])
-        elif msg[0] == "LERR":
-            self.write("MCU 串口错误，接收数据可能不完整："+msg[1])
-            self.decoder = Decoder(); self.text_decoder.reset()
-        elif msg[0] in ("ACK", "ERR"):
-            if msg[1] == self.bridge_request:
-                self.bridge = msg[0] == "ACK" and self.bridge_want is True
-                self.bridge_want = None; self.bridge_request = None
-                self.status.set("USART1 转发已开启 · 115200 / 8N1" if self.bridge else "转发关闭 / 开启失败："+msg[2])
-            data = self.pending.pop(msg[1], None)
-            if data is not None:
-                if msg[0] == "ACK": self.traffic("TX", data)
-                else: self.write("转发发送失败（未重试）："+msg[2])
 
     def refresh(self):
         for _ in range(100):

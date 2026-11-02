@@ -12,7 +12,7 @@
 /** @brief 一条回复的最大长度。 */
 #define REPLY_MAX (96U)
 
-/** @brief RUN、MSET 的电机持续时间与 TEST 的测试时长上限，单位毫秒。 */
+/** @brief MSET 的电机持续时间与 TEST 的测试时长上限，单位毫秒。 */
 #define MAX_DURATION_MS (60000L)
 
 /** @brief TEST 命令 value 参数的上限（蜂鸣器频率最高 20kHz）。 */
@@ -45,9 +45,6 @@ static void answer(debug_control_t *c, unsigned seq, const char *kind,
 }
 static bool stop(debug_control_t *c)
 {
-    c->motor = 0;
-    c->duty = 0;
-    c->pending = false;
     memset(c->multi_duty, 0, sizeof(c->multi_duty));
     memset(c->multi_target, 0, sizeof(c->multi_target));
     c->multi_pending = 0;
@@ -70,10 +67,10 @@ void debug_control_init(debug_control_t *c, debug_hw_t hw)
     c->hw = hw;
     c->locked = !stop(c);
 }
-/** @brief 单路 RUN 或多路手动是否正在占用电机（含等待启动）。 */
+/** @brief 多路手动是否正在占用电机（含等待启动）。 */
 static bool manual_active(const debug_control_t *c)
 {
-    if (c->motor || c->pending || c->multi_pending)
+    if (c->multi_pending)
     {
         return true;
     }
@@ -204,13 +201,12 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         }
         if (c->hw.aux)
         {
-            c->hw.reply("CAPS LIGHT 1\r\nCAPS LINUX 1\r\nCAPS MOTOR_PWM 1\r\n");
+            c->hw.reply("CAPS LIGHT 1\r\nCAPS MOTOR_PWM 1\r\n");
         }
         return;
     }
     if (!strcmp(tokens[0], "MSET") || !strcmp(tokens[0], "MOFF") ||
-        !strcmp(tokens[0], "LSET") || !strcmp(tokens[0], "LMODE") ||
-        !strcmp(tokens[0], "LTX") || !strcmp(tokens[0], "MPWM"))
+        !strcmp(tokens[0], "LSET") || !strcmp(tokens[0], "MPWM"))
     {
         bool off = !strcmp(tokens[0], "MOFF");
         if (!off && !has_heartbeat(c, now))
@@ -257,18 +253,6 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
             {
                 debug_control_fault(c, "EVENT HARDWARE\r\n");
                 return;
-            }
-            /* Legacy RUN is exclusive. Manual arrays own outputs from here. */
-            if (c->motor || c->pending)
-            {
-                if (c->motor && !c->hw.run(c->motor - 1U, 0))
-                {
-                    debug_control_fault(c, "EVENT HARDWARE\r\n");
-                    return;
-                }
-                c->motor = 0;
-                c->duty = 0;
-                c->pending = false;
             }
             for (unsigned i = 0; i < MOTOR_COUNT; ++i)
             {
@@ -348,7 +332,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
                 answer(c, (unsigned)seq, "ERR", "LOCKED");
                 return;
             }
-            /* JMOVE 不打断其他关节的运动，只在单路或多路手动占用电机时
+            /* JMOVE 不打断其他关节的运动，只在多路手动占用电机时
              * 先全部停下接管；改标定、范围和参数仍先全部停下。 */
             bool move = !strcmp(tokens[0], "JMOVE");
             if ((!move || manual_active(c)) && !stop(c))
@@ -405,42 +389,8 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
         answer(c, (unsigned)seq, err ? "ERR" : "ACK", err ? err : tokens[0]);
         return;
     }
-    unsigned motor =
-        (n == 5) ? parse_motor_name(tokens[2], MOTOR_COUNT) : MOTOR_COUNT;
-    if (n != 5 || strcmp(tokens[0], "RUN") || motor >= MOTOR_COUNT ||
-        !number(tokens[3], -MOTOR_DUTY_SMALL_MAX, MOTOR_DUTY_SMALL_MAX,
-                &duty) ||
-        duty == 0 || !number(tokens[4], 0, MAX_DURATION_MS, &duration))
-    {
-        answer(c, (unsigned)seq, "ERR", "PARAM");
-        return;
-    }
-    if (!motor_duty_valid(motor, (int)duty))
-    {
-        answer(c, (unsigned)seq, "ERR", "DUTY_RANGE");
-        return;
-    }
-    if (!has_heartbeat(c, now))
-    {
-        answer(c, (unsigned)seq, "ERR", "NO_HEARTBEAT");
-        return;
-    }
-    if (c->locked || c->home)
-    {
-        answer(c, (unsigned)seq, "ERR", "LOCKED");
-        return;
-    }
-    if (!stop(c))
-    {
-        answer(c, (unsigned)seq, "ERR", "HARDWARE");
-        return;
-    }
-    c->pending_motor = motor + 1U;
-    c->pending_duty = (int)duty;
-    c->duration_ms = (uint32_t)duration;
-    c->pending_ms = now;
-    c->pending = true;
-    answer(c, (unsigned)seq, "ACK", "QUEUED");
+    /* 未知命令。 */
+    answer(c, (unsigned)seq, "ERR", "PARAM");
 }
 void debug_control_update(debug_control_t *c, uint32_t now, bool home)
 {
@@ -482,23 +432,5 @@ void debug_control_update(debug_control_t *c, uint32_t now, bool home)
                 c->multi_duty[i] = c->multi_target[i] = 0;
             }
         }
-    }
-    if (c->pending && !c->locked && !home &&
-        (uint32_t)(now - c->pending_ms) >= DEBUG_CONTROL_SETTLE_MS)
-    {
-        c->pending = false;
-        if (!c->hw.run(c->pending_motor - 1U, c->pending_duty))
-        {
-            debug_control_fault(c, "EVENT HARDWARE\r\n");
-            return;
-        }
-        c->motor = c->pending_motor;
-        c->duty = c->pending_duty;
-        c->start_ms = now;
-    }
-    if (c->motor && c->duration_ms &&
-        (uint32_t)(now - c->start_ms) >= c->duration_ms)
-    {
-        c->hw.reply(stop(c) ? "EVENT DONE\r\n" : "EVENT HARDWARE\r\n");
     }
 }

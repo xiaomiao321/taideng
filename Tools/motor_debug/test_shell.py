@@ -4,8 +4,8 @@ from shell_commands import parse_shell, complete
 class ShellTests(unittest.TestCase):
     def test_translation(self):
         cases = {
-            "motor M1 80 500": ("RUN", 1, 800, 500),
-            "motor m6 -80.5 0": ("RUN", 6, -805, 0),
+            "motor M1 80 500": ("MSET", 1, (800, 0, 0, 0, 0, 0, 0, 0), (500, 0, 0, 0, 0, 0, 0, 0)),
+            "motor m6 -80.5 0": ("MSET", 32, (0, 0, 0, 0, 0, -805, 0, 0), (0,) * 8),
             "lamp up1 50 1000": ("TEST", "LAMP_UP1", 500, 1000),
             "buzzer 2700 1000": ("TEST", "BUZZER", 2700, 1000),
             "power": ("TEST", "PWR", 0, 200),

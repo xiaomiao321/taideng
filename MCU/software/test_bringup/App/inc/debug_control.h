@@ -11,7 +11,7 @@
  * - 心跳超时、HOME 按下或硬件失败都会停止全部输出并锁定，
  *   只有显式 STOP ALL（且 HOME 已松开）才解锁；
  * - 电机启动前先停 DEBUG_CONTROL_SETTLE_MS，避免带电直接换向。
- * - JMOVE 可让多个关节同时运动，不打断其他关节；单路或多路手动占用电机时，
+ * - JMOVE 可让多个关节同时运动，不打断其他关节；多路手动占用电机时，
  *   JMOVE 先全部停下再接管。
  */
 
@@ -49,31 +49,22 @@ typedef struct
                          const int32_t *values, unsigned count, uint32_t now);
     /** @brief 进入多路手动控制前取消其他控制者；返回 false 表示硬件失败。 */
     bool (*manual)(void);
-    /** @brief 其他命令（LSET、LMODE、LTX、MPWM）；返回 NULL 或错误名。 */
+    /** @brief 其他命令（LSET、MPWM）；返回 NULL 或错误名。 */
     const char *(*aux)(const char *op, const char *const *args, unsigned count);
 } debug_hw_t;
 
 /**
  * @brief 控制状态。调用者只读，不得直接修改。
  *
- * 单路 RUN 命令的 motor 与 pending_motor 是文本协议里的 M 编号（1～8），
- * 0 表示没有；多路数组的下标是 0 起的电机下标。
+ * 多路数组的下标是 0 起的电机下标。
  */
 typedef struct
 {
     debug_hw_t hw;
     uint32_t heartbeat_ms;         /**< 最近一次 PING 的时刻。 */
-    uint32_t start_ms;             /**< 单路电机开始转动的时刻。 */
-    uint32_t duration_ms;          /**< 单路电机持续时间，0 表示不限时。 */
-    uint32_t pending_ms;           /**< 单路命令排队的时刻。 */
-    unsigned motor;                /**< 正在转的单路电机 M 编号，0 表示没有。 */
-    unsigned pending_motor;        /**< 等待启动的单路电机 M 编号。 */
-    int duty;                      /**< 单路电机当前占空比。 */
-    int pending_duty;              /**< 单路电机待启动的占空比。 */
     bool linked;                   /**< 心跳有效。 */
     bool locked;                   /**< 已锁定，需 STOP ALL 解锁。 */
     bool home;                     /**< HOME 键当前是否按下。 */
-    bool pending;                  /**< 有单路命令在等待启动。 */
     int multi_duty[MOTOR_COUNT];   /**< 多路手动：当前占空比。 */
     int multi_target[MOTOR_COUNT]; /**< 多路手动：目标占空比。 */
     uint32_t multi_start[MOTOR_COUNT];    /**< 多路手动：开始转动时刻。 */

@@ -22,8 +22,7 @@ class FakeSerial:
         with self.lock:
             self.writes.append(parts)
             if parts[0] != self.omit:
-                result = "QUEUED" if parts[0] == "RUN" else parts[0]
-                self.buf.extend(f"ACK {parts[1]} {result}\r\n".encode())
+                self.buf.extend(f"ACK {parts[1]} {parts[0]}\r\n".encode())
                 if parts[0] == "STOP":
                     self.buf.extend(b"STATE 123 0 0 0 0\r\nPOT 123 1 2 3 4 5 6\r\n")
         return len(data)
@@ -37,6 +36,11 @@ class FakeSerial:
 
     def close(self):
         self.closed = True
+
+
+# MSET 参数：掩码、八路占空比、八路时长。
+M1_REVERSE = (1, (-800, 0, 0, 0, 0, 0, 0, 0), (500,) + (0,) * 7)
+M8_FORWARD = (128, (0, 0, 0, 0, 0, 0, 0, 800), (0,) * 8)
 
 
 def wait_event(events, kind, timeout=2):
@@ -59,11 +63,11 @@ class SerialTests(unittest.TestCase):
             worker.start()
             try:
                 wait_event(events, "connected")
-                worker.submit("RUN", 1, -800, 500)
+                worker.submit("MSET", *M1_REVERSE)
                 end = time.monotonic() + 1
-                while not any(w[0] == "RUN" for w in fake.writes) and time.monotonic() < end:
+                while not any(w[0] == "MSET" for w in fake.writes) and time.monotonic() < end:
                     time.sleep(.01)
-                self.assertEqual(sum(w[0] == "RUN" for w in fake.writes), 1)
+                self.assertEqual(sum(w[0] == "MSET" for w in fake.writes), 1)
             finally:
                 worker.quit.set()
                 worker.join(2)
@@ -82,18 +86,18 @@ class SerialTests(unittest.TestCase):
             self.assertFalse(worker.is_alive())
             self.assertTrue(fake.closed)
             self.assertEqual(fake.writes[-1][0], "STOP")
-            self.assertFalse(any(w[0] == "RUN" for w in fake.writes))
+            self.assertFalse(any(w[0] == "MSET" for w in fake.writes))
 
-    def test_run_not_retried_on_lost_ack(self):
-        fake, events = FakeSerial(omit="RUN"), queue.Queue()
+    def test_motor_command_not_retried_on_lost_ack(self):
+        fake, events = FakeSerial(omit="MSET"), queue.Queue()
         with patch("serial.Serial", return_value=fake):
             worker = SerialWorker("FAKE", events)
             worker.start()
             wait_event(events, "connected")
-            worker.submit("RUN", 8, 800, 0)
+            worker.submit("MSET", *M8_FORWARD)
             wait_event(events, "error")
             worker.join(2)
-            self.assertEqual(sum(w[0] == "RUN" for w in fake.writes), 1)
+            self.assertEqual(sum(w[0] == "MSET" for w in fake.writes), 1)
             self.assertEqual(fake.writes[-1][0], "STOP")
 
 

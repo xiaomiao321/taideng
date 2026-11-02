@@ -26,16 +26,14 @@ class MultiTests(unittest.TestCase):
         for text in ("nan", "inf", "-1", "100.1", "50.01"):
             with self.assertRaises(ValueError): pwm(text)
 
-    def test_states_and_bridge(self):
+    def test_states(self):
         line = "MSTATE 100 500 -600 0 0 0 0 800 -800 100 200 0 0 0 0 0 0 4 0"
         state = parse(line)
         self.assertEqual(state[0], "MSTATE")
         self.assertEqual(state[2], (500, -600, 0, 0, 0, 0, 800, -800))
         self.assertEqual(state[4], 4)
-        self.assertEqual(parse("LSTATE 100 0 10 20 30 40 50 1000 1")[3], True)
-        self.assertEqual(command("LTX", 3, duty=b"\x00\xff\n"), "LTX 3 00FF0A\n")
-        self.assertEqual(parse("LRX 00FF0A"), ("LRX", b"\x00\xff\n"))
-        for bad in ("LRX GG", "LSTATE 1 0 0 0 0 0 0 1001 0", line.replace(" 4 0", " 256 0")):
+        self.assertEqual(parse("LSTATE 100 0 10 20 30 40 50 1000"), ("LSTATE", 100, (0, 10, 20, 30, 40, 50, 1000)))
+        for bad in ("LSTATE 1 0 0 0 0 0 0 1001", line.replace(" 4 0", " 256 0")):
             self.assertEqual(parse(bad)[0], "BAD")
 
 

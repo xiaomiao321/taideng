@@ -4,7 +4,6 @@
  *
  * 命令解析和安全规则在 debug_control，全板测试在 debug_board，电位器采样和
  * 关节闭环在 joint_service；本文件只负责把它们的回调接到 BSP，并按行收发文本。
- * USART1 可切换为透传模式（LMODE 1），把 Linux 串口的字节转发给上位机。
  */
 
 #include "debug_console.h"
@@ -20,7 +19,6 @@
 #include "bsp_led.h"
 #include "bsp_light.h"
 #include "bsp_linux_power.h"
-#include "bsp_linux_uart.h"
 #include "bsp_motor.h"
 #include "debug_board.h"
 #include "debug_control.h"
@@ -40,15 +38,6 @@ _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
 /** @brief 单次六路 ADC 扫描的等待超时，单位毫秒。 */
 #define ADC_TIMEOUT_MS (5U)
 
-/** @brief 一行 LRX 最多携带的透传字节数。 */
-#define LINUX_RX_BYTES_PER_LINE (32U)
-
-/** @brief LTX 一次最多发送的字节数。 */
-#define LINUX_TX_MAX_BYTES (48U)
-
-/** @brief LTX 发送超时，单位毫秒。 */
-#define LINUX_TX_TIMEOUT_MS (10U)
-
 /** @brief 状态行的最大长度。 */
 #define STATUS_LINE_MAX (192U)
 
@@ -60,7 +49,6 @@ static bool s_is_initialized = false;
 static bool s_is_light_ok = false;
 static bool s_is_buzzer_ok = false;
 static bool s_is_power_ok = false;
-static bool s_is_linux_ok = false;
 
 static debug_control_t s_control;
 static debug_board_t s_board;
@@ -81,10 +69,6 @@ static uint32_t s_seen_rx_errors = 0U;
 static uint32_t s_seen_rx_overflows = 0U;
 /** @brief USART3 发送失败次数，仅供调试器查看。 */
 static uint32_t s_tx_error_count = 0U;
-
-/** @brief 已处理过的 USART1 透传错误和溢出计数。 */
-static uint32_t s_seen_linux_errors = 0U;
-static uint32_t s_seen_linux_overflows = 0U;
 
 /** @brief JTRACE 打开时每次采样上报一行 JT。 */
 static bool s_is_trace_on = false;
@@ -180,13 +164,9 @@ static bool outputs_off(void)
     return ok;
 }
 
-/** @brief 全部停止：关透传、取消关节运动和全板测试、关闭全部输出。 */
+/** @brief 全部停止：取消关节运动和全板测试、关闭全部输出。 */
 static bool stop_all(void)
 {
-    if (s_is_linux_ok)
-    {
-        (void)bsp_linux_uart_stream_stop();
-    }
     bool ok = joint_cancel(s_joints);
     debug_board_cancel(&s_board);
     return outputs_off() && ok;
@@ -253,23 +233,6 @@ static bool manual_control(void)
     return joint_cancel(s_joints);
 }
 
-static int hex_digit(char ch)
-{
-    if (ch >= '0' && ch <= '9')
-    {
-        return ch - '0';
-    }
-    if (ch >= 'a' && ch <= 'f')
-    {
-        return ch - 'a' + 10;
-    }
-    if (ch >= 'A' && ch <= 'F')
-    {
-        return ch - 'A' + 10;
-    }
-    return -1;
-}
-
 /** @brief LSET：一次设定全部灯板通道的占空比。 */
 static const char *set_lamps(const char *const *args, unsigned count)
 {
@@ -315,58 +278,6 @@ static const char *set_lamps(const char *const *args, unsigned count)
         s_lamp_duty[i] = values[i];
     }
     return NULL;
-}
-
-/** @brief LMODE：开关 USART1 透传。 */
-static const char *set_linux_mode(const char *const *args, unsigned count)
-{
-    if (count != 1 || (strcmp(args[0], "0") && strcmp(args[0], "1")))
-    {
-        return "PARAM";
-    }
-    if (bsp_linux_uart_stream_stop() != BSP_OK)
-    {
-        return "LINUX_RX_ERROR";
-    }
-    if (args[0][0] == '1')
-    {
-        if (bsp_linux_uart_stream_start() != BSP_OK)
-        {
-            return "LINUX_RX_ERROR";
-        }
-        s_seen_linux_errors = bsp_linux_uart_stream_error_count();
-        s_seen_linux_overflows = bsp_linux_uart_stream_overflow_count();
-    }
-    return NULL;
-}
-
-/** @brief LTX：把十六进制参数解码后从 USART1 发出。 */
-static const char *send_linux_hex(const char *const *args, unsigned count)
-{
-    uint8_t data[LINUX_TX_MAX_BYTES];
-    if (!bsp_linux_uart_stream_is_active())
-    {
-        return "BRIDGE_OFF";
-    }
-    size_t length = (count == 1) ? strlen(args[0]) : 0U;
-    if (length == 0U || length > sizeof(data) * 2U || (length % 2U) != 0U)
-    {
-        return "HEX_PARAM";
-    }
-    size_t size = length / 2U;
-    for (size_t i = 0; i < size; ++i)
-    {
-        int high = hex_digit(args[0][i * 2U]);
-        int low = hex_digit(args[0][i * 2U + 1U]);
-        if (high < 0 || low < 0)
-        {
-            return "HEX_PARAM";
-        }
-        data[i] = (uint8_t)((high << 4) | low);
-    }
-    return (bsp_linux_uart_write(data, size, LINUX_TX_TIMEOUT_MS) == BSP_OK)
-               ? NULL
-               : "LINUX_TX_ERROR";
 }
 
 /** @brief MPWM：无参数时查询，否则设置电机 PWM 频率（kHz）和衰减方式。 */
@@ -425,18 +336,6 @@ static const char *aux_command(const char *op, const char *const *args,
     if (!strcmp(op, "MPWM"))
     {
         return set_motor_pwm(args, count);
-    }
-    if (!s_is_linux_ok)
-    {
-        return "LINUX_UNAVAILABLE";
-    }
-    if (!strcmp(op, "LMODE"))
-    {
-        return set_linux_mode(args, count);
-    }
-    if (!strcmp(op, "LTX"))
-    {
-        return send_linux_hex(args, count);
     }
     return "UNSUPPORTED";
 }
@@ -695,50 +594,6 @@ static void check_control(void)
     }
 }
 
-/** @brief 处理 USART1 透传：报告错误和溢出，把收到的字节以 LRX 行转发。 */
-static void linux_update(void)
-{
-    if (!s_is_linux_ok || !bsp_linux_uart_stream_is_active())
-    {
-        return;
-    }
-    if (bsp_linux_uart_stream_update() != BSP_OK)
-    {
-        (void)bsp_linux_uart_stream_stop();
-    }
-    uint32_t errors = bsp_linux_uart_stream_error_count();
-    if (errors != s_seen_linux_errors)
-    {
-        s_seen_linux_errors = errors;
-        (void)send_line("LERR RX_ERROR\r\n");
-    }
-    uint32_t overflows = bsp_linux_uart_stream_overflow_count();
-    if (overflows != s_seen_linux_overflows)
-    {
-        s_seen_linux_overflows = overflows;
-        (void)send_line("LERR RX_OVERFLOW\r\n");
-    }
-
-    static const char digits[] = "0123456789ABCDEF";
-    char out[sizeof("LRX ") + 2U * LINUX_RX_BYTES_PER_LINE + sizeof("\r\n")] =
-        "LRX ";
-    size_t n = sizeof("LRX ") - 1U;
-    uint8_t value;
-    for (unsigned i = 0;
-         i < LINUX_RX_BYTES_PER_LINE && bsp_linux_uart_stream_read(&value); ++i)
-    {
-        out[n++] = digits[value >> 4];
-        out[n++] = digits[value & 0x0FU];
-    }
-    if (n > sizeof("LRX ") - 1U)
-    {
-        out[n++] = '\r';
-        out[n++] = '\n';
-        out[n] = '\0';
-        (void)send_line(out);
-    }
-}
-
 /** @brief 处理 USART3 接收错误：丢弃缓冲和当前行，停机锁定。 */
 static void check_console_rx(void)
 {
@@ -807,14 +662,13 @@ static void process_console_rx(void)
  * @param[out] duty 占空比。
  * @param[out] is_pending 是否有电机在等待启动。
  *
- * @note 优先级：关节运动 > 全板电机测试 > 多路手动 > 单路 RUN。
+ * @note 优先级：关节运动 > 全板电机测试 > 多路手动。
  *       多个关节同时运动时报告编号最小的一个；各路占空比见 MSTATE。
  */
 static void active_motor(unsigned *motor, int *duty, bool *is_pending)
 {
-    *motor = s_control.motor;
-    *duty = s_control.duty;
-    *is_pending = s_control.pending;
+    *motor = 0U;
+    *duty = 0;
     for (unsigned i = 0; i < MOTOR_COUNT; ++i)
     {
         if (s_control.multi_duty[i])
@@ -823,7 +677,7 @@ static void active_motor(unsigned *motor, int *duty, bool *is_pending)
             *duty = s_control.multi_duty[i];
         }
     }
-    *is_pending = *is_pending || s_control.multi_pending != 0U;
+    *is_pending = s_control.multi_pending != 0U;
     if (s_board.kind == BOARD_MOTOR && s_board.phase == BOARD_DRIVE)
     {
         *motor = s_board.index + 1U;
@@ -933,8 +787,7 @@ static void report_status(uint32_t now)
     {
         append(out, sizeof(out), &used, " %u", lights[i]);
     }
-    append(out, sizeof(out), &used, " %u\r\n",
-           (unsigned)bsp_linux_uart_stream_is_active());
+    append(out, sizeof(out), &used, "\r\n");
     (void)send_line(out);
     check_control();
 
@@ -969,7 +822,7 @@ static void report_status(uint32_t now)
  * @brief JTRACE 打开时，每个新采样上报一行焦点关节的数据：
  *        JT 采样时刻 M编号 读数 极差 角度 目标 占空比 制动 阶段。
  *
- * @note 占空比取 H 桥最近一次设定值，RUN、MSET 开环驱动时也有效；
+ * @note 占空比取 H 桥最近一次设定值，MSET 开环驱动时也有效；
  *       115200 波特率下一行约 4ms，与周期状态合计约占带宽七成。
  */
 static void report_trace(void)
@@ -1014,7 +867,6 @@ void debug_console_init(void)
     /* 在串口开始接收、看门狗启动之前加载：可能要擦除备用扇区，阻塞约 2 秒。 */
     unsigned restored = joint_service_init(reply_line);
     s_joints = joint_service_joints();
-    s_is_linux_ok = bsp_linux_uart_init() == BSP_OK;
     debug_hw_t hw = {
         .stop = stop_all,
         .run = run_motor,
@@ -1050,7 +902,6 @@ void debug_console_update(void)
         return;
     }
     check_control();
-    linux_update();
     check_console_rx();
     process_console_rx();
     check_control();
