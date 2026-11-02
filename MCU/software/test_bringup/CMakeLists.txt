@@ -42,19 +42,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# FreeRTOS kernel (vendor code, built with the toolchain's default warnings)
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/tasks.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/queue.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/list.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/timers.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/event_groups.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/stream_buffer.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/port.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Src/heap_4.c
-)
-
-# Hand-written sources: HAL callback dispatch, BSP, protocol, application, tests
+# Hand-written sources: HAL callback dispatch, BSP, protocol, application
 set(AITAID_SOURCES
     # HAL 弱回调的唯一实现位置（集成层，非 CubeMX 管理）
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/hal_callback_dispatch.c
@@ -86,21 +74,17 @@ set(AITAID_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_service.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/chassis.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Src/bringup_cases.c
 )
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${AITAID_SOURCES})
-# 只对手写代码加严警告；CubeMX、HAL 和 FreeRTOS 保持厂商原样，不加。
+# 只对手写代码加严警告；CubeMX 和 HAL 保持厂商原样，不加。
 set_source_files_properties(${AITAID_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wextra")
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/FreeRTOS/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/Config
     ${CMAKE_CURRENT_SOURCE_DIR}/App/inc
     ${CMAKE_CURRENT_SOURCE_DIR}/BSP/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/Inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/Tests/Inc
 )
 
 # Add project symbols (macros)

@@ -67,46 +67,6 @@ bsp_status_t bsp_log_write_string(const char *message)
     return bsp_log_write((const uint8_t *)message, length);
 }
 
-bsp_status_t bsp_log_printf(const char *format, ...)
-{
-    char buffer[BSP_LOG_BUFFER_SIZE];
-    va_list args;
-    int length;
-
-    if (s_is_log_initialized == false)
-    {
-        return BSP_ERR_NOT_INITIALIZED;
-    }
-    /* 检查格式字符串 */
-    if (format == NULL || format[0] == '\0')
-    {
-        return BSP_ERR_PARAM;
-    }
-
-    /* 获取可变参数并格式化到buffer */
-    va_start(args, format);
-    length = vsnprintf(buffer, sizeof(buffer), format, args);
-    va_end(args);
-
-    /* 检查格式化结果 */
-    if (length < 0)
-    {
-        return BSP_ERR_PARAM;
-    }
-
-    if ((size_t)length >= sizeof(buffer))
-    {
-        return BSP_ERR_BUFFER_TOO_SMALL;
-    }
-    if (length == 0)
-    {
-        return BSP_OK; /* 格式化结果为空，不发送 */
-    }
-
-    /* 发送字符串 */
-    return bsp_log_write((const uint8_t *)buffer, (size_t)length);
-}
-
 bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
                            ...)
 {

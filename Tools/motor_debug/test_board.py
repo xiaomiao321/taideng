@@ -6,11 +6,11 @@ from protocol import command, parse
 from board_panel import BoardPanel
 
 class BoardTests(unittest.TestCase):
-    def test_catalog_matches_firmware_bringup_table(self):
+    def test_catalog_matches_firmware_board_table(self):
         root = Path(__file__).resolve().parents[2]
-        src = (root / "MCU/software/test_bringup/Tests/Src/bringup_cases.c").read_text(encoding="utf-8")
-        table = src.split("g_bringup_cases[] =", 1)[1]
-        names = re.findall(r'\{"([A-Z0-9_]+)",', table)
+        src = (root / "MCU/software/test_bringup/App/src/debug_board.c").read_text(encoding="utf-8")
+        table = src.split("debug_board_names[DEBUG_BOARD_TEST_COUNT] = {", 1)[1].split("};", 1)[0]
+        names = re.findall(r'"([A-Z0-9_]+)"', table)
         self.assertEqual([case.name for case in CASES], names)
         self.assertEqual(len(names), 29)
 

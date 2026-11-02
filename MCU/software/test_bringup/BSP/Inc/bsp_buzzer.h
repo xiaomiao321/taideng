@@ -53,16 +53,4 @@ bsp_status_t bsp_buzzer_start(uint32_t frequency_hz);
  */
 bsp_status_t bsp_buzzer_stop(void);
 
-/**
- * @brief 获取蜂鸣器的软件运行状态。
- *
- * @param[out] is_active 用于接收蜂鸣器状态；true 表示 PWM 正在输出。
- *
- * @return bsp_status_t 查询结果。
- * @retval BSP_OK 查询成功。
- * @retval BSP_ERR_NOT_INITIALIZED BSP 未初始化。
- * @retval BSP_ERR_PARAM is_active 为空指针。
- */
-bsp_status_t bsp_buzzer_get_state(bool *is_active);
-
 #endif /* AITAID_BSP_BUZZER_H */

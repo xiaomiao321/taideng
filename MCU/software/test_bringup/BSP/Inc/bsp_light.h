@@ -64,13 +64,4 @@ bsp_status_t bsp_light_set_duty(bsp_light_id_t light_id,
  */
 bsp_status_t bsp_light_stop(bsp_light_id_t light_id);
 
-/**
- * @brief 取得某一路的底层通道句柄，供需要直接操作时使用。
- *
- * @param[in] light_id 灯板逻辑编号。
- *
- * @return 指向该路 bsp_light_pwm_t 的指针；模块未初始化或灯号无效时返回 NULL。
- */
-bsp_light_pwm_t *bsp_light_handle(bsp_light_id_t light_id);
-
 #endif /* AITAID_BSP_LIGHT_H */

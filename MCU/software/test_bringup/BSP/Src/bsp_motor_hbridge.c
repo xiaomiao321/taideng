@@ -184,28 +184,3 @@ bsp_status_t bsp_motor_hbridge_get_duty(const bsp_motor_hbridge_t *self,
     *duty_permille = self->duty_permille;
     return BSP_OK;
 }
-
-bsp_status_t bsp_motor_hbridge_deinit(bsp_motor_hbridge_t *self)
-{
-    if (self == NULL)
-    {
-        return BSP_ERR_PARAM;
-    }
-    if (!self->is_initialized)
-    {
-        return BSP_ERR_NOT_INITIALIZED;
-    }
-
-    __HAL_TIM_SET_COMPARE(self->htim, self->channel_fi, 0U);
-    __HAL_TIM_SET_COMPARE(self->htim, self->channel_bi, 0U);
-    if ((HAL_TIM_PWM_Stop(self->htim, self->channel_fi) != HAL_OK) ||
-        (HAL_TIM_PWM_Stop(self->htim, self->channel_bi) != HAL_OK))
-    {
-        return BSP_ERR_HAL;
-    }
-
-    self->is_initialized = false;
-    self->htim = NULL;
-    self->duty_permille = 0;
-    return BSP_OK;
-}

@@ -73,12 +73,3 @@ bsp_status_t bsp_light_stop(bsp_light_id_t light_id)
     }
     return bsp_light_pwm_stop(&s_lights[light_id]);
 }
-
-bsp_light_pwm_t *bsp_light_handle(bsp_light_id_t light_id)
-{
-    if (!s_is_initialized || !is_valid_id(light_id))
-    {
-        return NULL;
-    }
-    return &s_lights[light_id];
-}

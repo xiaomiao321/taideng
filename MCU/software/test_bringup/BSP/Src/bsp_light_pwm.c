@@ -83,29 +83,3 @@ bsp_status_t bsp_light_pwm_stop(bsp_light_pwm_t *self)
     __HAL_TIM_SET_COMPARE(self->htim, self->channel, 0U);
     return BSP_OK;
 }
-
-bsp_status_t bsp_light_pwm_deinit(bsp_light_pwm_t *self)
-{
-    if (self == NULL)
-    {
-        return BSP_ERR_PARAM;
-    }
-    if (!self->is_initialized)
-    {
-        return BSP_ERR_NOT_INITIALIZED;
-    }
-
-    if (self->is_started)
-    {
-        if (HAL_TIM_PWM_Stop(self->htim, self->channel) != HAL_OK)
-        {
-            return BSP_ERR_HAL;
-        }
-        self->is_started = false;
-    }
-
-    __HAL_TIM_SET_COMPARE(self->htim, self->channel, 0U);
-    self->is_initialized = false;
-    self->htim = NULL;
-    return BSP_OK;
-}

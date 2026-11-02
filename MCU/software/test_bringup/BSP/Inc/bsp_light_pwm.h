@@ -101,19 +101,4 @@ bsp_status_t bsp_light_pwm_set_duty(bsp_light_pwm_t *self,
  */
 bsp_status_t bsp_light_pwm_stop(bsp_light_pwm_t *self);
 
-/**
- * @brief 停止本路 PWM 输出并解除绑定。
- *
- * @param[in,out] self 已初始化的通道句柄，不允许为 NULL。
- *
- * @retval BSP_OK 已停止并解除绑定。
- * @retval BSP_ERR_PARAM self 为 NULL。
- * @retval BSP_ERR_NOT_INITIALIZED 本实例尚未初始化。
- * @retval BSP_ERR_HAL 停止 PWM 通道失败，本实例保持可用。
- *
- * @note 已启动时调用 HAL_TIM_PWM_Stop()，随后把 CCR 置零并清除初始化标志。
- *       不影响同一定时器的其他通道。
- */
-bsp_status_t bsp_light_pwm_deinit(bsp_light_pwm_t *self);
-
 #endif /* AITAID_BSP_LIGHT_PWM_H */

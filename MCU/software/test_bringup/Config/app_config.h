@@ -20,9 +20,8 @@
 /* -------------------------------------------------------------------------- */
 
 #define APP_MODE_DEBUG (0) /**< USART3 上位机 / 终端，开放全部功能。 */
-#define APP_MODE_BOARD (1) /**< 按 HOME 启动全板测试。 */
-#define APP_MODE_ANDROID                                                       \
-    (2) /**< USART1 二进制 Android 协议，USART3 只出日志。 */
+/** @brief USART1 二进制 Android 协议，USART3 只出日志；取值 2 沿用旧编号。 */
+#define APP_MODE_ANDROID (2)
 
 /** @brief 固件入口；编译时也可用 -DAPP_MODE=... 覆盖。 */
 #ifndef APP_MODE
@@ -33,7 +32,7 @@
  * @brief 独立看门狗标称超时，单位毫秒。
  *
  * 主循环单次最长阻塞约 100ms（串口限时发送），LSI 最快时实际超时约为标称值
- * 的 0.68 倍，仍有充足余量。BOARD 模式的测试用例会阻塞等待人工确认，不启用。
+ * 的 0.68 倍，仍有充足余量。
  */
 #define APP_WATCHDOG_TIMEOUT_MS (1000U)
 

@@ -75,27 +75,6 @@ bsp_status_t bsp_log_write(const uint8_t *data, size_t length);
 bsp_status_t bsp_log_write_string(const char *message);
 
 /**
- * @brief 将 printf 风格的消息格式化后，通过调试串口阻塞发送。
- *
- * @param[in] format 格式字符串，不允许为 NULL 或空字符串。
- * @param[in] ... 与格式字符串匹配的可变参数。
- *
- * @retval BSP_OK 发送成功，或格式化结果为空且无须发送。
- * @retval BSP_ERR_NOT_INITIALIZED 日志模块尚未初始化。
- * @retval BSP_ERR_PARAM 格式字符串无效，或格式化函数返回错误。
- * @retval BSP_ERR_BUFFER_TOO_SMALL 格式化结果超长，整条消息不发送。
- * @retval BSP_BUSY UART 当前忙。
- * @retval BSP_ERR_TIMEOUT UART 发送超时。
- * @retval BSP_ERR_HAL UART 发生其他发送错误。
- *
- * @note 使用 256 字节缓冲区，最多发送 255 字节，不发送末尾的空字符。
- * @note 本函数不自动添加换行，调用者按需在格式字符串中添加换行。
- * @warning 本函数为阻塞接口，不能从中断服务程序调用。
- * @warning 当前版本不保证多任务并发调用安全。
- */
-bsp_status_t bsp_log_printf(const char *format, ...);
-
-/**
  * @brief 输出带时间戳、等级和模块标签的单行格式化日志。
  *
  * @param[in] level 日志等级，仅接受 LOG_LEVEL_ERROR 至 LOG_LEVEL_DEBUG。
@@ -120,7 +99,7 @@ bsp_status_t bsp_log_printf(const char *format, ...);
  *       必须为末尾空字符预留空间；发送时不包含该空字符。
  * @note 正文格式化结果为空时，仍输出前缀和 CRLF。
  * @note 等级过滤仅作用于分级日志；bsp_log_write()、
- *       bsp_log_write_string() 和 bsp_log_printf() 本身不受等级限制。
+ *       bsp_log_write_string() 本身不受等级限制。
  * @warning 本函数为阻塞接口，不能从中断服务程序调用。
  * @warning 当前版本不保证多任务并发调用安全。
  */

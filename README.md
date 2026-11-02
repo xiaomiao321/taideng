@@ -1,8 +1,8 @@
 # AI 台灯：电机与灯光主控板、固件与调试工具
 
-X·Lab 台灯形态教育陪伴机器人工程样机的机电控制部分。本仓库包含 STM32F407 主控板的硬件设计、FreeRTOS 固件、PC 端调试上位机，以及早期的电源板和电机驱动实验代码。主控板 V1.0 已打样、焊接并完成上电调试，固件在实板上运行。
+X·Lab 台灯形态教育陪伴机器人工程样机的机电控制部分。本仓库包含 STM32F407 主控板的硬件设计、裸机固件、PC 端调试上位机，以及早期的电源板和电机驱动实验代码。主控板 V1.0 已打样、焊接并完成上电调试，固件在实板上运行。
 
-Motor and lighting controller for a lamp-shaped companion robot prototype: a 4-layer STM32F407 board driving 8 DC motors with potentiometer feedback and 7 lamp PWM channels, a FreeRTOS firmware with a binary UART protocol to the Linux/Android main board, and a Python debug tool. Designed in EasyEDA Pro.
+Motor and lighting controller for a lamp-shaped companion robot prototype: a 4-layer STM32F407 board driving 8 DC motors with potentiometer feedback and 7 lamp PWM channels, a bare-metal firmware with a binary UART protocol to the Linux/Android main board, and a Python debug tool. Designed in EasyEDA Pro.
 
 ![主控板顶层](MCU/hardware/PCB/顶层_3D.png)
 ![主控板底层](MCU/hardware/PCB/底层_3D.png)
@@ -36,9 +36,9 @@ Motor and lighting controller for a lamp-shaped companion robot prototype: a 4-l
 
 ## 固件
 
-`MCU/software/test_bringup/`，STM32CubeMX 生成外设初始化，CMake 构建，FreeRTOS。
+`MCU/software/test_bringup/`，STM32CubeMX 生成外设初始化，CMake 构建，裸机主循环，不用 RTOS。
 
-- 分层：`BSP/` 外设驱动（电机 H 桥、灯光 PWM、ADC、按键、蜂鸣器、看门狗、串口流、参数 Flash、Flash 日志）；`Protocol/` 帧解析与命令层；`App/` 应用、调试控制台、板级测试、关节控制；`Tests/` 按测试表组织的 bring-up 测试运行器。
+- 分层：`BSP/` 外设驱动（电机 H 桥、灯光 PWM、ADC、按键、蜂鸣器、看门狗、串口流、参数 Flash、Flash 日志）；`Protocol/` 帧解析与命令层；`App/` 应用、调试控制台、板级测试、关节控制。
 - 与主控板的二进制串口协议：帧头、版本、CRC16，分包与粘包处理，重复帧去重，超时与错误恢复。
 - 关节标定：电位器参数加单个参考点的理论标定，每关节独立的允许运动范围，标定结果存片内 Flash 并上电自动恢复。
 - 安全：独立看门狗；异常、急停、心跳超时时全输出停止，需显式解锁。

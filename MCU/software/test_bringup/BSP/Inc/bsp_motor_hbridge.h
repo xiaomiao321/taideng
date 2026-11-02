@@ -152,16 +152,4 @@ bsp_status_t bsp_motor_hbridge_brake(bsp_motor_hbridge_t *self);
 bsp_status_t bsp_motor_hbridge_get_duty(const bsp_motor_hbridge_t *self,
                                         int16_t *duty_permille);
 
-/**
- * @brief 两路归零、停止 PWM 通道并解除绑定。
- *
- * @param[in,out] self 已初始化的 H 桥句柄，不允许为 NULL。
- *
- * @retval BSP_OK 已停止并解除绑定。
- * @retval BSP_ERR_PARAM self 为 NULL。
- * @retval BSP_ERR_NOT_INITIALIZED 本实例尚未初始化。
- * @retval BSP_ERR_HAL 停止 PWM 通道失败，本实例保持可用。
- */
-bsp_status_t bsp_motor_hbridge_deinit(bsp_motor_hbridge_t *self);
-
 #endif /* AITAID_BSP_MOTOR_HBRIDGE_H */

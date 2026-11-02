@@ -49,25 +49,4 @@ bsp_status_t bsp_led_init(void);
  */
 bsp_status_t bsp_led_set(bsp_led_id_t led_id, bool is_on);
 
-/**
- * @brief 翻转指定 LED 的逻辑亮灭状态。
- *
- * @param[in] led_id LED 逻辑编号。
- *
- * @retval BSP_OK 翻转成功。
- * @retval BSP_ERR_PARAM LED 编号无效。
- */
-bsp_status_t bsp_led_toggle(bsp_led_id_t led_id);
-
-/**
- * @brief 读取指定 LED 当前的逻辑亮灭状态。
- *
- * @param[in] led_id LED 逻辑编号。
- * @param[out] is_on 接收 LED 状态；`true` 表示点亮，`false` 表示熄灭。
- *
- * @retval BSP_OK 读取成功。
- * @retval BSP_ERR_PARAM LED 编号无效，或 `is_on` 为 NULL。
- */
-bsp_status_t bsp_led_get_state(bsp_led_id_t led_id, bool *is_on);
-
 #endif /* AITAID_BSP_LED_H */

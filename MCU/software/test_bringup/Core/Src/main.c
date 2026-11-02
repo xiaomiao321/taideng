@@ -28,10 +28,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_config.h"
-#include "bringup_test.h"
 #include "app_main.h"
 #include "bsp_common.h"
-#include "bsp_key.h"
 #include "bsp_led.h"
 #include "bsp_log.h"
 #include "bsp_motor.h"
@@ -49,8 +47,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* 运行模式 APP_MODE 与看门狗超时在 Config/app_config.h 中修改。 */
-#if (APP_MODE != APP_MODE_DEBUG) && (APP_MODE != APP_MODE_BOARD) && (APP_MODE != APP_MODE_ANDROID)
-#error "Invalid APP_MODE: use APP_MODE_DEBUG, APP_MODE_BOARD or APP_MODE_ANDROID"
+#if (APP_MODE != APP_MODE_DEBUG) && (APP_MODE != APP_MODE_ANDROID)
+#error "Invalid APP_MODE: use APP_MODE_DEBUG or APP_MODE_ANDROID"
 #endif
 
 /* USER CODE END PD */
@@ -130,25 +128,16 @@ int main(void)
     {
         LOG_WARN("MAIN", "last reset was caused by the watchdog");
     }
-#if APP_MODE == APP_MODE_BOARD
-    if ((bsp_key_init() != BSP_OK) || (bsp_motor_init() != BSP_OK))
-    {
-        Error_Handler();
-    }
-    LOG_INFO("TEST",
-             "board test ready; HOME to start; motor jogs at 80%% for 500ms");
-#elif APP_MODE == APP_MODE_ANDROID
+#if APP_MODE == APP_MODE_ANDROID
     app_init();
 #else
     debug_console_init();
 #endif
-#if APP_MODE != APP_MODE_BOARD
     /* 初始化完成后再启动，初始化过程中的阻塞不计入看门狗超时。 */
     if (bsp_watchdog_start(APP_WATCHDOG_TIMEOUT_MS) != BSP_OK)
     {
         Error_Handler();
     }
-#endif
 
     /* USER CODE END 2 */
 
@@ -156,19 +145,7 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-#if APP_MODE == APP_MODE_BOARD
-        LOG_INFO("TEST", "press HOME to start one board test round");
-        while (bringup_confirm(BRINGUP_CONFIRM_TIMEOUT_MS) != TEST_PASS)
-        {
-            HAL_Delay(5U);
-        }
-        bringup_run_all();
-        if (bsp_motor_stop_all() != BSP_OK)
-        {
-            Error_Handler();
-        }
-        LOG_INFO("TEST", "round finished; motors stopped");
-#elif APP_MODE == APP_MODE_ANDROID
+#if APP_MODE == APP_MODE_ANDROID
         app_run_once();
         bsp_watchdog_feed();
 #else

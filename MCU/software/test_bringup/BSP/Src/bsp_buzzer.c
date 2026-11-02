@@ -100,17 +100,3 @@ bsp_status_t bsp_buzzer_stop(void)
 
     return BSP_OK;
 }
-
-bsp_status_t bsp_buzzer_get_state(bool *is_active)
-{
-    if (s_is_buzzer_initialized == false)
-    {
-        return BSP_ERR_NOT_INITIALIZED;
-    }
-    if (is_active == NULL)
-    {
-        return BSP_ERR_PARAM;
-    }
-    *is_active = s_is_buzzer_active;
-    return BSP_OK;
-}
