@@ -57,7 +57,18 @@ static bool has_side_effect(uint8_t cmd)
     return (cmd == MCU_PROTOCOL_CMD_SET_LIGHT) ||
            (cmd == MCU_PROTOCOL_CMD_SET_MOTION) ||
            (cmd == MCU_PROTOCOL_CMD_SET_ARM_POSITION) ||
-           (cmd == MCU_PROTOCOL_CMD_HOME_ARM);
+           (cmd == MCU_PROTOCOL_CMD_HOME_ARM) ||
+           (cmd == MCU_PROTOCOL_CMD_SET_LIGHT_ZONE) ||
+           (cmd == MCU_PROTOCOL_CMD_SET_BUZZER) ||
+           (cmd == MCU_PROTOCOL_CMD_SET_INDICATOR);
+}
+
+/** @brief 是否为分区灯、蜂鸣器、指示灯这三种输出类扩展命令。 */
+static bool is_output_command(uint8_t cmd)
+{
+    return (cmd == MCU_PROTOCOL_CMD_SET_LIGHT_ZONE) ||
+           (cmd == MCU_PROTOCOL_CMD_SET_BUZZER) ||
+           (cmd == MCU_PROTOCOL_CMD_SET_INDICATOR);
 }
 
 /** @brief 关节 ID 是否在 extension-v2 的 1～6 内。 */
@@ -160,7 +171,63 @@ static void handle_arm_action(const mcu_frame_t *request, mcu_frame_t *reply)
     mcu_protocol_make_ack(reply, request->seq, request->cmd, result, 0U);
 }
 
-/** @brief 处理 GET_EXTENDED_STATUS：只支持关节类查询。 */
+/**
+ * @brief 处理输出类扩展命令（SET_LIGHT_ZONE、SET_BUZZER、SET_INDICATOR）：
+ *        校验通用字段，再交给回调判断 ID 是否支持。
+ *
+ * @note 不做故障门控：灯光、蜂鸣器和指示灯不会造成机械危险，有故障时
+ *       还可能正需要它们提示用户。
+ */
+static void handle_output_action(const mcu_frame_t *request, mcu_frame_t *reply)
+{
+    if (request->payload_length != 4U)
+    {
+        build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_LENGTH);
+        return;
+    }
+
+    const uint8_t *p = request->payload;
+    bool is_valid = false;
+    switch (request->cmd)
+    {
+        case MCU_PROTOCOL_CMD_SET_LIGHT_ZONE:
+            /* 分区 ID，开关 0/1，亮度 0～100，保留。 */
+            is_valid = (p[1] <= 1U) && (p[2] <= 100U) && (p[3] == 0U);
+            break;
+        case MCU_PROTOCOL_CMD_SET_BUZZER:
+            /* 图案 ID，音量 0～100，两个保留。 */
+            is_valid = (p[1] <= 100U) && (p[2] == 0U) && (p[3] == 0U);
+            break;
+        default: /* SET_INDICATOR：指示灯 ID，开关 0/1，两个保留。 */
+            is_valid = (p[1] <= 1U) && (p[2] == 0U) && (p[3] == 0U);
+            break;
+    }
+    if (!is_valid)
+    {
+        build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_VALUE);
+        return;
+    }
+
+    uint8_t result = MCU_PROTOCOL_RESULT_INTERNAL;
+    switch (request->cmd)
+    {
+        case MCU_PROTOCOL_CMD_SET_LIGHT_ZONE:
+            result = s_hw->light_zone(p[0], p[1] != 0U, p[2]);
+            break;
+        case MCU_PROTOCOL_CMD_SET_BUZZER:
+            result = s_hw->buzzer(p[0], p[1]);
+            break;
+        default:
+            result = s_hw->indicator(p[0], p[1] != 0U);
+            break;
+    }
+    mcu_protocol_make_ack(reply, request->seq, request->cmd, result, 0U);
+}
+
+/**
+ * @brief 处理 GET_EXTENDED_STATUS：支持关节类和输出类查询，对应回调没有
+ *        注册的查询类型回 INVALID_VALUE。
+ */
 static void handle_extended_query(const mcu_frame_t *request,
                                   mcu_frame_t *reply)
 {
@@ -173,15 +240,27 @@ static void handle_extended_query(const mcu_frame_t *request,
     const uint8_t *p = request->payload;
     bool is_joint_query = (p[0] == MCU_PROTOCOL_CMD_SET_ARM_POSITION) ||
                           (p[0] == MCU_PROTOCOL_CMD_HOME_ARM);
-    if (!is_joint_query || !is_valid_joint(p[1]) || (p[2] != 0U) ||
-        (p[3] != 0U))
+    bool is_valid = (p[2] == 0U) && (p[3] == 0U);
+    if (is_joint_query)
+    {
+        is_valid = is_valid && (s_hw->arm_status != NULL) &&
+                   is_valid_joint(p[1]);
+    }
+    else
+    {
+        is_valid = is_valid && is_output_command(p[0]) &&
+                   (s_hw->output_status != NULL);
+    }
+    if (!is_valid)
     {
         build_error_ack(reply, request, MCU_PROTOCOL_RESULT_INVALID_VALUE);
         return;
     }
 
     mcu_extended_status_t status = {0};
-    uint8_t result = s_hw->arm_status(p[0], p[1], &status);
+    uint8_t result = is_joint_query
+                         ? s_hw->arm_status(p[0], p[1], &status)
+                         : s_hw->output_status(p[0], p[1], &status);
     if (result != MCU_PROTOCOL_RESULT_OK)
     {
         build_error_ack(reply, request, result);
@@ -207,7 +286,13 @@ static bool is_supported(uint8_t cmd)
         case MCU_PROTOCOL_CMD_HOME_ARM:
             return s_hw->arm_home != NULL;
         case MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS:
-            return s_hw->arm_status != NULL;
+            return (s_hw->arm_status != NULL) || (s_hw->output_status != NULL);
+        case MCU_PROTOCOL_CMD_SET_LIGHT_ZONE:
+            return s_hw->light_zone != NULL;
+        case MCU_PROTOCOL_CMD_SET_BUZZER:
+            return s_hw->buzzer != NULL;
+        case MCU_PROTOCOL_CMD_SET_INDICATOR:
+            return s_hw->indicator != NULL;
         default:
             return false;
     }
@@ -393,6 +478,12 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
 
         case MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS:
             handle_extended_query(request, reply);
+            break;
+
+        case MCU_PROTOCOL_CMD_SET_LIGHT_ZONE:
+        case MCU_PROTOCOL_CMD_SET_BUZZER:
+        case MCU_PROTOCOL_CMD_SET_INDICATOR:
+            handle_output_action(request, reply);
             break;
 
         default:

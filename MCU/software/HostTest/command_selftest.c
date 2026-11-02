@@ -88,6 +88,13 @@ typedef struct
     int32_t last_arm_speed;
     uint8_t last_query;
     uint8_t arm_result;
+    uint32_t output_calls;
+    uint32_t output_status_calls;
+    uint8_t last_output_cmd;
+    uint8_t last_output_id;
+    bool last_output_on;
+    uint8_t last_output_level;
+    uint8_t output_result;
 } fake_hw_t;
 
 static fake_hw_t s_fake;
@@ -165,14 +172,75 @@ static uint8_t fake_arm_status(uint8_t command, uint8_t joint_id,
     return s_fake.arm_result;
 }
 
-/* 不带关节回调：关节命令按未知命令处理。 */
+static uint8_t fake_output(uint8_t cmd, uint8_t id, bool is_on, uint8_t level)
+{
+    ++s_fake.output_calls;
+    s_fake.last_output_cmd = cmd;
+    s_fake.last_output_id = id;
+    s_fake.last_output_on = is_on;
+    s_fake.last_output_level = level;
+    return s_fake.output_result;
+}
+
+static uint8_t fake_light_zone(uint8_t zone_id, bool is_on, uint8_t brightness)
+{
+    return fake_output(MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, zone_id, is_on,
+                       brightness);
+}
+
+static uint8_t fake_buzzer(uint8_t pattern_id, uint8_t volume)
+{
+    return fake_output(MCU_PROTOCOL_CMD_SET_BUZZER, pattern_id, false, volume);
+}
+
+static uint8_t fake_indicator(uint8_t indicator_id, bool is_on)
+{
+    return fake_output(MCU_PROTOCOL_CMD_SET_INDICATOR, indicator_id, is_on,
+                       0U);
+}
+
+static uint8_t fake_output_status(uint8_t command, uint8_t selector,
+                                  mcu_extended_status_t *status)
+{
+    ++s_fake.output_status_calls;
+    s_fake.last_query = command;
+    s_fake.last_output_id = selector;
+    status->actual = 1;
+    status->target = 1;
+    status->actual_speed = 60;
+    status->target_speed = 60;
+    return s_fake.output_result;
+}
+
+/* 不带扩展回调：扩展命令按未知命令处理。 */
 static const mcu_command_hw_t k_fake_hw = {
-    fake_read_status, fake_apply_light, fake_apply_motion, fake_safe_stop,
-    NULL,             NULL,             NULL};
+    .read_status = fake_read_status,
+    .apply_light = fake_apply_light,
+    .apply_motion = fake_apply_motion,
+    .safe_stop = fake_safe_stop,
+};
 
 static const mcu_command_hw_t k_arm_hw = {
-    fake_read_status, fake_apply_light, fake_apply_motion, fake_safe_stop,
-    fake_arm_move,    fake_arm_home,    fake_arm_status};
+    .read_status = fake_read_status,
+    .apply_light = fake_apply_light,
+    .apply_motion = fake_apply_motion,
+    .safe_stop = fake_safe_stop,
+    .arm_move = fake_arm_move,
+    .arm_home = fake_arm_home,
+    .arm_status = fake_arm_status,
+};
+
+/* 只有输出类扩展回调，没有关节回调。 */
+static const mcu_command_hw_t k_output_hw = {
+    .read_status = fake_read_status,
+    .apply_light = fake_apply_light,
+    .apply_motion = fake_apply_motion,
+    .safe_stop = fake_safe_stop,
+    .light_zone = fake_light_zone,
+    .buzzer = fake_buzzer,
+    .indicator = fake_indicator,
+    .output_status = fake_output_status,
+};
 
 static void fake_reset(void)
 {
@@ -977,6 +1045,214 @@ static void test_extended_status(void)
           "ext status: allowed while faulted");
 }
 
+/** @brief 发一条要求 ACK 的 4 字节控制帧，返回回复。 */
+static mcu_frame_t send4(uint8_t seq, uint8_t cmd, uint8_t b0, uint8_t b1,
+                         uint8_t b2, uint8_t b3, uint32_t now_ms)
+{
+    uint8_t payload[4] = {b0, b1, b2, b3};
+    mcu_frame_t request = make_request(seq, cmd, payload, 4U,
+                                       MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t reply = {0};
+    (void)mcu_command_handle(&request, &reply, now_ms);
+    return reply;
+}
+
+/** @brief 没有注册输出类回调时，0x35～0x37 都是未知命令，不碰硬件。 */
+static void test_output_unsupported(void)
+{
+    fake_reset();
+    mcu_command_init(&k_arm_hw, 0U);
+
+    mcu_frame_t reply =
+        send4(0x90U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 1U, 1U, 50U, 0U, 10U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_INVALID_COMMAND),
+          "output: zone unsupported without callback");
+    reply = send4(0x91U, MCU_PROTOCOL_CMD_SET_BUZZER, 1U, 50U, 0U, 0U, 20U);
+    check(ack_is(&reply, 0x36U, MCU_PROTOCOL_RESULT_INVALID_COMMAND),
+          "output: buzzer unsupported without callback");
+    reply = send4(0x92U, MCU_PROTOCOL_CMD_SET_INDICATOR, 1U, 1U, 0U, 0U, 30U);
+    check(ack_is(&reply, 0x37U, MCU_PROTOCOL_RESULT_INVALID_COMMAND),
+          "output: indicator unsupported without callback");
+
+    /* 有关节回调、没有输出回调时，输出类查询回 INVALID_VALUE。 */
+    uint8_t payload[4] = {MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 1U, 0U, 0U};
+    mcu_frame_t request = make_request(
+        0x93U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS, payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 40U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "output: zone query rejected without callback");
+}
+
+/** @brief SET_LIGHT_ZONE：合法帧交给回调，非法字段在命令层拒绝。 */
+static void test_light_zone(void)
+{
+    fake_reset();
+    mcu_command_init(&k_output_hw, 0U);
+
+    mcu_frame_t reply =
+        send4(0xA0U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 3U, 1U, 60U, 0U, 10U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_OK) && (reply.seq == 0xA0U),
+          "zone: OK ACK");
+    check((s_fake.output_calls == 1U) && (s_fake.last_output_id == 3U) &&
+              s_fake.last_output_on && (s_fake.last_output_level == 60U),
+          "zone: id, on and brightness passed to hw");
+
+    reply = send4(0xA1U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 3U, 0U, 60U, 0U, 20U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_OK) &&
+              !s_fake.last_output_on,
+          "zone: off passed to hw");
+
+    reply = send4(0xA2U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 3U, 2U, 60U, 0U, 30U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "zone: switch 2 rejected");
+    reply =
+        send4(0xA3U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 3U, 1U, 101U, 0U, 40U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "zone: brightness 101 rejected");
+    reply = send4(0xA4U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 3U, 1U, 60U, 1U, 50U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "zone: reserved byte rejected");
+    check(s_fake.output_calls == 2U, "zone: invalid frames not applied");
+
+    uint8_t short_payload[3] = {3U, 1U, 60U};
+    mcu_frame_t request =
+        make_request(0xA5U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, short_payload, 3U,
+                     MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    (void)mcu_command_handle(&request, &reply, 60U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_INVALID_LENGTH),
+          "zone: length 3 rejected");
+
+    /* 分区 ID 由固件判断，回调的结果码原样进 ACK。 */
+    s_fake.output_result = MCU_PROTOCOL_RESULT_INVALID_VALUE;
+    reply = send4(0xA6U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 9U, 1U, 60U, 0U, 70U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_INVALID_VALUE) &&
+              (s_fake.last_output_id == 9U),
+          "zone: callback result passed through");
+
+    /* 有故障时灯光照常可用。 */
+    s_fake.output_result = MCU_PROTOCOL_RESULT_OK;
+    s_fake.fault_flags = 0x10U;
+    reply = send4(0xA7U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 1U, 1U, 20U, 0U, 80U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_OK),
+          "zone: not gated by faults");
+
+    /* 原样重发只回上次的 ACK，不重复执行。 */
+    uint32_t calls = s_fake.output_calls;
+    reply = send4(0xA7U, MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 1U, 1U, 20U, 0U, 90U);
+    check(ack_is(&reply, 0x35U, MCU_PROTOCOL_RESULT_OK) &&
+              (s_fake.output_calls == calls),
+          "zone: retransmission not re-applied");
+}
+
+/** @brief SET_BUZZER 与 SET_INDICATOR 的字段校验。 */
+static void test_buzzer_and_indicator(void)
+{
+    fake_reset();
+    mcu_command_init(&k_output_hw, 0U);
+
+    mcu_frame_t reply =
+        send4(0xB0U, MCU_PROTOCOL_CMD_SET_BUZZER, 2U, 80U, 0U, 0U, 10U);
+    check(ack_is(&reply, 0x36U, MCU_PROTOCOL_RESULT_OK) &&
+              (s_fake.last_output_cmd == 0x36U) &&
+              (s_fake.last_output_id == 2U) &&
+              (s_fake.last_output_level == 80U),
+          "buzzer: pattern and volume passed to hw");
+    reply = send4(0xB1U, MCU_PROTOCOL_CMD_SET_BUZZER, 2U, 101U, 0U, 0U, 20U);
+    check(ack_is(&reply, 0x36U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "buzzer: volume 101 rejected");
+    reply = send4(0xB2U, MCU_PROTOCOL_CMD_SET_BUZZER, 2U, 80U, 1U, 0U, 30U);
+    check(ack_is(&reply, 0x36U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "buzzer: reserved byte rejected");
+
+    reply = send4(0xB3U, MCU_PROTOCOL_CMD_SET_INDICATOR, 2U, 1U, 0U, 0U, 40U);
+    check(ack_is(&reply, 0x37U, MCU_PROTOCOL_RESULT_OK) &&
+              (s_fake.last_output_cmd == 0x37U) &&
+              (s_fake.last_output_id == 2U) && s_fake.last_output_on,
+          "indicator: id and switch passed to hw");
+    reply = send4(0xB4U, MCU_PROTOCOL_CMD_SET_INDICATOR, 2U, 2U, 0U, 0U, 50U);
+    check(ack_is(&reply, 0x37U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "indicator: switch 2 rejected");
+    reply = send4(0xB5U, MCU_PROTOCOL_CMD_SET_INDICATOR, 2U, 1U, 0U, 7U, 60U);
+    check(ack_is(&reply, 0x37U, MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "indicator: reserved byte rejected");
+    check(s_fake.output_calls == 2U, "output: invalid frames not applied");
+}
+
+/** @brief 输出类扩展状态查询：字段编码、回调错误、没有关节回调时的关节查询。 */
+static void test_output_status(void)
+{
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_output_hw, 0U);
+
+    uint8_t payload[4] = {MCU_PROTOCOL_CMD_SET_LIGHT_ZONE, 5U, 0U, 0U};
+    mcu_frame_t request = make_request(
+        0xC0U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS, payload, 4U, 0U);
+    check(mcu_command_handle(&request, &reply, 10U),
+          "output status: replies without ACK_REQUIRED");
+    static const uint8_t expected[20] = {
+        0x35, 0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x3C, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00};
+    check((reply.cmd == MCU_PROTOCOL_CMD_EXTENDED_STATUS) &&
+              (reply.seq == 0xC0U) && (reply.payload_length == 20U) &&
+              bytes_equal(reply.payload, expected, 20U),
+          "output status: zone fields encoded");
+    check((s_fake.last_query == 0x35U) && (s_fake.last_output_id == 5U),
+          "output status: command and selector passed to hw");
+
+    payload[0] = MCU_PROTOCOL_CMD_SET_BUZZER;
+    request = make_request(0xC1U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 20U);
+    check((reply.cmd == MCU_PROTOCOL_CMD_EXTENDED_STATUS) &&
+              (reply.payload[0] == 0x36U),
+          "output status: buzzer query supported");
+
+    s_fake.output_result = MCU_PROTOCOL_RESULT_INVALID_VALUE;
+    payload[0] = MCU_PROTOCOL_CMD_SET_INDICATOR;
+    request = make_request(0xC2U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 30U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "output status: callback error becomes an ACK");
+
+    s_fake.output_result = MCU_PROTOCOL_RESULT_OK;
+    payload[0] = MCU_PROTOCOL_CMD_SET_LIGHT_ZONE;
+    payload[3] = 1U;
+    request = make_request(0xC3U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 40U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "output status: reserved byte rejected");
+
+    /* 没有关节回调时，关节查询回 INVALID_VALUE，不会调用空指针。 */
+    payload[0] = MCU_PROTOCOL_CMD_SET_ARM_POSITION;
+    payload[1] = 1U;
+    payload[3] = 0U;
+    request = make_request(0xC4U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 50U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "output status: joint query rejected without callback");
+
+    /* 0x30、0x38 仍未实现。 */
+    payload[0] = 0x38U;
+    request = make_request(0xC5U, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                           payload, 4U, 0U);
+    (void)mcu_command_handle(&request, &reply, 60U);
+    check(ack_is(&reply, MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS,
+                 MCU_PROTOCOL_RESULT_INVALID_VALUE),
+          "output status: shutdown query not supported");
+    reply = send4(0xC6U, 0x38U, 0x53U, 0x44U, 0x01U, 0x00U, 70U);
+    check(ack_is(&reply, 0x38U, MCU_PROTOCOL_RESULT_INVALID_COMMAND),
+          "output: soft shutdown still unsupported");
+}
+
 int main(void)
 {
     test_get_status_reply();
@@ -1005,6 +1281,10 @@ int main(void)
     test_arm_fault_gate();
     test_arm_home();
     test_extended_status();
+    test_output_unsupported();
+    test_light_zone();
+    test_buzzer_and_indicator();
+    test_output_status();
 
     printf("\n%u passed, %u failed\n", (unsigned int)s_passed,
            (unsigned int)s_failed);

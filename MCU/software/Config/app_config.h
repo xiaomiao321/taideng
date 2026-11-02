@@ -214,6 +214,23 @@
         135000, 135000, 135000, 135000, 135000, 135000                         \
     }
 
+/**
+ * @brief Android SET_BUZZER 的发声频率，单位 Hz；蜂鸣器在约 2.7kHz 最响。
+ */
+#define MCU_BUZZER_FREQ_HZ (2700U)
+
+/**
+ * @brief SET_BUZZER 的图案表，按图案 ID 0～3 依次给出 {响毫秒, 停毫秒}。
+ *
+ * 0 关，1 长鸣，2 慢响（响 200 停 800），3 快响（响 100 停 100）。响为 0 表示
+ * 不响，停为 0 表示一直响。图案一直保持到下一条 SET_BUZZER，失联停机时回到 0。
+ * 须与 App 端能力描述里的 buzzerPatternIds 保持一致。
+ */
+#define MCU_BUZZER_PATTERNS                                                    \
+    {                                                                          \
+        {0U, 0U}, {1U, 0U}, {200U, 800U}, {100U, 100U}                         \
+    }
+
 /** @brief HOME 键消抖时间，单位毫秒。 */
 #define BSP_KEY_DEBOUNCE_MS (20U)
 

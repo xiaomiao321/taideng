@@ -25,7 +25,14 @@ bsp_status_t bsp_buzzer_init(void)
 
 bsp_status_t bsp_buzzer_start(uint32_t frequency_hz)
 {
-    if (frequency_hz == 0U)
+    return bsp_buzzer_start_duty(frequency_hz, 500U);
+}
+
+bsp_status_t bsp_buzzer_start_duty(uint32_t frequency_hz,
+                                   uint16_t duty_permille)
+{
+    if ((frequency_hz == 0U) || (duty_permille == 0U) ||
+        (duty_permille > 500U))
     {
         return BSP_ERR_PARAM;
     }
@@ -50,7 +57,11 @@ bsp_status_t bsp_buzzer_start(uint32_t frequency_hz)
     }
 
     uint32_t arr = period_counts - 1U;
-    uint32_t compare = period_counts / 2U;
+    uint32_t compare = (period_counts * duty_permille) / 1000U;
+    if (compare == 0U)
+    {
+        compare = 1U;
+    }
     if (arr > 0xFFFFU)
     {
         return BSP_ERR_PARAM;

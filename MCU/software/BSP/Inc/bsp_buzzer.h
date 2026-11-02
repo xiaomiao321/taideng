@@ -42,6 +42,20 @@ bsp_status_t bsp_buzzer_init(void);
 bsp_status_t bsp_buzzer_start(uint32_t frequency_hz);
 
 /**
+ * @brief 以指定频率和占空比启动蜂鸣器 PWM 输出，用占空比调节音量。
+ *
+ * 占空比越接近 50% 越响，越小越轻；两者不是线性关系。
+ *
+ * @param[in] frequency_hz 目标频率，单位为 Hz。
+ * @param[in] duty_permille 占空比千分比，1 至 500。
+ *
+ * @return bsp_status_t 启动结果，同 bsp_buzzer_start()；占空比超出范围时
+ *         返回 BSP_ERR_PARAM。
+ */
+bsp_status_t bsp_buzzer_start_duty(uint32_t frequency_hz,
+                                   uint16_t duty_permille);
+
+/**
  * @brief 停止蜂鸣器 PWM 输出。
  *
  * 重复调用本函数不会重复停止定时器，并返回成功。

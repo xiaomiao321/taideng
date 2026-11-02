@@ -83,6 +83,15 @@
 /** @brief 扩展命令字：关节回原点。 */
 #define MCU_PROTOCOL_CMD_HOME_ARM (0x34U)
 
+/** @brief 扩展命令字：设置一个灯光分区的开关和亮度。 */
+#define MCU_PROTOCOL_CMD_SET_LIGHT_ZONE (0x35U)
+
+/** @brief 扩展命令字：设置蜂鸣器图案和音量。 */
+#define MCU_PROTOCOL_CMD_SET_BUZZER (0x36U)
+
+/** @brief 扩展命令字：设置一个指示灯的开关。 */
+#define MCU_PROTOCOL_CMD_SET_INDICATOR (0x37U)
+
 /** @brief 命令字：应答。 */
 #define MCU_PROTOCOL_CMD_ACK (0x7FU)
 
@@ -163,7 +172,13 @@ typedef struct
  *
  * 关节类（SET_ARM_POSITION、HOME_ARM）查询时：actual/target 为实际和目标位置
  * （毫度），actual_speed/target_speed 为估计转速和当前运行目标速度（毫度/秒），
- * 停止时两个速度都为 0。写入 PAYLOAD 时逐字段展开成小端字节。
+ * 停止时两个速度都为 0。
+ *
+ * 输出类查询时：SET_LIGHT_ZONE 的 actual/target 为开关 0/1，两个速度为亮度
+ * 0～100；SET_BUZZER 的 actual/target 为图案 ID，两个速度为音量 0～100；
+ * SET_INDICATOR 的 actual/target 为开关 0/1，两个速度为 0。
+ *
+ * 写入 PAYLOAD 时逐字段展开成小端字节。
  */
 typedef struct
 {

@@ -12,12 +12,14 @@
  *   - SET_MOTION        -> STOP 安全停止，其余动作交给底盘，回 ACK；
  *   - PING              -> 成功 ACK；
  *   - SET_ARM_POSITION、HOME_ARM -> 校验后交给 arm_move / arm_home；
- *   - GET_EXTENDED_STATUS（关节类）-> EXTENDED_STATUS；
- *   - 其余命令（其他扩展命令），以及没有注册对应回调的关节命令
- *     -> 带"未知命令"的 ACK，不改输出。
+ *   - SET_LIGHT_ZONE、SET_BUZZER、SET_INDICATOR -> 校验后交给对应回调；
+ *   - GET_EXTENDED_STATUS（关节类和上面三种输出类）-> EXTENDED_STATUS；
+ *   - 其余命令（SET_LIGHT_MODE、SOFT_SHUTDOWN），以及没有注册对应回调的
+ *     扩展命令 -> 带"未知命令"的 ACK，不改输出。
  *
  * 全局 fault_flags 非 0 时拒绝 SET_ARM_POSITION、HOME_ARM 和非 STOP 的
- * SET_MOTION（硬件故障 ACK，detail 为故障位），STOP 和查询不受限制。
+ * SET_MOTION（硬件故障 ACK，detail 为故障位），STOP、查询和灯光、蜂鸣器、
+ * 指示灯不受限制。
  */
 
 #ifndef AITAID_MCU_COMMAND_H
@@ -32,8 +34,10 @@
 /**
  * @brief 命令层需要的硬件动作，由上层实现并在初始化时注册。
  *
- * @note 前四个函数指针必须有效，关节相关的三个可为 NULL（表示不支持），
+ * @note 前四个函数指针必须有效，其余扩展回调可为 NULL（表示不支持），
  *       都由主循环串行调用，不需要考虑重入。
+ * @note 扩展回调收到的分区、图案、指示灯 ID 是原样转发的，由固件自己判断是否
+ *       支持，不支持时返回 MCU_PROTOCOL_RESULT_INVALID_VALUE。
  */
 typedef struct
 {
@@ -103,12 +107,57 @@ typedef struct
      */
     uint8_t (*arm_status)(uint8_t command, uint8_t joint_id,
                           mcu_extended_status_t *status);
+
+    /**
+     * @brief 设置一个灯光分区（SET_LIGHT_ZONE）。
+     *
+     * @param[in] zone_id 分区 ID，未校验。
+     * @param[in] is_on 开关。
+     * @param[in] brightness 亮度 0～100，已校验；关灯时也要记住，供回读。
+     *
+     * @return 结果码 MCU_PROTOCOL_RESULT_*，原样放进 ACK。
+     */
+    uint8_t (*light_zone)(uint8_t zone_id, bool is_on, uint8_t brightness);
+
+    /**
+     * @brief 设置蜂鸣器（SET_BUZZER）。
+     *
+     * @param[in] pattern_id 图案 ID，未校验。
+     * @param[in] volume 音量 0～100，已校验。
+     *
+     * @return 结果码 MCU_PROTOCOL_RESULT_*，原样放进 ACK。
+     */
+    uint8_t (*buzzer)(uint8_t pattern_id, uint8_t volume);
+
+    /**
+     * @brief 设置一个指示灯（SET_INDICATOR）。
+     *
+     * @param[in] indicator_id 指示灯 ID，未校验。
+     * @param[in] is_on 开关。
+     *
+     * @return 结果码 MCU_PROTOCOL_RESULT_*，原样放进 ACK。
+     */
+    uint8_t (*indicator)(uint8_t indicator_id, bool is_on);
+
+    /**
+     * @brief 读取分区灯、蜂鸣器或指示灯的扩展状态，供 GET_EXTENDED_STATUS 回读。
+     *
+     * @param[in] command 被查询的控制命令，SET_LIGHT_ZONE、SET_BUZZER 或
+     *            SET_INDICATOR。
+     * @param[in] selector 分区、图案或指示灯 ID，未校验。
+     * @param[out] status 字段含义见 mcu_extended_status_t；command 和 selector
+     *             由命令层填。
+     *
+     * @return MCU_PROTOCOL_RESULT_OK 时回 EXTENDED_STATUS，否则回该结果码的 ACK。
+     */
+    uint8_t (*output_status)(uint8_t command, uint8_t selector,
+                             mcu_extended_status_t *status);
 } mcu_command_hw_t;
 
 /**
  * @brief 初始化命令层并注册硬件回调。
  *
- * @param[in] hw 硬件回调表，不允许为 NULL，三个函数指针也必须全部有效。
+ * @param[in] hw 硬件回调表，不允许为 NULL，前四个函数指针必须有效。
  * @param[in] now_ms 当前时刻，作为运行秒数的起点和失联计时的基准。
  *
  * @note 本函数只清状态，不主动驱动任何硬件；上电安全状态由各 BSP 的 init 保证。
@@ -127,7 +176,7 @@ void mcu_command_init(const mcu_command_hw_t *hw, uint32_t now_ms);
  *
  * @note 收到任何合法请求都会刷新失联计时，重复帧也算。
  * @note 只有会改变硬件状态的命令（SET_LIGHT、SET_MOTION、SET_ARM_POSITION、
- *       HOME_ARM）参与去重：与上一条
+ *       HOME_ARM、SET_LIGHT_ZONE、SET_BUZZER、SET_INDICATOR）参与去重：与上一条
  *       控制帧的 SEQ、CMD、VERSION、FLAGS 和 PAYLOAD 全部相同才算重发，
  *       重发帧不会重复执行，但会重发上一次的 ACK。
  * @note 查询类命令（PING、GET_STATUS、GET_EXTENDED_STATUS）不去重，每次查询都返回当前状态，

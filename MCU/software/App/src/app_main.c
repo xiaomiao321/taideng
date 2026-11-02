@@ -3,8 +3,13 @@
  * @brief 应用层实现：串口收发、协议解析与命令分派的接线。
  *
  * Android 模式：支持灯光开关/亮度、PING、状态查询、底盘前进/后退/左右转和
- * 全电机 STOP，以及 extension-v2 的关节定位、回原点和关节状态查询。
- * HOME 键按下立即停止全部电机。
+ * 全电机 STOP，以及 extension-v2 的关节定位、回原点、分区灯、蜂鸣器、指示灯
+ * 和它们的扩展状态查询。HOME 键按下立即停止全部电机。
+ *
+ * 扩展输出的 ID 由本文件定义，须与 App 端能力描述一致：
+ *   - 分区灯 lightZoneIds：1～4 为上灯板 UP1～UP4，5～7 为下灯板 DOWN1～DOWN3；
+ *   - 蜂鸣器 buzzerPatternIds：0～3，见 app_config.h 的 MCU_BUZZER_PATTERNS；
+ *   - 指示灯 indicatorIds：1 为 STATE，2 为 ACT。COMM 和 ERROR 由固件自己用。
  *
  * @note 调试日志继续走 USART3；USART1 只跑二进制协议，不再发文本。
  */
@@ -13,6 +18,7 @@
 
 #include <string.h>
 
+#include "bsp_buzzer.h"
 #include "bsp_common.h"
 #include "bsp_key.h"
 #include "bsp_led.h"
@@ -60,10 +66,39 @@ static bool s_is_rearm_failing = false;
 static uint32_t s_rearm_retry_ms = 0U;
 /** @brief USART1 收发错误累计数，只用于日志排查。 */
 static uint32_t s_uart_error_count = 0U;
-/** @brief 灯光实际开关，bit0 有效。 */
-static uint8_t s_light_enabled = 0U;
-/** @brief 最近一次设定的亮度 0～100；关灯时保留，下次开灯继续用。 */
+/** @brief SET_LIGHT 最近一次设定的统一亮度 0～100，STATUS 回读用。 */
 static uint8_t s_brightness = 0U;
+/** @brief 各分区灯的实际开关，下标为分区 ID 减 1，即 bsp_light_id_t。 */
+static bool s_zone_on[BSP_LIGHT_COUNT];
+/** @brief 各分区灯最近设定的亮度 0～100；关灯时保留，供回读。 */
+static uint8_t s_zone_brightness[BSP_LIGHT_COUNT];
+/** @brief 蜂鸣器图案表，见 MCU_BUZZER_PATTERNS。 */
+static const struct
+{
+    uint16_t on_ms;  /**< 每个周期响的时长，0 表示不响。 */
+    uint16_t off_ms; /**< 每个周期停的时长，0 表示一直响。 */
+} k_buzzer_patterns[] = MCU_BUZZER_PATTERNS;
+/** @brief 图案 ID 的个数。 */
+#define APP_BUZZER_PATTERN_COUNT                                               \
+    ((uint8_t)(sizeof(k_buzzer_patterns) / sizeof(k_buzzer_patterns[0])))
+/** @brief 蜂鸣器 BSP 是否初始化成功；失败时 SET_BUZZER 回硬件故障。 */
+static bool s_is_buzzer_ok = false;
+/** @brief 当前蜂鸣器图案 ID。 */
+static uint8_t s_buzzer_pattern = 0U;
+/** @brief 当前蜂鸣器音量 0～100，0 表示静音。 */
+static uint8_t s_buzzer_volume = 0U;
+/** @brief 当前图案开始的时刻，用于计算响停相位。 */
+static uint32_t s_buzzer_start_ms = 0U;
+/** @brief 蜂鸣器此刻是否在出声。 */
+static bool s_is_buzzer_sounding = false;
+/** @brief 开放给主机的指示灯，下标为指示灯 ID 减 1。 */
+static const bsp_led_id_t k_indicators[] = {BSP_LED_ID_STATE,
+                                            BSP_LED_ID_ACTIVITY};
+/** @brief 指示灯 ID 的个数。 */
+#define APP_INDICATOR_COUNT                                                    \
+    ((uint8_t)(sizeof(k_indicators) / sizeof(k_indicators[0])))
+/** @brief 各开放指示灯的实际开关。 */
+static bool s_indicator_on[sizeof(k_indicators) / sizeof(k_indicators[0])];
 /** @brief 通信指示灯是否正处于闪烁脉冲中。 */
 static bool s_comm_led_is_on = false;
 /** @brief 通信指示灯应当熄灭的时刻。 */
@@ -83,15 +118,30 @@ static chassis_t s_chassis;
 /* 命令层的硬件回调                                                            */
 /* -------------------------------------------------------------------------- */
 
+/** @brief 是否有任意一路分区灯亮着。 */
+static bool any_zone_on(void)
+{
+    for (uint32_t i = 0U; i < (uint32_t)BSP_LIGHT_COUNT; ++i)
+    {
+        if (s_zone_on[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * @brief 回读当前实际状态。
  *
- * @note 灯光读的是本文件保存的实际状态。底盘开环，实际与目标都是最近一次
- *       成功应用的动作和速度。故障位为全部关节锁存故障与底盘故障的按位或。
+ * @note 灯光开关为任意一路分区灯亮着即为 1，亮度为最近一次 SET_LIGHT 的
+ *       统一亮度；只用 SET_LIGHT 时两者都和提交值一致。底盘开环，实际与目标
+ *       都是最近一次成功应用的动作和速度。故障位为全部关节锁存故障与底盘
+ *       故障的按位或。
  */
 static void hw_read_status(mcu_status_t *status)
 {
-    status->light_enabled = s_light_enabled;
+    status->light_enabled = any_zone_on() ? 1U : 0U;
     status->brightness = s_brightness;
     status->motion = s_chassis.motion;
     status->target_motion = s_chassis.motion;
@@ -115,40 +165,220 @@ static bool chassis_drive(unsigned motor, int duty)
     return bsp_motor_set_duty((bsp_motor_id_t)motor, (int16_t)duty) == BSP_OK;
 }
 
+/** @brief 亮度 0～100 换算成灯光 PWM 千分比，关灯时为 0。 */
+static uint16_t light_duty(bool is_on, uint8_t brightness)
+{
+    if (!is_on)
+    {
+        return 0U;
+    }
+    return (uint16_t)(((uint32_t)brightness * BSP_LIGHT_PWM_DUTY_MAX) / 100U);
+}
+
+/** @brief 关掉全部分区灯，用于硬件失败后的收尾。 */
+static void all_zones_off(void)
+{
+    for (uint32_t i = 0U; i < (uint32_t)BSP_LIGHT_COUNT; ++i)
+    {
+        (void)bsp_light_set_duty((bsp_light_id_t)i, 0U);
+        s_zone_on[i] = false;
+    }
+}
+
 /**
  * @brief 应用灯光总开关和亮度。
  *
- * @note 七路灯板一起调：开灯时按亮度统一设定占空比，关灯时全部置 0，
- *       但保留亮度值，下次开灯直接沿用。
+ * @note 七路灯板一起调：每一路分区都设成同一个开关和亮度，覆盖之前 SET_LIGHT_ZONE
+ *       的单独设置。关灯时保留亮度值，供回读。
  */
 static bool hw_apply_light(uint8_t light_flags, uint8_t brightness)
 {
-    uint16_t duty = 0U;
+    bool is_on = (light_flags & 0x01U) != 0U;
+    uint16_t duty = light_duty(is_on, brightness);
 
-    s_light_enabled = (uint8_t)(light_flags & 0x01U);
     s_brightness = brightness;
-
-    if (s_light_enabled != 0U)
-    {
-        duty =
-            (uint16_t)(((uint32_t)brightness * BSP_LIGHT_PWM_DUTY_MAX) / 100U);
-    }
-
     for (uint32_t i = 0U; i < (uint32_t)BSP_LIGHT_COUNT; ++i)
     {
         if (bsp_light_set_duty((bsp_light_id_t)i, duty) != BSP_OK)
         {
             /* 有任意一路失败就全部关掉，不留"只亮一半"的中间态。 */
-            for (uint32_t j = 0U; j < (uint32_t)BSP_LIGHT_COUNT; ++j)
-            {
-                (void)bsp_light_set_duty((bsp_light_id_t)j, 0U);
-            }
-            s_light_enabled = 0U;
+            all_zones_off();
             return false;
         }
+        s_zone_on[i] = is_on;
+        s_zone_brightness[i] = brightness;
     }
-
     return true;
+}
+
+/**
+ * @brief SET_LIGHT_ZONE：设置一路分区灯，其他分区不变。
+ *
+ * @note 分区 ID 1～7 依次对应 UP1～UP4、DOWN1～DOWN3。
+ */
+static uint8_t hw_light_zone(uint8_t zone_id, bool is_on, uint8_t brightness)
+{
+    if ((zone_id == 0U) || (zone_id > (uint8_t)BSP_LIGHT_COUNT))
+    {
+        return MCU_PROTOCOL_RESULT_INVALID_VALUE;
+    }
+    unsigned index = (unsigned)zone_id - 1U;
+    if (bsp_light_set_duty((bsp_light_id_t)index,
+                           light_duty(is_on, brightness)) != BSP_OK)
+    {
+        (void)bsp_light_set_duty((bsp_light_id_t)index, 0U);
+        s_zone_on[index] = false;
+        return MCU_PROTOCOL_RESULT_HARDWARE;
+    }
+    s_zone_on[index] = is_on;
+    s_zone_brightness[index] = brightness;
+    return MCU_PROTOCOL_RESULT_OK;
+}
+
+/** @brief 当前图案在 now_ms 时刻是否应该出声。 */
+static bool buzzer_should_sound(uint32_t now_ms)
+{
+    uint32_t on_ms = k_buzzer_patterns[s_buzzer_pattern].on_ms;
+    uint32_t off_ms = k_buzzer_patterns[s_buzzer_pattern].off_ms;
+    if ((s_buzzer_volume == 0U) || (on_ms == 0U))
+    {
+        return false;
+    }
+    if (off_ms == 0U)
+    {
+        return true;
+    }
+    return ((now_ms - s_buzzer_start_ms) % (on_ms + off_ms)) < on_ms;
+}
+
+/**
+ * @brief 让蜂鸣器出声或停下。
+ *
+ * @note 音量 1～100 线性换算成占空比 1%～50%。
+ */
+static bool buzzer_output(bool is_on)
+{
+    bsp_status_t status = BSP_OK;
+    if (is_on)
+    {
+        uint16_t duty = (uint16_t)(10U + ((uint32_t)s_buzzer_volume - 1U) *
+                                             490U / 99U);
+        status = bsp_buzzer_start_duty(MCU_BUZZER_FREQ_HZ, duty);
+    }
+    else
+    {
+        status = bsp_buzzer_stop();
+    }
+    s_is_buzzer_sounding = is_on && (status == BSP_OK);
+    return status == BSP_OK;
+}
+
+/** @brief 主循环里按图案的响停相位切换蜂鸣器，只在需要变化时操作硬件。 */
+static void update_buzzer(uint32_t now_ms)
+{
+    if (!s_is_buzzer_ok)
+    {
+        return;
+    }
+    bool should_sound = buzzer_should_sound(now_ms);
+    if (should_sound != s_is_buzzer_sounding)
+    {
+        (void)buzzer_output(should_sound);
+    }
+}
+
+/** @brief SET_BUZZER：换一个图案和音量，从这一刻重新开始计相位。 */
+static uint8_t hw_buzzer(uint8_t pattern_id, uint8_t volume)
+{
+    if (pattern_id >= APP_BUZZER_PATTERN_COUNT)
+    {
+        return MCU_PROTOCOL_RESULT_INVALID_VALUE;
+    }
+    if (!s_is_buzzer_ok)
+    {
+        return MCU_PROTOCOL_RESULT_HARDWARE;
+    }
+    uint32_t now_ms = HAL_GetTick();
+    s_buzzer_pattern = pattern_id;
+    s_buzzer_volume = volume;
+    s_buzzer_start_ms = now_ms;
+    /* 音量可能变了，正在响也要重新设一次占空比。 */
+    if (!buzzer_output(buzzer_should_sound(now_ms)))
+    {
+        (void)bsp_buzzer_stop();
+        s_is_buzzer_sounding = false;
+        s_buzzer_pattern = 0U;
+        return MCU_PROTOCOL_RESULT_HARDWARE;
+    }
+    return MCU_PROTOCOL_RESULT_OK;
+}
+
+/** @brief 关掉蜂鸣器图案，音量保留。 */
+static void buzzer_off(void)
+{
+    s_buzzer_pattern = 0U;
+    if (s_is_buzzer_ok)
+    {
+        (void)buzzer_output(false);
+    }
+}
+
+/** @brief SET_INDICATOR：设置 STATE 或 ACT 指示灯。 */
+static uint8_t hw_indicator(uint8_t indicator_id, bool is_on)
+{
+    if ((indicator_id == 0U) || (indicator_id > APP_INDICATOR_COUNT))
+    {
+        return MCU_PROTOCOL_RESULT_INVALID_VALUE;
+    }
+    unsigned index = (unsigned)indicator_id - 1U;
+    if (bsp_led_set(k_indicators[index], is_on) != BSP_OK)
+    {
+        return MCU_PROTOCOL_RESULT_HARDWARE;
+    }
+    s_indicator_on[index] = is_on;
+    return MCU_PROTOCOL_RESULT_OK;
+}
+
+/**
+ * @brief 分区灯、蜂鸣器、指示灯的扩展状态。
+ *
+ * @note 都是开环输出，实际值和目标值相同，故障位恒为 0。蜂鸣器回读当前图案，
+ *       与查询时给的图案 ID 无关，只要该 ID 有效。
+ */
+static uint8_t hw_output_status(uint8_t command, uint8_t selector,
+                                mcu_extended_status_t *status)
+{
+    switch (command)
+    {
+        case MCU_PROTOCOL_CMD_SET_LIGHT_ZONE:
+            if ((selector == 0U) || (selector > (uint8_t)BSP_LIGHT_COUNT))
+            {
+                return MCU_PROTOCOL_RESULT_INVALID_VALUE;
+            }
+            status->actual = s_zone_on[selector - 1U] ? 1 : 0;
+            status->actual_speed = s_zone_brightness[selector - 1U];
+            break;
+        case MCU_PROTOCOL_CMD_SET_BUZZER:
+            if (selector >= APP_BUZZER_PATTERN_COUNT)
+            {
+                return MCU_PROTOCOL_RESULT_INVALID_VALUE;
+            }
+            status->actual = s_buzzer_pattern;
+            status->actual_speed = s_buzzer_volume;
+            break;
+        default: /* SET_INDICATOR */
+            if ((selector == 0U) || (selector > APP_INDICATOR_COUNT))
+            {
+                return MCU_PROTOCOL_RESULT_INVALID_VALUE;
+            }
+            status->actual = s_indicator_on[selector - 1U] ? 1 : 0;
+            status->actual_speed = 0;
+            break;
+    }
+    status->faults = 0U;
+    status->target = status->actual;
+    status->target_speed = status->actual_speed;
+    return MCU_PROTOCOL_RESULT_OK;
 }
 
 /**
@@ -176,10 +406,14 @@ static bool hw_apply_motion(uint8_t motion, uint8_t speed)
     return ok;
 }
 
-/** @brief 失联时的安全停止：立即停止全部运动输出，灯光保持，不清故障。 */
+/**
+ * @brief 失联时的安全停止：立即停止全部运动输出并关掉蜂鸣器，灯光和指示灯
+ *        保持，不清故障。
+ */
 static void hw_safe_stop(void)
 {
     (void)stop_all_motors();
+    buzzer_off();
 }
 
 /** @brief 把 joint_move 的错误名换成协议结果码。 */
@@ -272,8 +506,18 @@ static void joint_log(const char *line)
 
 /** @brief 命令层使用的硬件回调表。 */
 static const mcu_command_hw_t g_mcu_hw = {
-    hw_read_status, hw_apply_light, hw_apply_motion, hw_safe_stop,
-    start_arm,      hw_arm_home,    hw_arm_status};
+    .read_status = hw_read_status,
+    .apply_light = hw_apply_light,
+    .apply_motion = hw_apply_motion,
+    .safe_stop = hw_safe_stop,
+    .arm_move = start_arm,
+    .arm_home = hw_arm_home,
+    .arm_status = hw_arm_status,
+    .light_zone = hw_light_zone,
+    .buzzer = hw_buzzer,
+    .indicator = hw_indicator,
+    .output_status = hw_output_status,
+};
 
 /* -------------------------------------------------------------------------- */
 /* 内部工具                                                                    */
@@ -459,6 +703,12 @@ void app_init(void)
     {
         fail_hard();
     }
+    /* 蜂鸣器不是必需的：初始化失败只记日志，SET_BUZZER 回硬件故障。 */
+    s_is_buzzer_ok = bsp_buzzer_init() == BSP_OK;
+    if (!s_is_buzzer_ok)
+    {
+        LOG_WARN("APP", "buzzer init failed");
+    }
     chassis_init(&s_chassis, chassis_drive);
     unsigned restored = joint_service_init(joint_log);
     LOG_INFO("APP", "joints: %u calibrated, flash %s", restored,
@@ -520,4 +770,5 @@ void app_run_once(void)
     }
     (void)mcu_command_poll(HAL_GetTick());
     update_comm_led(HAL_GetTick());
+    update_buzzer(HAL_GetTick());
 }
