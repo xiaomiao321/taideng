@@ -12,6 +12,10 @@
 
 _Static_assert(JOINT_COUNT == BSP_ADC_CHANNEL_COUNT,
                "each joint needs one potentiometer channel");
+_Static_assert(JOINT_CAL_BLOB_SIZE % 4U == 0U && JOINT_CAL_BLOB_SIZE <= 1024U &&
+                   JOINT_CAL_BLOB_V3_SIZE % 4U == 0U &&
+                   JOINT_CAL_BLOB_V2_SIZE % 4U == 0U,
+               "param flash records must be multiples of 4, at most 1024");
 
 /** @brief 单次六路 ADC 扫描的等待超时，单位毫秒。 */
 #define ADC_TIMEOUT_MS (5U)
@@ -43,16 +47,24 @@ static bool joint_brake(unsigned index)
 /**
  * @brief 初始化 Flash 参数存储并恢复上次保存的标定和控制参数。
  *
- * 只有旧格式（版本 2）记录时，恢复其中的标定并立即按新格式保存。
+ * 只有旧格式（版本 3 或版本 2）记录时，恢复其中的参数并立即按新格式保存，
+ * 免得刷新固件后丢失标定。
  *
  * @return 恢复的关节数。
  * @note 需要擦除备用扇区时会阻塞约 2 秒，只在初始化阶段调用。
  */
 static unsigned load_calibration(void)
 {
-    /* 必须在 init 之前读旧记录：init 换用新长度后可能擦掉旧记录所在扇区。 */
-    static uint8_t old[JOINT_CAL_BLOB_V2_SIZE];
-    bool has_old = bsp_param_flash_peek(JOINT_CAL_BLOB_V2_SIZE, old) == BSP_OK;
+    /* 必须在 init 之前读旧记录：init 换用新长度后可能擦掉旧记录所在扇区。
+     * 先找版本 3，没有再找版本 2。 */
+    static uint8_t old[JOINT_CAL_BLOB_V3_SIZE];
+    uint32_t old_size = JOINT_CAL_BLOB_V3_SIZE;
+    bool has_old = bsp_param_flash_peek(old_size, old) == BSP_OK;
+    if (!has_old)
+    {
+        old_size = JOINT_CAL_BLOB_V2_SIZE;
+        has_old = bsp_param_flash_peek(old_size, old) == BSP_OK;
+    }
     bsp_status_t status = bsp_param_flash_init(JOINT_CAL_BLOB_SIZE);
     s_is_store_ok = (status == BSP_OK);
     /* 备用扇区擦除失败（ERR_HAL）时已有记录仍可读，只是之后保存可能失败。 */
@@ -66,8 +78,9 @@ static unsigned load_calibration(void)
         return joint_cal_import(&s_joints, blob, sizeof(blob));
     }
     unsigned restored =
-        has_old ? joint_cal_import(&s_joints, old, sizeof(old)) : 0U;
-    if (restored > 0U)
+        has_old ? joint_cal_import(&s_joints, old, old_size) : 0U;
+    /* 版本 3 即使没有已标定的关节也带着控制参数，同样要转存。 */
+    if (restored > 0U || (has_old && old_size == JOINT_CAL_BLOB_V3_SIZE))
     {
         (void)joint_service_save();
     }

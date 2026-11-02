@@ -11,7 +11,8 @@
  * 改为短脉冲点动）、比例式（占空比 = 起转占空比 + kp × 误差，进入容差和换向
  * 时先短路制动再滑行）和轨迹式（按五次多项式规划位置、速度、加速度都连续的
  * 参考轨迹，用速度前馈、摩擦前馈加 PI 反馈跟踪它，见 joint_traj.h；可设定
- * 单向逼近，反向到达时先越过目标再回来，消除减速箱背隙的影响）。
+ * 可设定单向逼近，三种方式都适用：反向到达时先越过目标再回来，让最后一段
+ * 总朝同一个方向走，消除背隙和回程误差）。
  * 进入容差后保持一段时间判定到达；传感器失效、超时、
  * 越限、反向或停滞都会停机并报故障，故障同时锁存为故障位，由
  * joint_clear_faults() 按原因是否消失清除。每次采样还会估计各关节转速。
@@ -36,13 +37,19 @@
 #define JOINT_POT_MAX_OHMS (1000000U)
 
 /** @brief 标定数据序列化格式的版本；格式变化时加一。 */
-#define JOINT_CAL_BLOB_VERSION (3U)
+#define JOINT_CAL_BLOB_VERSION (4U)
 
-/** @brief 序列化后每个关节占用的字节数：28 字节标定加 8 字节控制参数。 */
-#define JOINT_CAL_BLOB_ENTRY_SIZE (36U)
+/**
+ * @brief 序列化后每个关节占用的字节数：28 字节标定、8 字节控制参数、
+ *        8 字节单向逼近参数。
+ */
+#define JOINT_CAL_BLOB_ENTRY_SIZE (44U)
 
 /** @brief 序列化后的总字节数：4 字节头加每个关节一项，是 4 的倍数。 */
 #define JOINT_CAL_BLOB_SIZE (4U + JOINT_COUNT * JOINT_CAL_BLOB_ENTRY_SIZE)
+
+/** @brief 旧格式（版本 3，没有单向逼近参数）的总字节数，用于迁移。 */
+#define JOINT_CAL_BLOB_V3_SIZE (4U + JOINT_COUNT * 36U)
 
 /** @brief 旧格式（版本 2，只有标定、没有控制参数）的总字节数，用于迁移。 */
 #define JOINT_CAL_BLOB_V2_SIZE (4U + JOINT_COUNT * 28U)
@@ -121,11 +128,14 @@ typedef struct
 } joint_tune_t;
 
 /**
- * @brief 轨迹式的逐关节参数，上电取 app_config.h 的默认值，目前不存 Flash。
+ * @brief 单向逼近和轨迹式的逐关节参数，上电取 app_config.h 的默认值。
+ *
+ * approach、backlash、overshoot 对三种控制方式都有效，随标定保存到 Flash；
+ * kv 只用于轨迹式，不保存。
  */
 typedef struct
 {
-    int approach;      /**< 规定的逼近方向：+1 角度增大方向，-1 减小，0 不限定。 */
+    int approach;      /**< 最后一段的方向：+1 角度增大，-1 角度减小，0 不限定。 */
     int32_t backlash;  /**< 背隙，毫度；超调量被限位压缩到小于它时放弃单向逼近。 */
     int32_t overshoot; /**< 反向到达时越过目标的量，毫度。 */
     unsigned kv;       /**< 速度前馈，千分比/(度/秒)。 */
@@ -172,6 +182,9 @@ typedef struct
     int32_t seg_angle;      /**< 当前段开始时的实际角度，用于判断方向错误。 */
     int32_t ref;            /**< 当前参考位置，毫度。 */
     int32_t ref_speed;      /**< 当前参考速度，毫度/秒；进入容差后为 0。 */
+    /* 以下只在比例式和开关式中使用。 */
+    int32_t goal;           /**< 当前这一段要去的角度：中间点或目标，毫度。 */
+    bool via_pending;       /**< 单向逼近时是否还在去中间点的路上。 */
     float integral;         /**< PI 积分项，千分比。 */
     uint32_t tick_ms;       /**< 上一次控制的时刻，用于积分。 */
 } joint_motion_t;
@@ -280,7 +293,7 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
                            joint_tune_t tune);
 
 /**
- * @brief 设置轨迹式的逐关节参数；不要求已标定。
+ * @brief 设置单向逼近和轨迹式的逐关节参数；不要求已标定。
  *
  * @return NULL 表示成功；"JOINT_ID"、"BUSY" 或 "TUNE_PARAM"（方向不是 -1、0、1，
  *         背隙或超调量为负或超过 30°，或超调量小于背隙）。
@@ -329,7 +342,8 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
                              uint32_t now);
 
 /**
- * @brief 当前参考位置，毫度：轨迹式运动中为轨迹上的参考点，其他情况为目标。
+ * @brief 当前参考位置，毫度：轨迹式运动中为轨迹上的参考点，其他方式运动中为
+ *        这一段要去的角度（单向逼近时先是中间点），停止时为目标。
  */
 int32_t joint_reference(const joint_state_t *s);
 
@@ -376,8 +390,9 @@ const char *joint_phase_name(joint_phase_t phase);
  *   头：版本 u8、关节数 u8、保留 u16；
  *   每个关节：已标定 u8、方向 i8、占空比 u16、raw_a u16、raw_b u16、
  *            angle_a i32、angle_b i32、容差 u32、limit_min i32、limit_max i32，
- *            控制参数有效 u8、控制方式 u8、kp u16、起转占空比 u16、制动 u16。
- * 版本 2 没有最后 8 字节，其余相同。
+ *            控制参数有效 u8、控制方式 u8、kp u16、起转占空比 u16、制动 u16，
+ *            逼近参数有效 u8、逼近方向 i8、保留 u16、背隙 u16、超调量 u16。
+ * 版本 3 没有最后 8 字节，版本 2 没有最后 16 字节，其余相同。
  */
 void joint_cal_export(const joint_control_t *j,
                       uint8_t blob[JOINT_CAL_BLOB_SIZE]);
@@ -385,7 +400,8 @@ void joint_cal_export(const joint_control_t *j,
 /**
  * @brief 从 joint_cal_export() 的结果恢复标定和控制参数。
  *
- * 接受版本 3（size 为 JOINT_CAL_BLOB_SIZE）和版本 2（size 为
+ * 接受版本 4（size 为 JOINT_CAL_BLOB_SIZE）、版本 3（size 为
+ * JOINT_CAL_BLOB_V3_SIZE，没有逼近参数）和版本 2（size 为
  * JOINT_CAL_BLOB_V2_SIZE，只有标定）。版本、长度或关节数不符时什么都不做；
  * 每个关节的参数仍经 joint_calibrate()、joint_set_tune() 校验，不合法的项
  * 被跳过，未标记的关节保持原状。

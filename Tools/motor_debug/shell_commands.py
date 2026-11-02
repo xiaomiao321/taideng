@@ -25,6 +25,9 @@ HELP = """命令（占空比用百分数，时长用 ms）：
   tune M1 traj 5 25 [80]  轨迹式控制：平滑轨迹加前馈和 PI 跟踪，反馈每度 5%，
                          实测起转 25%，最高 80%（省略不改），不制动；
                          速度、加速度、单向逼近等参数暂在 app_config.h
+  approach M1 + 1.5 3.5   单向逼近：最后一段角度增大（- 为减小），背隙 1.5°，
+                         反向到达时先越过目标 3.5° 再回来，三种控制方式都有效，
+                         保存到 MCU；approach M1 off 取消。超调量至少取背隙加容差
   trace M1 on / off       每 10ms 上报 M1 的读数、噪声、角度、占空比，
                          自动存成 records 目录下的 CSV
   pwm [5 brake]          查询或设置电机 PWM：频率 1/2/4/5/10/20kHz，
@@ -48,7 +51,7 @@ HELP = """命令（占空比用百分数，时长用 ms）：
 ↑ ↓ 历史；Tab 补全；Ctrl+L 清屏；输入框 Ctrl+C 或 ESC 停止。
 序号与心跳自动处理。命令一次一行，不执行操作系统命令。"""
 
-COMMANDS = ("help", "motor", "angle", "joint", "jlim", "jnom", "tune", "trace", "pwm", "lamp", "buzzer", "power", "led", "log", "adc", "key",
+COMMANDS = ("help", "motor", "angle", "joint", "jlim", "jnom", "tune", "approach", "trace", "pwm", "lamp", "buzzer", "power", "led", "log", "adc", "key",
             "status", "test", "pass", "fail", "stop", "info", "watch", "history", "clear")
 
 @dataclass(frozen=True)
@@ -139,6 +142,10 @@ def parse_shell(text):
         return send("JTUNE", int(args[0][1]), (1, percent(args[2]), percent(args[3]), integer(args[4]), *map(percent, args[5:])))
     if name == "tune" and len(args) in (4, 5) and args[1].lower() == "traj" and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JTUNE", int(args[0][1]), (2, percent(args[2]), percent(args[3]), 0, *map(percent, args[4:])))
+    if name == "approach" and len(args) == 2 and args[1].lower() == "off" and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JDIR", int(args[0][1]), (0, 0, 0))
+    if name == "approach" and len(args) == 4 and args[1] in ("+", "-") and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JDIR", int(args[0][1]), (1 if args[1] == "+" else -1, millidegrees(args[2]), millidegrees(args[3])))
     if name == "trace" and len(args) == 2 and args[1].lower() in ("on", "off") and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JTRACE", int(args[0][1]), int(args[1].lower() == "on"))
     if name == "pwm" and not args:
@@ -186,7 +193,7 @@ def complete(text):
         options = {"motor": [f"M{i}" for i in range(1, 9)],
                    "angle": [f"M{i}" for i in range(1, 7)], "joint": [f"M{i}" for i in range(1, 7)],
                    "jlim": [f"M{i}" for i in range(1, 7)], "jnom": [f"M{i}" for i in range(1, 7)],
-                   "tune": [f"M{i}" for i in range(1, 7)], "trace": [f"M{i}" for i in range(1, 7)],
+                   "tune": [f"M{i}" for i in range(1, 7)], "approach": [f"M{i}" for i in range(1, 7)], "trace": [f"M{i}" for i in range(1, 7)],
                    "lamp": ["UP1", "UP2", "UP3", "UP4", "DOWN1", "DOWN2", "DOWN3"],
                    "test": list(BY_NAME), "watch": ["on", "off"],
                    "adc": ["test"], "key": ["test"]}.get(words[0].lower(), [])

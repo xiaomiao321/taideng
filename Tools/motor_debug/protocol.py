@@ -30,7 +30,7 @@ def command(kind, seq, motor=1, duty=800, duration=500):
         return f"MPWM {seq} {motor} {duty}\n"
     if kind in ("PING", "STOP", "INFO"):
         return f"{kind} {seq}" + (" ALL\n" if kind == "STOP" else "\n")
-    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE"):
+    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "JDIR"):
         if type(motor) is not int or not 1 <= motor <= 6:
             raise ValueError("只有 M1～M6 支持角度控制")
         if kind == "CAL":
@@ -51,6 +51,17 @@ def command(kind, seq, motor=1, duty=800, duration=500):
             return f"JLIM {seq} M{motor} {duty[0]} {duty[1]}\n"
         if kind == "JGET":
             return f"JGET {seq} M{motor}\n"
+        if kind == "JDIR":
+            if not isinstance(duty, (tuple, list)) or len(duty) != 3:
+                raise ValueError("单向逼近参数不完整")
+            direction, backlash, overshoot = duty
+            if direction not in (-1, 0, 1):
+                raise ValueError("逼近方向须为 +、- 或 0")
+            if type(backlash) is not int or not 0 <= backlash <= 30000:
+                raise ValueError("背隙须为 0～30°")
+            if type(overshoot) is not int or not backlash <= overshoot <= 30000:
+                raise ValueError("超调量须不小于背隙，且不超过 30°")
+            return f"JDIR {seq} M{motor} {direction} {backlash} {overshoot}\n"
         if kind == "JTRACE":
             if duty not in (0, 1):
                 raise ValueError("数据记录参数须为 on 或 off")
@@ -104,6 +115,11 @@ def parse(line):
                 raise ValueError()
             # 最高占空比：旧固件不报为 None，未标定时固件报 0
             return "JTUNE", int(p[1]), int(p[2][1]), mode, kp, low, brake, (high or [None])[0]
+        if p[0] == "JDIR" and len(p) == 6 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
+            direction, backlash, overshoot = map(int, p[3:6])
+            if direction not in (-1, 0, 1) or not 0 <= backlash <= overshoot <= 30000:
+                raise ValueError()
+            return "JDIR", int(p[1]), int(p[2][1]), direction, backlash, overshoot
         if p[0] == "MPWM" and len(p) == 3:
             khz, slow = int(p[1]), int(p[2])
             if slow not in (0, 1):

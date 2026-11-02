@@ -807,6 +807,105 @@ static void traj_error_test(void)
     assert(!strcmp(joint_set_traj(&j, 6, j.states[0].traj), "JOINT_ID"));
 }
 
+/**
+ * 比例式单向逼近：规定最后一段角度增大。从 90° 去 30° 时先越过 30° 到
+ * 中间点，制动、换向后从下往上回到 30°；从下往上去时直接到。
+ */
+static void p_approach_test(void)
+{
+    joint_control_t j = fresh(normal());
+    joint_traj_cfg_t cfg = j.states[0].traj;
+    cfg.approach = 1;
+    cfg.backlash = 1000;
+    cfg.overshoot = 5000;
+    assert(!joint_set_traj(&j, 0, cfg));
+    double raw[6] = {2000, 2000, 2000, 2000, 2000, 2000}, speed[6] = {0};
+    feed_all(&j, raw, 0); /* 90° */
+    assert(!joint_move(&j, 50, 0, 30000, 20000, 0));
+    assert(j.states[0].motion.via_pending &&
+           j.states[0].motion.goal == 25000 &&
+           joint_reference(&j.states[0]) == 25000);
+    int32_t lowest = INT32_MAX;
+    int last_drive = 0;
+    for (uint32_t now = 10; now < 20000 && joint_any_active(&j); now += 10)
+    {
+        step_plant(raw, speed, 0);
+        feed_all(&j, raw, now);
+        assert(joint_tick(&j, now));
+        lowest = j.states[0].angle < lowest ? j.states[0].angle : lowest;
+        last_drive = duties[0] ? duties[0] : last_drive;
+    }
+    assert(strstr(reply, "REACHED") && j.states[0].phase == JOINT_DONE);
+    assert(abs(j.states[0].angle - 30000) <= 2000);
+    /* 越过了目标至少 overshoot 减容差，最后一段电机正转即角度增大。 */
+    assert(lowest <= 30000 - 5000 + 2000);
+    assert(last_drive > 0);
+    assert(j.states[0].target == 30000);
+    printf("p approach: 90->30 lowest %ld, final %ld mdeg\n", (long)lowest,
+           (long)j.states[0].angle);
+
+    /* 同向：从 10° 去 30° 不需要中间点。 */
+    raw[0] = 1111; /* 约 10° */
+    speed[0] = 0;
+    feed_all(&j, raw, 30000);
+    assert(!joint_move(&j, 51, 0, 30000, 20000, 30000));
+    assert(!j.states[0].motion.via_pending &&
+           j.states[0].motion.goal == 30000);
+    assert(joint_cancel(&j));
+
+    /* 中间点被下限压缩到小于背隙：放弃，回报 JNOTE，直接去目标。 */
+    assert(!joint_set_limits(&j, 0, 29500, 180000));
+    raw[0] = 2000;
+    feed_all(&j, raw, 31000);
+    log_text[0] = 0;
+    assert(!joint_move(&j, 52, 0, 30000, 20000, 31000));
+    assert(!j.states[0].motion.via_pending &&
+           strstr(log_text, "JNOTE 52 M1 NO_OVERSHOOT"));
+    assert(joint_cancel(&j));
+}
+
+/** 逼近参数随标定保存；版本 3 记录只恢复标定和控制参数，逼近参数保持默认。 */
+static void approach_blob_test(void)
+{
+    joint_control_t source = fresh(normal());
+    joint_traj_cfg_t cfg = source.states[0].traj;
+    cfg.approach = -1;
+    cfg.backlash = 1500;
+    cfg.overshoot = 4000;
+    assert(!joint_set_traj(&source, 0, cfg));
+    assert(!joint_set_tune(&source, 0, p_tune()));
+    uint8_t blob[JOINT_CAL_BLOB_SIZE];
+    joint_cal_export(&source, blob);
+    assert(blob[0] == 4U);
+    joint_control_t restored = fresh(normal());
+    assert(joint_cal_import(&restored, blob, sizeof(blob)) == 1U);
+    assert(restored.states[0].traj.approach == -1 &&
+           restored.states[0].traj.backlash == 1500 &&
+           restored.states[0].traj.overshoot == 4000);
+    assert(restored.states[1].traj.approach == 0);
+
+    /* 由版本 4 构造版本 3：去掉每项最后 8 字节。 */
+    uint8_t v3[JOINT_CAL_BLOB_V3_SIZE];
+    memcpy(v3, blob, 4);
+    v3[0] = 3U;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        memcpy(&v3[4 + i * 36], &blob[4 + i * JOINT_CAL_BLOB_ENTRY_SIZE], 36);
+    }
+    joint_control_t migrated = fresh(normal());
+    migrated.states[0].calibrated = false;
+    assert(joint_cal_import(&migrated, v3, sizeof(v3)) == 1U);
+    assert(!memcmp(&migrated.states[0].cal, &source.states[0].cal,
+                   sizeof(joint_cal_t)));
+    assert(!memcmp(&migrated.states[0].tune, &source.states[0].tune,
+                   sizeof(joint_tune_t)));
+    assert(migrated.states[0].traj.approach == 0);
+    /* 版本号和长度对不上时不导入。 */
+    assert(joint_cal_import(&migrated, v3, sizeof(blob)) == 0U);
+    v3[0] = 4U;
+    assert(joint_cal_import(&migrated, v3, sizeof(v3)) == 0U);
+}
+
 int main(void)
 {
     joint_cal_t cal = normal();
@@ -847,6 +946,8 @@ int main(void)
     traj_approach_test();
     traj_supersede_test();
     traj_error_test();
+    p_approach_test();
+    approach_blob_test();
     joint_control_t j = fresh(cal);
     assert(joint_move(&j, 1, 6, 90000, 10000, 0));
     assert(joint_move(&j, 1, 1, 90000, 10000, 0)); /* M2 not calibrated */

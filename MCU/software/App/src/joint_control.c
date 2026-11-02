@@ -21,6 +21,9 @@
 /** @brief 序列化中版本 2 每个关节的字节数，控制参数从这里开始。 */
 #define BLOB_V2_ENTRY_SIZE (28U)
 
+/** @brief 序列化中版本 3 每个关节的字节数，逼近参数从这里开始。 */
+#define BLOB_V3_ENTRY_SIZE (36U)
+
 _Static_assert(JOINT_BRAKE_MAX_MS <= JOINT_REACHED_HOLD_MS,
                "brake must end before the reached hold expires");
 
@@ -535,8 +538,41 @@ static joint_traj_point_t traj_point(const joint_motion_t *m, uint32_t now)
 }
 
 /**
- * @brief 从 from 规划到 target：规定了逼近方向且这次是反向到达时，先到越过
- *        目标 overshoot 的中间点，再以 JOINT_RETURN_SPEED_MDEG_S 回到目标。
+ * @brief 单向逼近：从 from 去 target 是否要先越过目标到中间点。
+ *
+ * 规定了逼近方向、距离超过容差、而这次的运动方向与规定方向相反时，中间点
+ * 取在目标另一侧 overshoot 处，压到允许范围内；压完后离目标不足 backlash
+ * 时放弃单向逼近，*skipped 置 true。
+ *
+ * @return true 表示要先去 *via。
+ */
+static bool approach_via(const joint_state_t *s, int32_t from, int32_t target,
+                         int32_t *via, bool *skipped)
+{
+    int approach = s->traj.approach;
+    int32_t distance = target - from;
+    *skipped = false;
+    if (approach == 0 || magnitude(distance) <= (int32_t)s->cal.tolerance ||
+        (distance > 0 ? 1 : -1) == approach)
+    {
+        return false;
+    }
+    /* 中间点在目标的另一侧：沿本次运动方向越过目标，再按规定方向回来。 */
+    int32_t point = target - approach * s->traj.overshoot;
+    point = point < s->cal.limit_min ? s->cal.limit_min : point;
+    point = point > s->cal.limit_max ? s->cal.limit_max : point;
+    if (magnitude(point - target) < s->traj.backlash || point == target)
+    {
+        *skipped = true;
+        return false;
+    }
+    *via = point;
+    return true;
+}
+
+/**
+ * @brief 从 from 规划到 target：需要单向逼近时先到中间点，再以
+ *        JOINT_RETURN_SPEED_MDEG_S 回到目标。
  */
 static void plan_traj(const joint_state_t *s, joint_traj_point_t from,
                       int32_t target, int32_t speed, traj_plan_t *out)
@@ -547,33 +583,19 @@ static void plan_traj(const joint_state_t *s, joint_traj_point_t from,
         vmax = (float)speed;
     }
     float amax = (float)JOINT_TRAJ_AMAX_MDEG_S2;
-    float distance = (float)target - from.p;
-    int approach = s->traj.approach;
-    bool reverse = approach != 0 &&
-                   fabsf(distance) > (float)s->cal.tolerance &&
-                   (distance > 0.0f ? 1 : -1) != approach;
-    out->skipped = false;
+    int32_t via = target;
     out->seg_count = 1U;
-    if (reverse)
+    if (approach_via(s, (int32_t)lroundf(from.p), target, &via, &out->skipped))
     {
-        /* 中间点在目标的另一侧：沿本次运动方向越过目标，再按规定方向回来。 */
-        int32_t via = target - approach * s->traj.overshoot;
-        via = via < s->cal.limit_min ? s->cal.limit_min : via;
-        via = via > s->cal.limit_max ? s->cal.limit_max : via;
-        if (magnitude(via - target) >= s->traj.backlash &&
-            magnitude(via - target) > 0)
-        {
-            float back = (float)JOINT_RETURN_SPEED_MDEG_S;
-            joint_traj_plan(&out->seg[0], from, (float)via, vmax, amax,
-                            JOINT_TRAJ_MIN_MS);
-            joint_traj_point_t rest = {(float)via, 0.0f, 0.0f};
-            joint_traj_plan(&out->seg[1], rest, (float)target,
-                            back < vmax ? back : vmax, amax,
-                            JOINT_TRAJ_MIN_MS);
-            out->seg_count = 2U;
-            return;
-        }
-        out->skipped = true;
+        float back = (float)JOINT_RETURN_SPEED_MDEG_S;
+        joint_traj_plan(&out->seg[0], from, (float)via, vmax, amax,
+                        JOINT_TRAJ_MIN_MS);
+        joint_traj_point_t rest = {(float)via, 0.0f, 0.0f};
+        joint_traj_plan(&out->seg[1], rest, (float)target,
+                        back < vmax ? back : vmax, amax,
+                        JOINT_TRAJ_MIN_MS);
+        out->seg_count = 2U;
+        return;
     }
     joint_traj_plan(&out->seg[0], from, (float)target, vmax, amax,
                     JOINT_TRAJ_MIN_MS);
@@ -617,6 +639,12 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
     joint_motion_t *m = &s->motion;
     bool is_traj = s->tune.mode == JOINT_MODE_TRAJ;
     traj_plan_t plan;
+    int32_t via = target;
+    bool has_via = false, skipped = false;
+    if (!is_traj)
+    {
+        has_via = approach_via(s, s->angle, target, &via, &skipped);
+    }
     if (is_traj)
     {
         /* 运动中换目标时从当前参考状态接着走，否则从实际位置静止出发。 */
@@ -653,7 +681,9 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
     m->progress_ms = now;
     m->timeout_ms = timeout;
     m->stable = false;
-    m->initial_error = magnitude(target - s->angle);
+    m->goal = has_via ? via : target;
+    m->via_pending = has_via;
+    m->initial_error = magnitude(m->goal - s->angle);
     m->best_error = m->initial_error;
     m->pulse_on = false;
     m->near_mode = false;
@@ -675,21 +705,25 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
         m->integral = 0.0f;
         m->tick_ms = now;
         s->phase = JOINT_MOVING;
-        if (plan.skipped)
-        {
-            char line[48];
-            (void)snprintf(line, sizeof(line), "JNOTE %u M%u NO_OVERSHOOT\r\n",
-                           seq, index + 1U);
-            j->hw.reply(line);
-        }
+        skipped = plan.skipped;
+    }
+    if (skipped)
+    {
+        char line[48];
+        (void)snprintf(line, sizeof(line), "JNOTE %u M%u NO_OVERSHOOT\r\n", seq,
+                       index + 1U);
+        j->hw.reply(line);
     }
     return NULL;
 }
 
 int32_t joint_reference(const joint_state_t *s)
 {
-    return (s->motion.active && s->motion.seg_count > 0U) ? s->motion.ref
-                                                          : s->target;
+    if (!s->motion.active)
+    {
+        return s->target;
+    }
+    return s->motion.seg_count > 0U ? s->motion.ref : s->motion.goal;
 }
 
 /** @brief est 中从最旧样本数起第 k 个样本的下标。 */
@@ -932,7 +966,22 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
     {
         return tick_traj(j, i, now);
     }
-    int32_t error = s->target - s->angle, distance = magnitude(error);
+    if (m->via_pending)
+    {
+        /* 单向逼近：到了中间点附近或已越过，改去目标。之后误差反号，按换向
+         * 处理：比例式先制动，再停 JOINT_REVERSE_SETTLE_MS 后反向。 */
+        int travel = m->goal > s->target ? 1 : -1;
+        if (travel * (s->angle - m->goal) >= -(int32_t)s->cal.tolerance)
+        {
+            m->via_pending = false;
+            m->goal = s->target;
+            m->stable = false;
+            m->initial_error = magnitude(m->goal - s->angle);
+            m->best_error = m->initial_error;
+            m->progress_ms = now;
+        }
+    }
+    int32_t error = m->goal - s->angle, distance = magnitude(error);
     bool proportional = s->tune.mode == JOINT_MODE_P;
     if (distance <= (int32_t)s->cal.tolerance)
     {
@@ -1106,6 +1155,11 @@ void joint_cal_export(const joint_control_t *j,
         put_u16(&t[2], (uint16_t)s->tune.kp);
         put_u16(&t[4], (uint16_t)s->tune.duty_min);
         put_u16(&t[6], (uint16_t)s->tune.brake_ms);
+        uint8_t *a = &p[BLOB_V3_ENTRY_SIZE];
+        a[0] = 1U;
+        a[1] = (uint8_t)(int8_t)s->traj.approach;
+        put_u16(&a[4], (uint16_t)s->traj.backlash);
+        put_u16(&a[6], (uint16_t)s->traj.overshoot);
         if (!s->calibrated)
         {
             continue;
@@ -1126,14 +1180,17 @@ void joint_cal_export(const joint_control_t *j,
 unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
                           uint32_t size)
 {
-    bool is_v3 =
+    bool is_v4 =
         blob[0] == JOINT_CAL_BLOB_VERSION && size == JOINT_CAL_BLOB_SIZE;
+    bool is_v3 = (blob[0] == 3U && size == JOINT_CAL_BLOB_V3_SIZE) || is_v4;
     bool is_v2 = blob[0] == 2U && size == JOINT_CAL_BLOB_V2_SIZE;
     if ((!is_v3 && !is_v2) || blob[1] != JOINT_COUNT)
     {
         return 0U;
     }
-    unsigned entry = is_v3 ? JOINT_CAL_BLOB_ENTRY_SIZE : BLOB_V2_ENTRY_SIZE;
+    unsigned entry = is_v4   ? JOINT_CAL_BLOB_ENTRY_SIZE
+                     : is_v3 ? BLOB_V3_ENTRY_SIZE
+                             : BLOB_V2_ENTRY_SIZE;
     unsigned restored = 0U;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
@@ -1144,6 +1201,15 @@ unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
             joint_tune_t tune = {(joint_mode_t)t[1], get_u16(&t[2]),
                                  get_u16(&t[4]), get_u16(&t[6])};
             (void)joint_set_tune(j, i, tune);
+        }
+        const uint8_t *a = &p[BLOB_V3_ENTRY_SIZE];
+        if (is_v4 && a[0] == 1U)
+        {
+            joint_traj_cfg_t cfg = j->states[i].traj;
+            cfg.approach = (int8_t)a[1];
+            cfg.backlash = get_u16(&a[4]);
+            cfg.overshoot = get_u16(&a[6]);
+            (void)joint_set_traj(j, i, cfg);
         }
         if (p[0] != 1U)
         {

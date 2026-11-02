@@ -365,6 +365,10 @@ static void joint_report(unsigned index, uint32_t now, bool config)
                        (unsigned)s->tune.mode, s->tune.kp, s->tune.duty_min,
                        s->tune.brake_ms, s->calibrated ? s->cal.duty : 0U);
         (void)send_line(out);
+        (void)snprintf(out, sizeof(out), "JDIR %lu M%u %d %ld %ld\r\n",
+                       (unsigned long)now, index + 1U, s->traj.approach,
+                       (long)s->traj.backlash, (long)s->traj.overshoot);
+        (void)send_line(out);
     }
     bool is_fresh =
         s_joints->valid &&
@@ -531,6 +535,20 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
                 s_joints->states[index].tune = old;
             }
         }
+        if (!err)
+        {
+            commit_calibration(now);
+        }
+        return err;
+    }
+    /* 单向逼近：方向 -1/0/1、背隙、超调量（毫度），随标定保存。 */
+    if (!strcmp(op, "JDIR") && count == 3U)
+    {
+        joint_traj_cfg_t cfg = s_joints->states[index].traj;
+        cfg.approach = (int)v[0];
+        cfg.backlash = v[1];
+        cfg.overshoot = v[2];
+        const char *err = joint_set_traj(s_joints, index, cfg);
         if (!err)
         {
             commit_calibration(now);

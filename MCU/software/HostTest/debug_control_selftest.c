@@ -53,6 +53,10 @@ static const char *hw_joint(const char *op, unsigned seq, unsigned id,
     {
         assert(count == 1 && v[0] == 1);
     }
+    else if (!strcmp(op, "JDIR"))
+    {
+        assert(count == 3 && v[0] == 1 && v[1] == 1500 && v[2] == 4000);
+    }
     else
     {
         assert(!strcmp(op, "JGET") && count == 0);
@@ -339,13 +343,22 @@ int main(void)
     assert(joint_calls == 6 && strstr(reply, "JOINT_PARAM"));
     debug_control_line(&c, "JTUNE 148 M1 1 30 300 50 700", 17);
     assert(joint_calls == 7 && strstr(reply, "ACK 148 JTUNE"));
+    /* JDIR：方向、背隙、超调量三个参数，和 JTUNE 一样要心跳并先停机。 */
+    stops_before = stops;
+    debug_control_line(&c, "JDIR 149 M1 1 1500 4000", 17);
+    assert(joint_calls == 8 && strstr(reply, "ACK 149 JDIR") &&
+           stops == stops_before + 1);
+    debug_control_line(&c, "JDIR 150 M1 1 1500", 17);
+    assert(joint_calls == 8 && strstr(reply, "JOINT_PARAM"));
     c.linked = false;
     stops_before = stops;
     debug_control_line(&c, "JTRACE 48 M1 1", 18);
-    assert(joint_calls == 8 && strstr(reply, "ACK 48 JTRACE") &&
+    assert(joint_calls == 9 && strstr(reply, "ACK 48 JTRACE") &&
            stops == stops_before);
     debug_control_line(&c, "JTUNE 49 M1 1 30 300 50", 19);
-    assert(joint_calls == 8 && strstr(reply, "NO_HEARTBEAT"));
+    assert(joint_calls == 9 && strstr(reply, "NO_HEARTBEAT"));
+    debug_control_line(&c, "JDIR 151 M1 1 1500 4000", 19);
+    assert(joint_calls == 9 && strstr(reply, "NO_HEARTBEAT"));
     /* MPWM 交给 aux，与 LSET 一样要心跳。 */
     c.hw.aux = hw_aux;
     debug_control_line(&c, "MPWM 50 5 1", 20);

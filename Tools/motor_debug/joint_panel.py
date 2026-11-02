@@ -8,6 +8,7 @@ from shell_commands import percent, kilohms
 
 DIRECTIONS = {"正转使角度增大": 1, "正转使角度减小": -1}
 MODES = {"开关式": 0, "比例式": 1, "轨迹式": 2}
+APPROACHES = {"不限定": 0, "最后角度增大": 1, "最后角度减小": -1}
 DECAYS = {"滑行": 0, "刹车": 1}
 PWM_KHZ = ("1", "2", "4", "5", "10", "20")
 SENSOR_DIRECTIONS = {"角度增大时 ADC 增大": 1, "角度增大时 ADC 减小": -1}
@@ -33,6 +34,7 @@ class JointPanel:
         self.history = deque(maxlen=150)
         self.last_query = 0.
         self.tunes = {}      # MCU 回报的控制参数（JTUNE），键为关节号
+        self.approaches = {}  # MCU 回报的单向逼近参数（JDIR），键为关节号
         self.pwm = None      # MCU 回报的 (kHz, 刹车)
         self.tracing = False
         self.trace_at = 0.   # 最近一次收到当前关节 JT 行的时刻
@@ -147,8 +149,21 @@ class JointPanel:
         self.tune_btn.grid(row=1, column=10, padx=8)
         self.tune_status = tk.StringVar(value="MCU：—")
         ttk.Label(tune, textvariable=self.tune_status).grid(row=2, column=0, columnspan=11, sticky="w")
+        self.approach_fields = {"dir": tk.StringVar(value="不限定"), "backlash": tk.StringVar(),
+                                "overshoot": tk.StringVar()}
+        ttk.Label(tune, text="单向逼近").grid(row=3, column=0, padx=5, pady=4, sticky="w")
+        ttk.Combobox(tune, textvariable=self.approach_fields["dir"], values=list(APPROACHES), state="readonly",
+                     width=12).grid(row=3, column=1, columnspan=2, sticky="w")
+        ttk.Label(tune, text="背隙 °").grid(row=3, column=3, padx=(12, 5))
+        ttk.Entry(tune, textvariable=self.approach_fields["backlash"], width=6).grid(row=3, column=4, sticky="w")
+        ttk.Label(tune, text="超调 °").grid(row=3, column=5, padx=(12, 5))
+        ttk.Entry(tune, textvariable=self.approach_fields["overshoot"], width=6).grid(row=3, column=6, sticky="w")
+        self.approach_btn = ttk.Button(tune, text="下发单向逼近", command=self.apply_approach)
+        self.approach_btn.grid(row=3, column=7, columnspan=2, padx=8, sticky="w")
+        self.approach_status = tk.StringVar(value="反向到达时先越过目标再回来，最后一段总朝同一方向，消除回程误差；超调至少取背隙加容差")
+        ttk.Label(tune, textvariable=self.approach_status).grid(row=4, column=0, columnspan=11, sticky="w")
         record = ttk.Frame(tune)
-        record.grid(row=3, column=0, columnspan=11, sticky="w", pady=(6, 0))
+        record.grid(row=5, column=0, columnspan=11, sticky="w", pady=(6, 0))
         self.trace_btn = ttk.Button(record, text="开始记录", command=self.toggle_trace)
         self.trace_btn.pack(side="left")
         self.trace_status = tk.StringVar(value="每 10ms 记录当前关节的读数、噪声、角度、占空比，存为 records 目录下的 CSV")
@@ -228,6 +243,7 @@ class JointPanel:
         # 参考点读数属于上一个关节，切换后必须重新记录；范围改用新关节的 MCU 值。
         for key in ("raw_ref", "limit_min", "limit_max"): self.nominal[key].set("")
         self.tune_fields["high"].set("")  # 收到新关节的 JTUNE 后重新填入
+        for key in ("backlash", "overshoot"): self.approach_fields[key].set("")  # 收到 JDIR 后重新填入
         self.fill_limits()
         for key, value in self.forms.get(self.selected, {}).items(): self.fields[key].set(value)
         self.history.clear()
@@ -385,6 +401,20 @@ class JointPanel:
             self.notice.set("下发控制参数会先停止全部电机，并随标定保存到 MCU；最高占空比即标定里的占空比，两种方式都受它限制。")
         except (KeyError, ValueError) as exc: messagebox.showerror("控制参数", str(exc))
 
+    def apply_approach(self):
+        try:
+            f = {k: v.get().strip() for k, v in self.approach_fields.items()}
+            direction = APPROACHES[f["dir"]]
+            backlash = millidegrees(f["backlash"] or "0")
+            overshoot = millidegrees(f["overshoot"] or "0")
+            if direction == 0: backlash = overshoot = 0
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持电机调试的新固件")
+            if not self.app.confirm_exclusive(): return
+            self.app.worker.submit("JDIR", self.selected, (direction, backlash, overshoot))
+            self.notice.set("下发单向逼近参数会先停止全部电机，并随标定保存到 MCU；比例式、开关式、轨迹式都按它逼近。")
+        except (KeyError, ValueError) as exc: messagebox.showerror("单向逼近", str(exc))
+
     def toggle_trace(self):
         if not self.capable or not self.app.ready or not self.app.worker:
             messagebox.showerror("数据记录", "请连接支持电机调试的新固件")
@@ -421,7 +451,7 @@ class JointPanel:
         except (ValueError, OSError) as exc: messagebox.showerror("载入标定", str(exc))
 
     def sent(self, kind, seq, args):
-        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "MPWM"): self.pending[seq] = (kind, args[0])
+        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "JDIR", "MPWM"): self.pending[seq] = (kind, args[0])
 
     def receive(self, msg):
         now = time.monotonic()
@@ -435,6 +465,13 @@ class JointPanel:
             self.tunes[msg[2]] = msg[3:]
             if msg[2] == self.selected and msg[7] and not self.tune_fields["high"].get():
                 self.tune_fields["high"].set(f"{msg[7]/10:g}")
+        elif msg[0] == "JDIR":
+            self.approaches[msg[2]] = msg[3:]
+            if msg[2] == self.selected and not self.approach_fields["backlash"].get():
+                name = next(k for k, v in APPROACHES.items() if v == msg[3])
+                self.approach_fields["dir"].set(name)
+                self.approach_fields["backlash"].set(f"{msg[4]/1000:g}")
+                self.approach_fields["overshoot"].set(f"{msg[5]/1000:g}")
         elif msg[0] == "JT":
             if msg[2] == self.selected:
                 self.trace_at, self.spread = now, msg[4]
@@ -459,7 +496,8 @@ class JointPanel:
             if kind == "JTRACE" and msg[0] == "ERR": self.tracing = False
             # 同时下发多个定位、连上后一次读六个关节时，不让 ACK 盖掉别的提示。
             if kind in ("JMOVE", "JGET") and msg[0] == "ACK": return
-            label = {"MPWM": "电机 PWM", "JTUNE": f"M{joint} 控制参数", "JTRACE": f"M{joint} 数据记录"}.get(kind, f"M{joint} {kind}")
+            label = {"MPWM": "电机 PWM", "JTUNE": f"M{joint} 控制参数", "JTRACE": f"M{joint} 数据记录",
+                     "JDIR": f"M{joint} 单向逼近"}.get(kind, f"M{joint} {kind}")
             self.notice.set(f"{label}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
         elif msg[0] == "JRESULT":
             self.notice.set(f"M{msg[2]} 定位：" + {"REACHED": "已在容差内稳定 200ms，停止驱动",
@@ -467,7 +505,7 @@ class JointPanel:
 
     def disconnect(self):
         self.capable = False; self.device.clear(); self.limits.clear(); self.states.clear(); self.pending.clear()
-        self.motion = None; self.tunes.clear(); self.pwm = None; self.tracing = False; self.spread = None
+        self.motion = None; self.tunes.clear(); self.approaches.clear(); self.pwm = None; self.tracing = False; self.spread = None
 
     def refresh(self):
         now = time.monotonic()
@@ -499,6 +537,7 @@ class JointPanel:
             button["state"] = "normal" if ready else "disabled"
         self.pwm_btn["state"] = "normal" if ready else "disabled"
         self.tune_btn["state"] = "normal" if ready else "disabled"
+        self.approach_btn["state"] = "normal" if ready else "disabled"
         self.trace_btn["state"] = "normal" if self.app.ready and self.capable else "disabled"
         self.trace_btn["text"] = "停止记录" if self.tracing else "开始记录"
         self.pwm_status.set("MCU：—" if not self.pwm else
@@ -509,6 +548,11 @@ class JointPanel:
                              f"M{self.selected} MCU 当前：开关式{high}" if t[0] == 0 else
                              f"M{self.selected} MCU 当前：轨迹式 反馈每度 {t[1]/10:g}% 起转 {t[2]/10:g}%{high}" if t[0] == 2 else
                              f"M{self.selected} MCU 当前：比例式 每度 {t[1]/10:g}% 起转 {t[2]/10:g}% 制动 {t[3]}ms{high}")
+        a = self.approaches.get(self.selected)
+        if a is not None:
+            self.approach_status.set(f"M{self.selected} MCU 当前：不限定方向" if a[0] == 0 else
+                                     f"M{self.selected} MCU 当前：最后角度{'增大' if a[0] > 0 else '减小'} "
+                                     f"背隙 {a[1]/1000:g}° 超调 {a[2]/1000:g}°")
         rec = self.app.recorder
         if self.tracing and rec.file:
             noise = "" if self.spread is None else f"  本次采样极差 {self.spread}"

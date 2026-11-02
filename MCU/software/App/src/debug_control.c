@@ -287,7 +287,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
     if (!strcmp(tokens[0], "CAL") || !strcmp(tokens[0], "JMOVE") ||
         !strcmp(tokens[0], "JGET") || !strcmp(tokens[0], "JNOM") ||
         !strcmp(tokens[0], "JLIM") || !strcmp(tokens[0], "JTUNE") ||
-        !strcmp(tokens[0], "JTRACE"))
+        !strcmp(tokens[0], "JTRACE") || !strcmp(tokens[0], "JDIR"))
     {
         /* JGET、JTRACE 只读：不要求心跳，也不打断正在进行的运动。 */
         bool trace = !strcmp(tokens[0], "JTRACE");
@@ -298,6 +298,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
                          : !strcmp(tokens[0], "CAL")   ? 7U
                          : nominal                     ? MAX_JOINT_ARGS
                          : !strcmp(tokens[0], "JTUNE") ? (n == 8U ? 5U : 4U)
+                         : !strcmp(tokens[0], "JDIR")  ? 3U
                                                        : 2U;
         unsigned joint = (n >= 3U)
                              ? parse_motor_name(tokens[2], JOINT_MOTOR_COUNT)

@@ -31,6 +31,14 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(parse_shell("tune M3 traj 5 25").request, ("JTUNE", 3, (2, 50, 250, 0), 500))
         self.assertEqual(parse_shell("tune M3 traj 5 25 80").request, ("JTUNE", 3, (2, 50, 250, 0, 800), 500))
         self.assertEqual(command("JTUNE", 3, 1, (2, 50, 250, 0)), "JTUNE 3 M1 2 50 250 0\n")
+        self.assertEqual(parse_shell("approach M1 + 1.5 3.5").request, ("JDIR", 1, (1, 1500, 3500), 500))
+        self.assertEqual(parse_shell("approach m2 - 2 4").request, ("JDIR", 2, (-1, 2000, 4000), 500))
+        self.assertEqual(parse_shell("approach M3 off").request, ("JDIR", 3, (0, 0, 0), 500))
+        for text in ("approach M1 up 1 2", "approach M7 + 1 2", "approach M1 + 1"):
+            with self.assertRaises(ValueError, msg=text): parse_shell(text)
+        self.assertEqual(command("JDIR", 5, 1, (1, 1500, 3500)), "JDIR 5 M1 1 1500 3500\n")
+        for bad in ((2, 0, 0), (1, -1, 0), (1, 2000, 1000), (1, 1000, 30001), (1, 1000)):
+            with self.assertRaises(ValueError, msg=str(bad)): command("JDIR", 5, 1, bad)
         self.assertEqual(parse_shell("trace M1 on").request, ("JTRACE", 1, 1, 500))
         self.assertEqual(parse_shell("trace M1 OFF").request, ("JTRACE", 1, 0, 500))
         self.assertEqual(parse_shell("pwm").request, ("MPWM", None, 800, 500))
@@ -45,6 +53,9 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(parse("JT 1234 M1 2048 6 90123 150000 450 0 MOVE 95321"),
                          ("JT", 1234, 1, 2048, 6, 90123, 150000, 450, False, "MOVE", 95321))
         self.assertEqual(parse("JTUNE 10 M3 2 50 250 0 800"), ("JTUNE", 10, 3, 2, 50, 250, 0, 800))
+        self.assertEqual(parse("JDIR 10 M1 -1 1500 3500"), ("JDIR", 10, 1, -1, 1500, 3500))
+        self.assertEqual(parse("JDIR 10 M1 2 1500 3500")[0], "BAD")
+        self.assertEqual(parse("JDIR 10 M1 1 4000 3500")[0], "BAD")
         self.assertEqual(parse("JTUNE 10 M3 1 30 300 50"), ("JTUNE", 10, 3, 1, 30, 300, 50, None))
         self.assertEqual(parse("JTUNE 10 M3 1 30 300 50 700"), ("JTUNE", 10, 3, 1, 30, 300, 50, 700))
         self.assertEqual(parse("MPWM 5 1"), ("MPWM", 5, True))
