@@ -36,7 +36,7 @@
 |---|---|---|---|
 | [灯光](software/App/src/app_main.c) | 7 路独立 PWM：上灯板 4 路、下灯板 3 路，24V 灯板，千分比调光 | `SET_LIGHT` 七路统一开关和亮度；`SET_LIGHT_ZONE` 0x35 单独设一路，分区 ID 1 到 4 为上灯板 UP1 到 UP4，5 到 7 为下灯板 DOWN1 到 DOWN3 | `SET_LIGHT` 会覆盖之前的分区设置。`STATUS` 的灯光开关为任意一路亮着即为 1，亮度为最近一次 `SET_LIGHT` 的值。灯光模式 0x30 未实现 |
 | [移动](software/App/src/chassis.c) | M7、M8 两路履带电机，左 M7 右 M8 | `SET_MOTION` 全部动作：前进、后退、原地左转、原地右转、STOP | 速度 0 到 100 乘 10 为 PWM 千分比，下限为起转值 10%，上限 80%；开环，`STATUS` 回读最近一次成功应用的动作和速度 |
-| [关节](software/App/src/joint_control.c) | M1 到 M6 六路关节电机，各配一个电位器，1:1 装在关节轴上，行程 270° | `SET_ARM_POSITION` 0x31、`HOME_ARM` 0x34、`GET_EXTENDED_STATUS` 0x32 | 关节 ID 1 到 6 对应 M1 到 M6。六个关节可以同时运动，同一关节的新目标替代旧目标。到位容差默认 2°。速度参数只记录、不限速。未标定的关节回 `INVALID_COMMAND` |
+| [关节](software/App/src/joint_control.c) | M1 到 M6 六路关节电机，各配一个电位器，1:1 装在关节轴上，行程 270° | `SET_ARM_POSITION` 0x31、`HOME_ARM` 0x34、`GET_EXTENDED_STATUS` 0x32 | 关节 ID 1 到 6 对应 M1 到 M6。六个关节可以同时运动，同一关节的新目标替代旧目标。到位容差默认 2°。默认的比例式下速度参数只记录、不限速；试验中的轨迹式把它作为速度上限。未标定的关节回 `INVALID_COMMAND` |
 | [蜂鸣器](software/Config/app_config.h) | 被动蜂鸣器，TIM13 PWM 驱动 | `SET_BUZZER` 0x36：图案 0 关、1 长鸣、2 慢响、3 快响，音量 0 到 100 | 图案一直保持到下一条命令；音量换算成 2.7kHz PWM 的占空比 1% 到 50%，和响度不是线性关系 |
 | [指示灯](software/BSP/Inc/bsp_led.h) | 4 个状态灯：STATE、COMM、ACT、ERROR | `SET_INDICATOR` 0x37：ID 1 为 STATE，2 为 ACT | COMM 由固件用来闪烁提示通信，ERROR 用来报初始化失败，不开放 |
 | [STOP](software/App/src/app_main.c) | 无 | 停止底盘和全部关节、取消目标，再清除原因已消失的故障 | 灯光、蜂鸣器、指示灯保持 |
@@ -78,7 +78,7 @@
 | 问题 | 现状 |
 |---|---|
 | [到位判定](software/Config/app_config.h) | 已解决。SDK extension-v2 允许按关节声明容差，固件默认 2°，回读的目标值始终是原始命令目标，不会用实际位置冒充 |
-| [速度参数](software/App/src/app_main.c) | 固件只记录、不限速，`EXTENDED_STATUS` 的目标速度在运动中报请求值，停止后为 0。SDK 文档允许这样做 |
+| [速度参数](software/App/src/app_main.c) | 默认的比例式只记录、不限速，`EXTENDED_STATUS` 的目标速度在运动中报请求值，停止后为 0。SDK 文档要求目标速度报“当前运行目标速度”，不能整段都填请求值，比例式这一点不符合。试验中的轨迹式把速度参数作为上限，目标速度报轨迹上的参考速度，符合要求 |
 | [HOME_ARM](software/Config/app_config.h) | 已约定为 135°，即电位器行程中点 |
 | [能力描述的数值](software/App/src/joint_control.c) | 待实测。每个关节的允许范围和最大速度要在实物上测，硬件这边提供 |
 | [多关节同时运动](software/App/src/joint_control.c) | 已支持，六个关节可以同时运动 |

@@ -22,6 +22,9 @@ HELP = """命令（占空比用百分数，时长用 ms）：
   tune M1 p 1 30 50 [80]  比例式控制：每度误差加 1% 占空比，起转 30%，
                          到位和换向时制动 50ms，最高 80%（省略不改），保存到 MCU；
                          tune M1 bang [80] 改为开关式
+  tune M1 traj 5 25 [80]  轨迹式控制：平滑轨迹加前馈和 PI 跟踪，反馈每度 5%，
+                         实测起转 25%，最高 80%（省略不改），不制动；
+                         速度、加速度、单向逼近等参数暂在 app_config.h
   trace M1 on / off       每 10ms 上报 M1 的读数、噪声、角度、占空比，
                          自动存成 records 目录下的 CSV
   pwm [5 brake]          查询或设置电机 PWM：频率 1/2/4/5/10/20kHz，
@@ -134,6 +137,8 @@ def parse_shell(text):
         return send("JTUNE", int(args[0][1]), (0, 30, 500, 50, *map(percent, args[2:])))
     if name == "tune" and len(args) in (5, 6) and args[1].lower() == "p" and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JTUNE", int(args[0][1]), (1, percent(args[2]), percent(args[3]), integer(args[4]), *map(percent, args[5:])))
+    if name == "tune" and len(args) in (4, 5) and args[1].lower() == "traj" and re.fullmatch(r"[Mm][1-6]", args[0]):
+        return send("JTUNE", int(args[0][1]), (2, percent(args[2]), percent(args[3]), 0, *map(percent, args[4:])))
     if name == "trace" and len(args) == 2 and args[1].lower() in ("on", "off") and re.fullmatch(r"[Mm][1-6]", args[0]):
         return send("JTRACE", int(args[0][1]), int(args[1].lower() == "on"))
     if name == "pwm" and not args:

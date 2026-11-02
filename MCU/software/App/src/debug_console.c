@@ -820,7 +820,9 @@ static void report_status(uint32_t now)
 
 /**
  * @brief JTRACE 打开时，每个新采样上报一行焦点关节的数据：
- *        JT 采样时刻 M编号 读数 极差 角度 目标 占空比 制动 阶段。
+ *        JT 采样时刻 M编号 读数 极差 角度 目标 占空比 制动 阶段 参考。
+ *
+ * 参考为轨迹式运动中轨迹上的参考位置，其他情况等于目标。
  *
  * @note 占空比取 H 桥最近一次设定值，MSET 开环驱动时也有效；
  *       115200 波特率下一行约 4ms，与周期状态合计约占带宽七成。
@@ -838,12 +840,13 @@ static void report_trace(void)
     (void)bsp_motor_hbridge_get_duty(
         bsp_motor_handle((bsp_motor_id_t)s_joint_focus), &duty);
     bool is_braking = s->motion.active && s->motion.braking;
-    char out[96];
-    (void)snprintf(out, sizeof(out), "JT %lu M%u %u %u %ld %ld %d %u %s\r\n",
+    char out[112];
+    (void)snprintf(out, sizeof(out), "JT %lu M%u %u %u %ld %ld %d %u %s %ld\r\n",
                    (unsigned long)s_joints->sample_ms, s_joint_focus + 1U,
                    (unsigned)s->raw, (unsigned)s->spread,
                    s->calibrated ? (long)s->angle : 0L, (long)s->target,
-                   (int)duty, (unsigned)is_braking, joint_phase_name(s->phase));
+                   (int)duty, (unsigned)is_braking, joint_phase_name(s->phase),
+                   (long)joint_reference(s));
     (void)send_line(out);
     check_control();
 }

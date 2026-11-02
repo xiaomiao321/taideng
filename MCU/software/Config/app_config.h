@@ -147,6 +147,74 @@
 #define JOINT_PULSE_ON_MS (30U)
 #define JOINT_PULSE_OFF_MS (100U)
 
+/* 轨迹式控制（JTUNE 模式 2）。以下数值都是占位值，要在实物上辨识后再改。 */
+
+/** @brief 轨迹速度上限，毫度/秒；SDK 给的速度更小时用 SDK 的。占位值。 */
+#define JOINT_TRAJ_VMAX_MDEG_S (30000)
+
+/** @brief 轨迹加速度上限，毫度/秒²。占位值。 */
+#define JOINT_TRAJ_AMAX_MDEG_S2 (60000)
+
+/** @brief 单段轨迹的最短时长，单位毫秒。 */
+#define JOINT_TRAJ_MIN_MS (300U)
+
+/**
+ * @brief 各关节的速度前馈，千分比/(度/秒)，依次为 M1～M6。
+ *
+ * 等于稳态时“占空比减动摩擦占空比”除以转速，用几档恒定占空比测稳态转速
+ * 得到。占位值。
+ */
+#define JOINT_TRAJ_KV                                                          \
+    {                                                                          \
+        10U, 10U, 10U, 10U, 10U, 10U                                           \
+    }
+
+/** @brief 加速度前馈，千分比/(度/秒²)。占位值，先不用。 */
+#define JOINT_TRAJ_KA (0)
+
+/** @brief PI 反馈的积分系数，千分比/(度·秒)；比例系数用 JTUNE 的 kp。占位值。 */
+#define JOINT_TRAJ_KI (50)
+
+/** @brief 积分项的限幅，千分比。 */
+#define JOINT_TRAJ_I_MAX (150)
+
+/** @brief 静止起步时预加的占空比比起转占空比低这么多，千分比。占位值。 */
+#define JOINT_TRAJ_PRELOAD_MARGIN (30)
+
+/** @brief 动摩擦占空比占起转占空比的百分比。占位值。 */
+#define JOINT_TRAJ_KINETIC_PCT (80)
+
+/** @brief 摩擦补偿从预加量过渡到动摩擦量所用的参考速度，毫度/秒。占位值。 */
+#define JOINT_TRAJ_FRICTION_SPEED (5000)
+
+/** @brief 跟踪误差超过该值持续 JOINT_STALL_MS 判定停滞，毫度。 */
+#define JOINT_TRACK_ERROR_MAX (10000)
+
+/**
+ * @brief 各关节规定的逼近方向，依次为 M1～M6：+1 只从角度小的一侧到达目标，
+ *        -1 只从角度大的一侧，0 不限定。应选逆着重力或负载的方向。占位值，
+ *        默认不启用。
+ */
+#define JOINT_APPROACH_DIR                                                     \
+    {                                                                          \
+        0, 0, 0, 0, 0, 0                                                       \
+    }
+
+/** @brief 各关节减速箱背隙，毫度。占位值，停机后用手扳输出端实测。 */
+#define JOINT_BACKLASH_MDEG                                                    \
+    {                                                                          \
+        1000, 1000, 1000, 1000, 1000, 1000                                     \
+    }
+
+/** @brief 各关节反向到达时越过目标的量，毫度，不小于背隙。占位值。 */
+#define JOINT_OVERSHOOT_MDEG                                                   \
+    {                                                                          \
+        3000, 3000, 3000, 3000, 3000, 3000                                     \
+    }
+
+/** @brief 单向逼近回程段的速度上限，毫度/秒，压低齿面重新接触时的冲击。占位值。 */
+#define JOINT_RETURN_SPEED_MDEG_S (5000)
+
 /**
  * @brief 转速估计：取最近 JOINT_SPEED_WINDOW 次采样（10ms 一次，约 200ms），
  *        最后 JOINT_SPEED_EDGE 次的平均角度减最早 JOINT_SPEED_EDGE 次的平均

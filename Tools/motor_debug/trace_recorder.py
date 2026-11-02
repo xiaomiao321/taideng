@@ -4,7 +4,8 @@ import os
 import sys
 import time
 
-HEADER = ("pc_time_s", "mcu_ms", "joint", "raw", "spread", "angle_deg", "target_deg", "duty_pct", "brake", "phase")
+HEADER = ("pc_time_s", "mcu_ms", "joint", "raw", "spread", "angle_deg", "target_deg", "duty_pct", "brake", "phase",
+          "ref_deg")
 GAP_S = 1.0  # 超过这么久没有 JT 行就结束当前文件，下一行开新文件
 
 
@@ -24,7 +25,7 @@ class TraceRecorder:
 
     def add(self, msg):
         """Record a parsed JT message; return the new file path when one is opened."""
-        _, tick, joint, raw, spread, angle, target, duty, brake, phase = msg
+        _, tick, joint, raw, spread, angle, target, duty, brake, phase, ref = msg
         now = self.clock()
         opened = None
         if self.file and (now - self.last > GAP_S or joint != self.joint):
@@ -40,7 +41,7 @@ class TraceRecorder:
             opened = self.path
         self.last = now
         self.writer.writerow((f"{now:.3f}", tick, f"M{joint}", raw, spread, f"{angle/1000:.3f}", f"{target/1000:.3f}",
-                              f"{duty/10:g}", int(brake), phase))
+                              f"{duty/10:g}", int(brake), phase, f"{ref/1000:.3f}"))
         self.rows += 1
         return opened
 

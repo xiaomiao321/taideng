@@ -423,7 +423,7 @@ static uint8_t arm_result(const char *err)
     {
         return MCU_PROTOCOL_RESULT_OK;
     }
-    if (!strcmp(err, "TARGET_RANGE"))
+    if (!strcmp(err, "TARGET_RANGE") || !strcmp(err, "TOO_SLOW"))
     {
         return MCU_PROTOCOL_RESULT_INVALID_VALUE;
     }
@@ -439,12 +439,18 @@ static uint8_t arm_result(const char *err)
     return MCU_PROTOCOL_RESULT_INTERNAL;
 }
 
-/** @brief 启动一个关节的定位；speed 只记录为目标速度，尚未用于限速。 */
+/**
+ * @brief 启动一个关节的定位。
+ *
+ * @note 轨迹式下 speed 作为本次运动的速度上限；其他控制方式只记录，不限速。
+ *       轨迹时长超过 MCU_ARM_MOVE_TIMEOUT_MS 时回 INVALID_VALUE。
+ */
 static uint8_t start_arm(uint8_t joint_id, int32_t target, int32_t speed)
 {
     unsigned index = (unsigned)joint_id - 1U;
-    const char *err = joint_move(joint_service_joints(), ++s_arm_seq, index,
-                                 target, MCU_ARM_MOVE_TIMEOUT_MS, HAL_GetTick());
+    const char *err =
+        joint_move_speed(joint_service_joints(), ++s_arm_seq, index, target,
+                         MCU_ARM_MOVE_TIMEOUT_MS, speed, HAL_GetTick());
     if (err == NULL)
     {
         s_arm_speed[index] = speed;
@@ -464,13 +470,14 @@ static uint8_t hw_arm_home(uint8_t joint_id)
     {
         return MCU_PROTOCOL_RESULT_INVALID_COMMAND;
     }
-    /* HOME 没有速度参数，目标速度报 0。 */
+    /* HOME 没有速度参数：轨迹式按默认速度上限，其他方式目标速度报 0。 */
     return start_arm(joint_id, home, 0);
 }
 
 /**
  * @brief 关节扩展状态：位置为标定后的真实角度，实际速度为电位器估计值，
- *        目标速度在运动中为本次速度上限请求、停止后为 0。
+ *        目标速度在轨迹式运动中为轨迹参考速度，其他控制方式运动中为本次
+ *        速度请求，停止后都为 0。
  */
 static uint8_t hw_arm_status(uint8_t command, uint8_t joint_id,
                              mcu_extended_status_t *status)
@@ -486,7 +493,10 @@ static uint8_t hw_arm_status(uint8_t command, uint8_t joint_id,
     status->actual = s->angle;
     status->target = s->target;
     status->actual_speed = s->speed;
-    status->target_speed = s->motion.active ? s_arm_speed[index] : 0;
+    /* 轨迹式报轨迹上的参考速度，其他控制方式报本次的速度请求。 */
+    status->target_speed = !s->motion.active          ? 0
+                           : s->motion.seg_count > 0U ? s->motion.ref_speed
+                                                      : s_arm_speed[index];
     return MCU_PROTOCOL_RESULT_OK;
 }
 

@@ -59,7 +59,7 @@ def command(kind, seq, motor=1, duty=800, duration=500):
             if not isinstance(duty, (tuple, list)) or len(duty) not in (4, 5):
                 raise ValueError("控制参数不完整")
             mode, kp, low, brake, *high = duty
-            if mode not in (0, 1) or type(kp) is not int or not 0 <= kp <= 1000:
+            if mode not in (0, 1, 2) or type(kp) is not int or not 0 <= kp <= 1000:
                 raise ValueError("比例系数须为 0～100%/度")
             if type(low) is not int or low <= 0:
                 raise ValueError("起转占空比须为正数")
@@ -89,16 +89,18 @@ def parse(line):
     try:
         if len(p) == 3 and p[0] == "CAPS" and p[1] in ("MULTI", "LIGHT") and p[2] == "1":
             return "XCAPS", p[1]
-        if p[0] == "JT" and len(p) == 10 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
+        if p[0] == "JT" and len(p) in (10, 11) and p[2] in tuple(f"M{i}" for i in range(1, 7)):
             tick, raw, spread, angle, target, duty, brake = (int(p[1]), *map(int, p[3:9]))
             if not 0 <= raw <= 4095 or not 0 <= spread <= 4095 or not -1000 <= duty <= 1000 or brake not in (0, 1):
                 raise ValueError()
             if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT"):
                 raise ValueError()
-            return "JT", tick, int(p[2][1]), raw, spread, angle, target, duty, bool(brake), p[9]
+            # 参考位置：轨迹式运动中为轨迹参考点，旧固件没有这一项时用目标代替
+            ref = int(p[10]) if len(p) == 11 else target
+            return "JT", tick, int(p[2][1]), raw, spread, angle, target, duty, bool(brake), p[9], ref
         if p[0] == "JTUNE" and len(p) in (7, 8) and p[2] in tuple(f"M{i}" for i in range(1, 7)):
             mode, kp, low, brake, *high = map(int, p[3:])
-            if mode not in (0, 1):
+            if mode not in (0, 1, 2):
                 raise ValueError()
             # 最高占空比：旧固件不报为 None，未标定时固件报 0
             return "JTUNE", int(p[1]), int(p[2][1]), mode, kp, low, brake, (high or [None])[0]

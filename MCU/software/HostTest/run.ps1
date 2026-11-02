@@ -35,6 +35,7 @@ $suites = @(
         Name = 'joint'
         Sources = @(
             (Join-Path $projectDir 'App\src\joint_control.c')
+            (Join-Path $projectDir 'App\src\joint_traj.c')
             (Join-Path $projectDir 'HostTest\joint_selftest.c')
         )
     }

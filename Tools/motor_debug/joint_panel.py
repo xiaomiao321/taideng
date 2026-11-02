@@ -7,7 +7,7 @@ from joint_model import Calibration, Nominal, millidegrees, decode_profile, devi
 from shell_commands import percent, kilohms
 
 DIRECTIONS = {"正转使角度增大": 1, "正转使角度减小": -1}
-MODES = {"开关式": 0, "比例式": 1}
+MODES = {"开关式": 0, "比例式": 1, "轨迹式": 2}
 DECAYS = {"滑行": 0, "刹车": 1}
 PWM_KHZ = ("1", "2", "4", "5", "10", "20")
 SENSOR_DIRECTIONS = {"角度增大时 ADC 增大": 1, "角度增大时 ADC 减小": -1}
@@ -438,7 +438,7 @@ class JointPanel:
         elif msg[0] == "JT":
             if msg[2] == self.selected:
                 self.trace_at, self.spread = now, msg[4]
-                self.history.append((now, msg[5]/1000, msg[6]/1000))
+                self.history.append((now, msg[5]/1000, msg[10]/1000))  # 轨迹式画参考位置
         elif msg[0] == "STATE": self.motion = (now, msg)
         elif msg[0] == "JCAL": self.device[msg[2]] = msg[3]
         elif msg[0] == "EVENT" and msg[1] in STORE_ERRORS:
@@ -507,6 +507,7 @@ class JointPanel:
         high = "" if not t or not t[4] else f" 最高 {t[4]/10:g}%"
         self.tune_status.set(f"M{self.selected} MCU 当前：—" if not t else
                              f"M{self.selected} MCU 当前：开关式{high}" if t[0] == 0 else
+                             f"M{self.selected} MCU 当前：轨迹式 反馈每度 {t[1]/10:g}% 起转 {t[2]/10:g}%{high}" if t[0] == 2 else
                              f"M{self.selected} MCU 当前：比例式 每度 {t[1]/10:g}% 起转 {t[2]/10:g}% 制动 {t[3]}ms{high}")
         rec = self.app.recorder
         if self.tracing and rec.file:
@@ -533,7 +534,7 @@ class JointPanel:
         c = self.canvas; c.delete("all")
         w, h = c.winfo_width(), c.winfo_height()
         points = [(t, a, b) for t, a, b in self.history if time.monotonic()-t <= 15]
-        c.create_text(8, 8, text="蓝：实测角度  橙：目标 · 最近 15 秒", anchor="nw", fill="#526479")
+        c.create_text(8, 8, text="蓝：实测角度  橙：目标，轨迹式记录时为参考位置 · 最近 15 秒", anchor="nw", fill="#526479")
         if not points or w < 100 or h < 50: return
         low = min(min(a, b) for _, a, b in points)-1
         high = max(max(a, b) for _, a, b in points)+1

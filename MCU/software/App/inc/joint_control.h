@@ -1,15 +1,18 @@
 /**
  * @file joint_control.h
- * @brief 单关节位置闭环：电位器读数换算成角度，开关式驱动电机到目标角度。
+ * @brief 单关节位置闭环：电位器读数换算成角度，驱动电机到目标角度。
  *
  * 角度单位为毫度。标定给出两点（raw_a, angle_a）与（raw_b, angle_b），
  * 读数与角度按直线换算；ADC 读数可以随角度递减。两点可以实测（CAL），
  * 也可以由电位器理论参数加一个实测参考点算出（joint_cal_from_nominal）。
  * 允许运动的范围 [limit_min, limit_max] 与标定点分开设置，
  * 应按机构实际能转的范围设定，避免顶到机械限位。
- * 两种控制方式由 joint_tune_t 选择：开关式（远离目标时持续驱动，接近目标时
- * 改为短脉冲点动）和比例式（占空比 = 起转占空比 + kp × 误差，进入容差和换向
- * 时先短路制动再滑行）。进入容差后保持一段时间判定到达；传感器失效、超时、
+ * 三种控制方式由 joint_tune_t 选择：开关式（远离目标时持续驱动，接近目标时
+ * 改为短脉冲点动）、比例式（占空比 = 起转占空比 + kp × 误差，进入容差和换向
+ * 时先短路制动再滑行）和轨迹式（按五次多项式规划位置、速度、加速度都连续的
+ * 参考轨迹，用速度前馈、摩擦前馈加 PI 反馈跟踪它，见 joint_traj.h；可设定
+ * 单向逼近，反向到达时先越过目标再回来，消除减速箱背隙的影响）。
+ * 进入容差后保持一段时间判定到达；传感器失效、超时、
  * 越限、反向或停滞都会停机并报故障，故障同时锁存为故障位，由
  * joint_clear_faults() 按原因是否消失清除。每次采样还会估计各关节转速。
  *
@@ -23,6 +26,7 @@
 #include <stdint.h>
 
 #include "app_config.h"
+#include "joint_traj.h"
 
 /** @brief 关节数量，对应 M1～M6 和电位器 POT1～POT6。 */
 #define JOINT_COUNT (6U)
@@ -98,17 +102,34 @@ typedef enum
 {
     JOINT_MODE_BANG = 0, /**< 开关式：全速接近，近处点动，停止时滑行。 */
     JOINT_MODE_P = 1,    /**< 比例式：起转占空比加比例项，停止时先制动。 */
+    JOINT_MODE_TRAJ = 2, /**< 轨迹式：平滑轨迹加前馈和 PI 跟踪，不制动。 */
     JOINT_MODE_COUNT
 } joint_mode_t;
 
-/** @brief 控制参数；随标定一起保存到 Flash，没保存过时用比例式默认值。 */
+/**
+ * @brief 控制参数；随标定一起保存到 Flash，没保存过时用比例式默认值。
+ *
+ * 轨迹式中 kp 是 PI 反馈的比例系数，duty_min 是实测起转占空比，摩擦前馈由它
+ * 推出；brake_ms 不使用。
+ */
 typedef struct
 {
     joint_mode_t mode;
     unsigned kp;       /**< 每度误差增加的占空比，千分比/度。 */
-    unsigned duty_min; /**< 比例式的起转占空比，千分比；不超过 cal.duty。 */
+    unsigned duty_min; /**< 起转占空比，千分比；不超过 cal.duty。 */
     unsigned brake_ms; /**< 比例式进入容差或换向时的制动时长，0 为不制动。 */
 } joint_tune_t;
+
+/**
+ * @brief 轨迹式的逐关节参数，上电取 app_config.h 的默认值，目前不存 Flash。
+ */
+typedef struct
+{
+    int approach;      /**< 规定的逼近方向：+1 角度增大方向，-1 减小，0 不限定。 */
+    int32_t backlash;  /**< 背隙，毫度；超调量被限位压缩到小于它时放弃单向逼近。 */
+    int32_t overshoot; /**< 反向到达时越过目标的量，毫度。 */
+    unsigned kv;       /**< 速度前馈，千分比/(度/秒)。 */
+} joint_traj_cfg_t;
 
 /** @brief 一次采样最多参与滤波的样本数。 */
 #define JOINT_FILTER_MAX_SAMPLES (32U)
@@ -143,6 +164,16 @@ typedef struct
     bool pulse_on;         /**< 点动脉冲是否处于驱动段。 */
     bool near_mode;        /**< 是否已进入接近目标的点动模式。 */
     bool braking;          /**< 是否正在短路制动。 */
+    /* 以下只在轨迹式中使用。 */
+    joint_traj_t seg[2];    /**< 轨迹段：单向逼近反向到达时为两段。 */
+    unsigned seg_count;     /**< 轨迹段数，1 或 2。 */
+    unsigned seg_index;     /**< 当前段下标。 */
+    uint32_t seg_ms;        /**< 当前段开始的时刻。 */
+    int32_t seg_angle;      /**< 当前段开始时的实际角度，用于判断方向错误。 */
+    int32_t ref;            /**< 当前参考位置，毫度。 */
+    int32_t ref_speed;      /**< 当前参考速度，毫度/秒；进入容差后为 0。 */
+    float integral;         /**< PI 积分项，千分比。 */
+    uint32_t tick_ms;       /**< 上一次控制的时刻，用于积分。 */
 } joint_motion_t;
 
 /** @brief 转速估计用的最近若干次角度采样，环形缓冲。 */
@@ -166,6 +197,7 @@ typedef struct
     int duty;        /**< 当前输出占空比。 */
     uint16_t spread; /**< 最近一次采样中各样本的极差，反映噪声。 */
     joint_tune_t tune;
+    joint_traj_cfg_t traj;
     joint_phase_t phase;
     const char *fault; /**< 最近一次故障名，没有故障时为 "NONE"。 */
     uint8_t faults;    /**< 锁存的故障位，见 JOINT_FAULT_*。 */
@@ -248,6 +280,15 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
                            joint_tune_t tune);
 
 /**
+ * @brief 设置轨迹式的逐关节参数；不要求已标定。
+ *
+ * @return NULL 表示成功；"JOINT_ID"、"BUSY" 或 "TUNE_PARAM"（方向不是 -1、0、1，
+ *         背隙或超调量为负或超过 30°，或超调量小于背隙）。
+ */
+const char *joint_set_traj(joint_control_t *j, unsigned index,
+                           joint_traj_cfg_t cfg);
+
+/**
  * @brief 设置闭环的最高占空比，即标定里的 cal.duty；两种控制方式都受它限制。
  *
  * @return NULL 表示成功；"JOINT_ID"、"NOT_CALIBRATED"、"BUSY" 或
@@ -272,9 +313,25 @@ void joint_filter(const uint16_t (*samples)[JOINT_COUNT], unsigned count,
  *
  * 其他关节的运动不受影响。该关节已在运动时，新目标替代旧目标：旧命令回报
  * JRESULT ... SUPERSEDED，驱动方向和制动状态沿用，进度、超时等重新计算。
+ * 轨迹式从当前参考状态接着规划，速度和加速度不突变。
  */
 const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
                        int32_t target, uint32_t timeout, uint32_t now);
+
+/**
+ * @brief 同 joint_move，另给本次运动的速度上限，毫度/秒。
+ *
+ * 只对轨迹式有效：取它和 JOINT_TRAJ_VMAX_MDEG_S 中较小的一个，0 表示用后者。
+ * 规划出的时长加上到位判定时间超过 timeout 时返回 "TOO_SLOW"，不启动运动。
+ */
+const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
+                             int32_t target, uint32_t timeout, int32_t speed,
+                             uint32_t now);
+
+/**
+ * @brief 当前参考位置，毫度：轨迹式运动中为轨迹上的参考点，其他情况为目标。
+ */
+int32_t joint_reference(const joint_state_t *s);
 
 /**
  * @brief 输入一组采样。

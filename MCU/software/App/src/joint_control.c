@@ -1,5 +1,6 @@
 #include "joint_control.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -22,6 +23,18 @@
 
 _Static_assert(JOINT_BRAKE_MAX_MS <= JOINT_REACHED_HOLD_MS,
                "brake must end before the reached hold expires");
+
+/** @brief 背隙和超调量的上限，毫度。 */
+#define TRAJ_BACKLASH_LIMIT (30000)
+
+/** @brief 速度前馈系数的上限，千分比/(度/秒)。 */
+#define TRAJ_KV_LIMIT (1000U)
+
+/** @brief 轨迹式各关节的默认参数，见 app_config.h。 */
+static const int k_traj_approach[JOINT_COUNT] = JOINT_APPROACH_DIR;
+static const int32_t k_traj_backlash[JOINT_COUNT] = JOINT_BACKLASH_MDEG;
+static const int32_t k_traj_overshoot[JOINT_COUNT] = JOINT_OVERSHOOT_MDEG;
+static const unsigned k_traj_kv[JOINT_COUNT] = JOINT_TRAJ_KV;
 
 static int32_t magnitude(int32_t n)
 {
@@ -153,6 +166,9 @@ void joint_init(joint_control_t *j, joint_hw_t hw)
         j->states[i].tune =
             (joint_tune_t){JOINT_DEFAULT_MODE, JOINT_DEFAULT_KP,
                            JOINT_DEFAULT_DUTY_MIN, JOINT_DEFAULT_BRAKE_MS};
+        j->states[i].traj =
+            (joint_traj_cfg_t){k_traj_approach[i], k_traj_backlash[i],
+                               k_traj_overshoot[i], k_traj_kv[i]};
     }
 }
 bool joint_any_active(const joint_control_t *j)
@@ -407,6 +423,27 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
     return NULL;
 }
 
+const char *joint_set_traj(joint_control_t *j, unsigned index,
+                           joint_traj_cfg_t cfg)
+{
+    if (index >= JOINT_COUNT)
+    {
+        return "JOINT_ID";
+    }
+    if (cfg.approach < -1 || cfg.approach > 1 || cfg.backlash < 0 ||
+        cfg.backlash > TRAJ_BACKLASH_LIMIT || cfg.overshoot < cfg.backlash ||
+        cfg.overshoot > TRAJ_BACKLASH_LIMIT || cfg.kv > TRAJ_KV_LIMIT)
+    {
+        return "TUNE_PARAM";
+    }
+    if (j->states[index].motion.active)
+    {
+        return "BUSY";
+    }
+    j->states[index].traj = cfg;
+    return NULL;
+}
+
 const char *joint_set_duty_max(joint_control_t *j, unsigned index,
                                unsigned duty)
 {
@@ -483,8 +520,74 @@ void joint_filter(const uint16_t (*samples)[JOINT_COUNT], unsigned count,
         spread[ch] = (uint16_t)(v[n - 1U] - v[0]);
     }
 }
+/** @brief 轨迹式一次运动的规划结果，确认可行后才写进 joint_motion_t。 */
+typedef struct
+{
+    joint_traj_t seg[2];
+    unsigned seg_count;
+    bool skipped; /**< 需要单向逼近但超调量被限位压缩到小于背隙，已放弃。 */
+} traj_plan_t;
+
+/** @brief 正在运动的轨迹式关节在 now 时刻的参考状态。 */
+static joint_traj_point_t traj_point(const joint_motion_t *m, uint32_t now)
+{
+    return joint_traj_eval(&m->seg[m->seg_index], (float)(now - m->seg_ms));
+}
+
+/**
+ * @brief 从 from 规划到 target：规定了逼近方向且这次是反向到达时，先到越过
+ *        目标 overshoot 的中间点，再以 JOINT_RETURN_SPEED_MDEG_S 回到目标。
+ */
+static void plan_traj(const joint_state_t *s, joint_traj_point_t from,
+                      int32_t target, int32_t speed, traj_plan_t *out)
+{
+    float vmax = (float)JOINT_TRAJ_VMAX_MDEG_S;
+    if (speed > 0 && (float)speed < vmax)
+    {
+        vmax = (float)speed;
+    }
+    float amax = (float)JOINT_TRAJ_AMAX_MDEG_S2;
+    float distance = (float)target - from.p;
+    int approach = s->traj.approach;
+    bool reverse = approach != 0 &&
+                   fabsf(distance) > (float)s->cal.tolerance &&
+                   (distance > 0.0f ? 1 : -1) != approach;
+    out->skipped = false;
+    out->seg_count = 1U;
+    if (reverse)
+    {
+        /* 中间点在目标的另一侧：沿本次运动方向越过目标，再按规定方向回来。 */
+        int32_t via = target - approach * s->traj.overshoot;
+        via = via < s->cal.limit_min ? s->cal.limit_min : via;
+        via = via > s->cal.limit_max ? s->cal.limit_max : via;
+        if (magnitude(via - target) >= s->traj.backlash &&
+            magnitude(via - target) > 0)
+        {
+            float back = (float)JOINT_RETURN_SPEED_MDEG_S;
+            joint_traj_plan(&out->seg[0], from, (float)via, vmax, amax,
+                            JOINT_TRAJ_MIN_MS);
+            joint_traj_point_t rest = {(float)via, 0.0f, 0.0f};
+            joint_traj_plan(&out->seg[1], rest, (float)target,
+                            back < vmax ? back : vmax, amax,
+                            JOINT_TRAJ_MIN_MS);
+            out->seg_count = 2U;
+            return;
+        }
+        out->skipped = true;
+    }
+    joint_traj_plan(&out->seg[0], from, (float)target, vmax, amax,
+                    JOINT_TRAJ_MIN_MS);
+}
+
 const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
                        int32_t target, uint32_t timeout, uint32_t now)
+{
+    return joint_move_speed(j, seq, index, target, timeout, 0, now);
+}
+
+const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
+                             int32_t target, uint32_t timeout, int32_t speed,
+                             uint32_t now)
 {
     if (index >= JOINT_COUNT)
     {
@@ -512,6 +615,27 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
         return "POSITION_RANGE";
     }
     joint_motion_t *m = &s->motion;
+    bool is_traj = s->tune.mode == JOINT_MODE_TRAJ;
+    traj_plan_t plan;
+    if (is_traj)
+    {
+        /* 运动中换目标时从当前参考状态接着走，否则从实际位置静止出发。 */
+        joint_traj_point_t from = {(float)s->angle, 0.0f, 0.0f};
+        if (m->active && m->seg_count > 0U)
+        {
+            from = traj_point(m, now);
+        }
+        plan_traj(s, from, target, speed, &plan);
+        uint32_t total = JOINT_REACHED_HOLD_MS;
+        for (unsigned k = 0; k < plan.seg_count; ++k)
+        {
+            total += plan.seg[k].duration_ms;
+        }
+        if (total > timeout)
+        {
+            return "TOO_SLOW";
+        }
+    }
     if (m->active)
     {
         /* 新目标替代旧目标：方向、制动和换向计时沿用，避免带电直接反转。 */
@@ -538,7 +662,34 @@ const char *joint_move(joint_control_t *j, unsigned seq, unsigned index,
     s->has_target = true;
     s->phase = JOINT_SETTLE;
     s->fault = "NONE";
+    m->seg_count = 0U;
+    if (is_traj)
+    {
+        memcpy(m->seg, plan.seg, sizeof(m->seg));
+        m->seg_count = plan.seg_count;
+        m->seg_index = 0U;
+        m->seg_ms = now;
+        m->seg_angle = s->angle;
+        m->ref = (int32_t)lroundf(plan.seg[0].p0);
+        m->ref_speed = (int32_t)lroundf(plan.seg[0].v0);
+        m->integral = 0.0f;
+        m->tick_ms = now;
+        s->phase = JOINT_MOVING;
+        if (plan.skipped)
+        {
+            char line[48];
+            (void)snprintf(line, sizeof(line), "JNOTE %u M%u NO_OVERSHOOT\r\n",
+                           seq, index + 1U);
+            j->hw.reply(line);
+        }
+    }
     return NULL;
+}
+
+int32_t joint_reference(const joint_state_t *s)
+{
+    return (s->motion.active && s->motion.seg_count > 0U) ? s->motion.ref
+                                                          : s->target;
 }
 
 /** @brief est 中从最旧样本数起第 k 个样本的下标。 */
@@ -637,6 +788,129 @@ void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
         }
     }
 }
+/**
+ * @brief 轨迹式的一步控制：沿轨迹取参考点，输出前馈加 PI 反馈。
+ *
+ * 前馈 = kv × 参考速度 + ka × 参考加速度 + 摩擦补偿。摩擦补偿按参考速度而不是
+ * 测量速度计算，方向取参考速度的方向，静止起步时取本段的运动方向：零速时为
+ * 起转占空比减 JOINT_TRAJ_PRELOAD_MARGIN，即预加到略低于起转点，电机还不会
+ * 动；随参考速度增大平滑过渡到动摩擦占空比。轨迹走完后只保留朝目标方向的
+ * 预加量，进入容差后输出 0 滑行，不短路制动，保持 JOINT_REACHED_HOLD_MS 判定
+ * 到达。跟踪误差持续超过 JOINT_TRACK_ERROR_MAX 判定停滞，实际角度反着参考
+ * 走出 2 倍容差加余量判定方向错误。
+ */
+static bool tick_traj(joint_control_t *j, unsigned i, uint32_t now)
+{
+    joint_state_t *s = &j->states[i];
+    joint_motion_t *m = &s->motion;
+    const joint_traj_t *g = &m->seg[m->seg_index];
+    if (m->seg_index + 1U < m->seg_count &&
+        (uint32_t)(now - m->seg_ms) >= g->duration_ms)
+    {
+        /* 进入下一段：两段在中间点都是静止的，参考状态仍然连续。 */
+        m->seg_ms += g->duration_ms;
+        ++m->seg_index;
+        m->seg_angle = s->angle;
+        m->integral = 0.0f;
+        g = &m->seg[m->seg_index];
+    }
+    uint32_t elapsed = now - m->seg_ms;
+    joint_traj_point_t r = joint_traj_eval(g, (float)elapsed);
+    m->ref = (int32_t)lroundf(r.p);
+    m->ref_speed = (int32_t)lroundf(r.v);
+    bool is_final =
+        m->seg_index + 1U == m->seg_count && elapsed >= g->duration_ms;
+    float dt = (float)(now - m->tick_ms) / 1000.0f;
+    m->tick_ms = now;
+    if (dt > 0.05f)
+    {
+        dt = 0.05f;
+    }
+    s->phase = JOINT_MOVING;
+
+    float error = r.p - (float)s->angle;
+    if (fabsf(error) <= (float)JOINT_TRACK_ERROR_MAX)
+    {
+        m->progress_ms = now;
+    }
+    else
+    {
+        int32_t moved = s->angle - m->seg_angle;
+        int32_t wrong = error > 0.0f ? -moved : moved;
+        if (wrong > (int32_t)(2U * s->cal.tolerance + JOINT_DIRECTION_MARGIN))
+        {
+            return finish(j, i, "DIRECTION", JOINT_FAULT);
+        }
+        if ((uint32_t)(now - m->progress_ms) >= JOINT_STALL_MS)
+        {
+            return finish(j, i, "STALL", JOINT_FAULT);
+        }
+    }
+
+    if (is_final && magnitude(s->target - s->angle) <= (int32_t)s->cal.tolerance)
+    {
+        if (!m->stable)
+        {
+            m->stable = true;
+            m->stable_ms = now;
+            m->integral = 0.0f;
+        }
+        if (!output(j, i, 0))
+        {
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
+        }
+        if ((uint32_t)(now - m->stable_ms) >= JOINT_REACHED_HOLD_MS)
+        {
+            return finish(j, i, "REACHED", JOINT_DONE);
+        }
+        return true;
+    }
+    m->stable = false;
+
+    int seg_dir = g->p1 > g->p0 ? 1 : (g->p1 < g->p0 ? -1 : 0);
+    float speed = fabsf(r.v);
+    float d_break = (float)s->tune.duty_min;
+    float d_pre = d_break - (float)JOINT_TRAJ_PRELOAD_MARGIN;
+    d_pre = d_pre > 0.0f ? d_pre : 0.0f;
+    float d_kin = d_break * (float)JOINT_TRAJ_KINETIC_PCT / 100.0f;
+    float friction = 0.0f;
+    if (!is_final)
+    {
+        int dir = speed > 1.0f ? (r.v > 0.0f ? 1 : -1) : seg_dir;
+        float ramp = speed / (float)JOINT_TRAJ_FRICTION_SPEED;
+        ramp = ramp < 1.0f ? ramp : 1.0f;
+        friction = (float)dir * (d_pre + (d_kin - d_pre) * ramp);
+    }
+    else if ((error > 0.0f ? 1 : -1) == seg_dir)
+    {
+        /* 轨迹走完还没进容差：保留朝目标方向的预加量，让 PI 小幅推过去。 */
+        friction = (float)seg_dir * d_pre;
+    }
+
+    m->integral += (float)JOINT_TRAJ_KI * error / 1000.0f * dt;
+    float i_max = (float)JOINT_TRAJ_I_MAX;
+    m->integral = m->integral > i_max ? i_max : m->integral;
+    m->integral = m->integral < -i_max ? -i_max : m->integral;
+
+    float u = friction + (float)s->traj.kv * r.v / 1000.0f +
+              (float)JOINT_TRAJ_KA * r.a / 1000.0f +
+              (float)s->tune.kp * error / 1000.0f + m->integral;
+    float high = (float)duty_max(s);
+    u = u > high ? high : u;
+    u = u < -high ? -high : u;
+    int duty = (int)lroundf(u);
+    /* 低于电机最小占空比的输出本来也转不动，置 0 以满足驱动层的范围检查。 */
+    if (duty > -MOTOR_DUTY_MIN && duty < MOTOR_DUTY_MIN)
+    {
+        duty = 0;
+    }
+    if (!output(j, i, duty * s->cal.direction))
+    {
+        return finish(j, i, "HARDWARE", JOINT_FAULT);
+    }
+    return true;
+}
+
 /** @brief 推进一个运动中关节的控制；返回 false 表示产生了新故障。 */
 static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
 {
@@ -653,6 +927,10 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
     if (out_of_limits(s))
     {
         return finish(j, i, "LIMIT", JOINT_FAULT);
+    }
+    if (m->seg_count > 0U)
+    {
+        return tick_traj(j, i, now);
     }
     int32_t error = s->target - s->angle, distance = magnitude(error);
     bool proportional = s->tune.mode == JOINT_MODE_P;

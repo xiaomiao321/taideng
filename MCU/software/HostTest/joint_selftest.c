@@ -1,6 +1,8 @@
 #include "joint_control.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 static int output_duty;
 static bool hardware_ok;
@@ -494,6 +496,317 @@ static void filter_test(void)
     joint_feed(&j, raw, noise, true, 0);
     assert(j.states[0].spread == 12 && j.states[1].spread == 0);
 }
+/* -------------------------------------------------------------------------- */
+/* 轨迹式                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** 五次多项式本身：端点、峰值、逐毫秒的速度和加速度变化都有界，中途重规划衔接连续。 */
+static void traj_curve_test(void)
+{
+    joint_traj_t t;
+    joint_traj_point_t start = {10000.0f, 0.0f, 0.0f};
+    joint_traj_plan(&t, start, 100000.0f, 30000.0f, 60000.0f, 300U);
+    /* 90° 按 30°/s 算 1.875 × 3 = 5.625s，比按加速度算的长。 */
+    assert(t.duration_ms == 5625U);
+    joint_traj_point_t first = joint_traj_eval(&t, 0.0f);
+    assert(first.p == 10000.0f && first.v == 0.0f && first.a == 0.0f);
+    joint_traj_point_t prev = first;
+    float vmax = 0.0f, amax = 0.0f, dv = 0.0f, da = 0.0f;
+    for (unsigned ms = 1U; ms <= t.duration_ms + 20U; ++ms)
+    {
+        joint_traj_point_t r = joint_traj_eval(&t, (float)ms);
+        vmax = fmaxf(vmax, fabsf(r.v));
+        amax = fmaxf(amax, fabsf(r.a));
+        dv = fmaxf(dv, fabsf(r.v - prev.v));
+        da = fmaxf(da, fabsf(r.a - prev.a));
+        prev = r;
+    }
+    assert(vmax <= 30000.0f * 1.001f && vmax >= 29900.0f);
+    assert(amax <= 60000.0f);
+    /* 速度连续：每毫秒变化不超过加速度峰值的千分之一；
+     * 加速度连续：每毫秒变化不超过加加速度峰值 60·D/T³ 的千分之一。 */
+    float T = 5.625f;
+    assert(dv <= amax / 1000.0f * 1.01f);
+    assert(da <= 60.0f * 90000.0f / (T * T * T) / 1000.0f * 1.01f);
+    assert(prev.p == 100000.0f && prev.v == 0.0f && prev.a == 0.0f);
+    joint_traj_point_t end = joint_traj_eval(&t, (float)t.duration_ms - 0.5f);
+    assert(fabsf(end.p - 100000.0f) < 1.0f && fabsf(end.v) < 1.0f &&
+           fabsf(end.a) < 100.0f);
+
+    /* 中途换目标：新轨迹起点与旧轨迹此刻的位置、速度、加速度一致。 */
+    joint_traj_point_t mid = joint_traj_eval(&t, 1000.0f);
+    joint_traj_t u;
+    joint_traj_plan(&u, mid, 20000.0f, 30000.0f, 60000.0f, 300U);
+    joint_traj_point_t join = joint_traj_eval(&u, 0.0f);
+    assert(join.p == mid.p && join.v == mid.v && join.a == mid.a);
+    joint_traj_point_t done = joint_traj_eval(&u, (float)u.duration_ms);
+    assert(done.p == 20000.0f && done.v == 0.0f && done.a == 0.0f);
+
+    /* 距离很短时用最短时长。 */
+    joint_traj_plan(&u, start, 10100.0f, 30000.0f, 60000.0f, 300U);
+    assert(u.duration_ms == 300U);
+}
+
+/**
+ * 带摩擦和背隙的电机模型，度和度/秒。占空比为 τ（千分之一），静止时 |τ|
+ * 不超过静摩擦 0.25 就不动；转动时加速度 = A·(τ − 0.20·方向) − B·速度。
+ * 稳态时 τ = 0.20 + 0.01·速度，与默认的 kv = 10、动摩擦 = 起转 × 80% 一致。
+ * 电位器测的是背隙另一侧的输出轴。
+ */
+typedef struct
+{
+    double motor;     /**< 电机侧位置，度。 */
+    double speed;     /**< 电机侧转速，度/秒。 */
+    double out;       /**< 输出轴位置，度。 */
+    double backlash;  /**< 背隙，度。 */
+    double stiction;  /**< 静摩擦，占空比。 */
+    bool stuck;       /**< 模拟卡死：电机完全不动。 */
+} friction_plant_t;
+
+static void plant_step(friction_plant_t *p, int duty, double dt)
+{
+    const double A = 2000.0, B = 20.0, kinetic = 0.20;
+    double tau = duty / 1000.0;
+    if (p->stuck)
+    {
+        p->speed = 0.0;
+    }
+    else if (p->speed == 0.0)
+    {
+        if (fabs(tau) > p->stiction)
+        {
+            p->speed = dt * A * (tau - (tau > 0 ? kinetic : -kinetic));
+        }
+    }
+    else
+    {
+        double sign = p->speed > 0 ? 1.0 : -1.0;
+        double next =
+            p->speed + dt * (A * (tau - sign * kinetic) - B * p->speed);
+        p->speed = (next * sign <= 0.0) ? 0.0 : next;
+    }
+    p->motor += p->speed * dt;
+    double half = p->backlash / 2.0;
+    if (p->motor - p->out > half)
+    {
+        p->out = p->motor - half;
+    }
+    else if (p->out - p->motor > half)
+    {
+        p->out = p->motor + half;
+    }
+}
+
+/** 标定 0～180° 对应读数 1000～3000。 */
+static uint16_t plant_raw(const friction_plant_t *p)
+{
+    return (uint16_t)lround(1000.0 + p->out / 0.09);
+}
+
+static joint_tune_t traj_tune(void)
+{
+    joint_tune_t t = {JOINT_MODE_TRAJ, 50, 250, 0};
+    return t;
+}
+
+typedef struct
+{
+    int32_t final_angle;
+    int32_t min_angle;
+    int32_t max_angle;
+    int max_step;      /**< 两次非零输出之间占空比的最大变化。 */
+    int32_t max_track; /**< 运动中跟踪误差的最大值，毫度。 */
+    int32_t max_ref_jump; /**< 相邻两次参考位置的最大变化，毫度。 */
+} traj_run_t;
+
+/** 跑到运动结束；途中可在 switch_ms 时刻换目标。 */
+static traj_run_t traj_run(joint_control_t *j, friction_plant_t *p,
+                           uint32_t now, uint32_t limit_ms, uint32_t switch_ms,
+                           int32_t switch_target)
+{
+    traj_run_t r = {0, INT32_MAX, INT32_MIN, 0, 0, 0};
+    int last = 0;
+    int32_t last_ref = joint_reference(&j->states[0]);
+    for (uint32_t end = now + limit_ms; now < end && joint_any_active(j);
+         now += 10)
+    {
+        plant_step(p, output_duty, 0.01);
+        feed(j, plant_raw(p), now);
+        if (switch_ms && now == switch_ms)
+        {
+            assert(!joint_move(j, 31, 0, switch_target, 20000, now));
+        }
+        assert(joint_tick(j, now));
+        const joint_state_t *s = &j->states[0];
+        if (output_duty && last)
+        {
+            int step = abs(output_duty - last);
+            r.max_step = step > r.max_step ? step : r.max_step;
+        }
+        last = output_duty;
+        int32_t ref = joint_reference(s);
+        int32_t jump = abs(ref - last_ref);
+        r.max_ref_jump = jump > r.max_ref_jump ? jump : r.max_ref_jump;
+        last_ref = ref;
+        if (s->motion.active)
+        {
+            int32_t track = abs(s->motion.ref - s->angle);
+            r.max_track = track > r.max_track ? track : r.max_track;
+        }
+        r.min_angle = s->angle < r.min_angle ? s->angle : r.min_angle;
+        r.max_angle = s->angle > r.max_angle ? s->angle : r.max_angle;
+    }
+    r.final_angle = j->states[0].angle;
+    return r;
+}
+
+static joint_control_t traj_fresh(friction_plant_t *p, double start_deg,
+                                  int approach)
+{
+    joint_control_t j = fresh(normal());
+    assert(!joint_set_tune(&j, 0, traj_tune()));
+    joint_traj_cfg_t cfg = j.states[0].traj;
+    cfg.approach = approach;
+    assert(!joint_set_traj(&j, 0, cfg));
+    *p = (friction_plant_t){start_deg, 0.0, start_deg, 0.0, 0.25, false};
+    feed(&j, plant_raw(p), 0);
+    return j;
+}
+
+/** 轨迹式在摩擦模型上到位：不报故障、不制动、输出平滑、跟踪误差小。 */
+static void traj_plant_test(void)
+{
+    friction_plant_t p;
+    joint_control_t j = traj_fresh(&p, 30.0, 0);
+    assert(!joint_move(&j, 30, 0, 120000, 20000, 0));
+    assert(j.states[0].phase == JOINT_MOVING);
+    traj_run_t r = traj_run(&j, &p, 10, 20000, 0, 0);
+    assert(j.states[0].phase == JOINT_DONE && strstr(reply, "REACHED"));
+    assert(abs(r.final_angle - 120000) <= 2000);
+    assert(brake_calls == 0U && output_duty == 0);
+    /* 起步预加到 220 是唯一的跳变，之后每 10ms 变化很小。 */
+    assert(r.max_step <= 40);
+    assert(r.max_track <= 3000);
+    /* 不越过目标太多：没有规定方向时也不该有明显过冲。 */
+    assert(r.max_angle <= 122000);
+    printf("traj: 30->120 deg, final %ld mdeg, max duty step %d, "
+           "max tracking error %ld mdeg\n",
+           (long)r.final_angle, r.max_step, (long)r.max_track);
+
+    /* 反向电机：标定 direction = -1 时输出取反。 */
+    joint_cal_t cal = normal();
+    cal.raw_a = 3000;
+    cal.raw_b = 1000;
+    cal.direction = -1;
+    joint_control_t k = fresh(cal);
+    assert(!joint_set_tune(&k, 0, traj_tune()));
+    feed(&k, 2000, 0);
+    assert(!joint_move(&k, 32, 0, 120000, 20000, 0));
+    feed(&k, 2000, 10);
+    assert(joint_tick(&k, 10));
+    assert(output_duty < 0); /* 角度要增大，电机反转。 */
+}
+
+/**
+ * 单向逼近：规定从角度小的一侧到达。从上方来时先越过目标再回来，两个方向
+ * 到达的位置都落在目标下沿附近，背隙两侧的差别被消除。
+ */
+static void traj_approach_test(void)
+{
+    friction_plant_t p;
+    joint_control_t j = traj_fresh(&p, 120.0, 1);
+    p.backlash = 1.0;
+    assert(!joint_move(&j, 33, 0, 60000, 20000, 0));
+    assert(j.states[0].motion.seg_count == 2U);
+    traj_run_t from_above = traj_run(&j, &p, 10, 20000, 0, 0);
+    assert(strstr(reply, "REACHED"));
+    /* 越过了目标：到过 60° − 3° 附近。 */
+    assert(from_above.min_angle <= 57000 + 1500);
+    assert(abs(from_above.final_angle - 60000) <= 2000);
+
+    j = traj_fresh(&p, 10.0, 1);
+    p.backlash = 1.0;
+    assert(!joint_move(&j, 34, 0, 60000, 20000, 0));
+    assert(j.states[0].motion.seg_count == 1U);
+    traj_run_t from_below = traj_run(&j, &p, 10, 20000, 0, 0);
+    assert(strstr(reply, "REACHED"));
+    assert(from_below.max_angle <= 60000 + 2000);
+    int32_t gap = abs(from_above.final_angle - from_below.final_angle);
+    printf("traj approach: from above %ld, from below %ld mdeg\n",
+           (long)from_above.final_angle, (long)from_below.final_angle);
+    assert(gap <= 1000);
+
+    /* 同向到达只有一段；目标就在容差内时不做超调。 */
+    j = traj_fresh(&p, 61.0, 1);
+    assert(!joint_move(&j, 35, 0, 60000, 20000, 0));
+    assert(j.states[0].motion.seg_count == 1U);
+
+    /* 超调点被下限压缩到小于背隙：放弃单向逼近，回报 JNOTE，照常到位。 */
+    j = traj_fresh(&p, 90.0, 1);
+    assert(!joint_set_limits(&j, 0, 0, 180000));
+    assert(!joint_move(&j, 36, 0, 500, 20000, 0));
+    assert(j.states[0].motion.seg_count == 1U);
+    assert(strstr(log_text, "JNOTE 36 M1 NO_OVERSHOOT"));
+    /* 压缩后仍不小于背隙：两段，中间点就是下限。 */
+    j = traj_fresh(&p, 90.0, 1);
+    assert(!joint_move(&j, 37, 0, 1500, 20000, 0));
+    assert(j.states[0].motion.seg_count == 2U &&
+           j.states[0].motion.seg[0].p1 == 0.0f);
+}
+
+/** 运动中换目标：参考位置不跳变，最终到达新目标。 */
+static void traj_supersede_test(void)
+{
+    friction_plant_t p;
+    joint_control_t j = traj_fresh(&p, 30.0, 0);
+    assert(!joint_move(&j, 38, 0, 150000, 20000, 0));
+    traj_run_t r = traj_run(&j, &p, 10, 20000, 1500, 40000);
+    assert(strstr(log_text, "SUPERSEDED") && strstr(reply, "REACHED"));
+    assert(abs(r.final_angle - 40000) <= 2000);
+    /* 30°/s 下 10ms 最多走 0.3°，换目标那一刻也一样。 */
+    assert(r.max_ref_jump <= 320);
+}
+
+/** 时长超过期限拒绝；卡死报停滞；参数校验。 */
+static void traj_error_test(void)
+{
+    friction_plant_t p;
+    joint_control_t j = traj_fresh(&p, 10.0, 0);
+    assert(!strcmp(joint_move(&j, 39, 0, 170000, 3000, 0), "TOO_SLOW"));
+    assert(!joint_any_active(&j));
+    /* 速度上限：给 10°/s，160° 要 30s，超过 20s 期限。 */
+    assert(!strcmp(joint_move_speed(&j, 40, 0, 170000, 20000, 10000, 0),
+                   "TOO_SLOW"));
+    assert(!joint_move_speed(&j, 41, 0, 170000, 20000, 90000, 0));
+    /* 超过配置的 30°/s 时按 30°/s：约 160° 要 1.875 × 160 / 30 = 10s。 */
+    uint32_t ms = j.states[0].motion.seg[0].duration_ms;
+    assert(ms >= 9990U && ms <= 10010U);
+    assert(joint_cancel(&j));
+
+    j = traj_fresh(&p, 10.0, 0);
+    p.stuck = true;
+    assert(!joint_move(&j, 42, 0, 100000, 20000, 0));
+    uint32_t now = 10;
+    for (; now < 20000 && joint_any_active(&j); now += 10)
+    {
+        plant_step(&p, output_duty, 0.01);
+        feed(&j, plant_raw(&p), now);
+        (void)joint_tick(&j, now);
+    }
+    assert(j.states[0].phase == JOINT_FAULT && strstr(reply, "STALL") &&
+           (j.states[0].faults & JOINT_FAULT_STALL));
+
+    joint_traj_cfg_t cfg = j.states[0].traj;
+    cfg.approach = 2;
+    assert(!strcmp(joint_set_traj(&j, 0, cfg), "TUNE_PARAM"));
+    cfg.approach = -1;
+    cfg.overshoot = cfg.backlash - 1;
+    assert(!strcmp(joint_set_traj(&j, 0, cfg), "TUNE_PARAM"));
+    cfg.overshoot = 40000;
+    assert(!strcmp(joint_set_traj(&j, 0, cfg), "TUNE_PARAM"));
+    assert(!strcmp(joint_set_traj(&j, 6, j.states[0].traj), "JOINT_ID"));
+}
+
 int main(void)
 {
     joint_cal_t cal = normal();
@@ -529,6 +842,11 @@ int main(void)
     assert(!joint_cal_valid(&bad));
     plant_test(false);
     plant_test(true);
+    traj_curve_test();
+    traj_plant_test();
+    traj_approach_test();
+    traj_supersede_test();
+    traj_error_test();
     joint_control_t j = fresh(cal);
     assert(joint_move(&j, 1, 6, 90000, 10000, 0));
     assert(joint_move(&j, 1, 1, 90000, 10000, 0)); /* M2 not calibrated */

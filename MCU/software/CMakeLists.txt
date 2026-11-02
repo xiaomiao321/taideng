@@ -72,6 +72,7 @@ set(AITAID_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/debug_board.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_control.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_traj.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_service.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/chassis.c
 )

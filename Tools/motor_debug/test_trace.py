@@ -16,7 +16,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(command("JTRACE", 4, 2, 1), "JTRACE 4 M2 1\n")
         self.assertEqual(command("MPWM", 5, None), "MPWM 5\n")
         self.assertEqual(command("MPWM", 6, 5, 1), "MPWM 6 5 1\n")
-        for bad in ((1, 30, -300, 50), (2, 30, 300, 50), (1, 1001, 300, 50), (1, 30, 99, 50), (1, 30, 300, 201)):
+        for bad in ((1, 30, -300, 50), (3, 30, 300, 50), (1, 1001, 300, 50), (1, 30, 99, 50), (1, 30, 300, 201)):
             with self.assertRaises(ValueError): command("JTUNE", 1, 1, bad)
         with self.assertRaises(ValueError): command("JTUNE", 1, 7, (1, 30, 300, 50))
         with self.assertRaises(ValueError): command("JTRACE", 1, 1, 2)
@@ -28,6 +28,9 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(parse_shell("tune m2 bang").request, ("JTUNE", 2, (0, 30, 500, 50), 500))
         self.assertEqual(parse_shell("tune M1 p 3 30 50 70").request, ("JTUNE", 1, (1, 30, 300, 50, 700), 500))
         self.assertEqual(parse_shell("tune m2 bang 60").request, ("JTUNE", 2, (0, 30, 500, 50, 600), 500))
+        self.assertEqual(parse_shell("tune M3 traj 5 25").request, ("JTUNE", 3, (2, 50, 250, 0), 500))
+        self.assertEqual(parse_shell("tune M3 traj 5 25 80").request, ("JTUNE", 3, (2, 50, 250, 0, 800), 500))
+        self.assertEqual(command("JTUNE", 3, 1, (2, 50, 250, 0)), "JTUNE 3 M1 2 50 250 0\n")
         self.assertEqual(parse_shell("trace M1 on").request, ("JTRACE", 1, 1, 500))
         self.assertEqual(parse_shell("trace M1 OFF").request, ("JTRACE", 1, 0, 500))
         self.assertEqual(parse_shell("pwm").request, ("MPWM", None, 800, 500))
@@ -38,7 +41,10 @@ class TraceTests(unittest.TestCase):
 
     def test_parse(self):
         self.assertEqual(parse("JT 1234 M1 2048 6 90123 150000 -450 1 MOVE"),
-                         ("JT", 1234, 1, 2048, 6, 90123, 150000, -450, True, "MOVE"))
+                         ("JT", 1234, 1, 2048, 6, 90123, 150000, -450, True, "MOVE", 150000))
+        self.assertEqual(parse("JT 1234 M1 2048 6 90123 150000 450 0 MOVE 95321"),
+                         ("JT", 1234, 1, 2048, 6, 90123, 150000, 450, False, "MOVE", 95321))
+        self.assertEqual(parse("JTUNE 10 M3 2 50 250 0 800"), ("JTUNE", 10, 3, 2, 50, 250, 0, 800))
         self.assertEqual(parse("JTUNE 10 M3 1 30 300 50"), ("JTUNE", 10, 3, 1, 30, 300, 50, None))
         self.assertEqual(parse("JTUNE 10 M3 1 30 300 50 700"), ("JTUNE", 10, 3, 1, 30, 300, 50, 700))
         self.assertEqual(parse("MPWM 5 1"), ("MPWM", 5, True))
@@ -60,7 +66,7 @@ class TraceTests(unittest.TestCase):
             with open(first, encoding="utf-8") as f:
                 rows = list(csv.reader(f))
             self.assertEqual(tuple(rows[0]), HEADER)
-            self.assertEqual(rows[1][1:], ["10", "M1", "2048", "6", "90.123", "150.000", "-45", "0", "MOVE"])
+            self.assertEqual(rows[1][1:], ["10", "M1", "2048", "6", "90.123", "150.000", "-45", "0", "MOVE", "150.000"])
             self.assertEqual(rows[2][8], "1")
             # 切换关节立即换新文件。
             second = rec.add(parse("JT 30 M1 2048 6 90123 150000 0 0 IDLE"))
