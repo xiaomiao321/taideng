@@ -36,7 +36,7 @@ Motor and lighting controller for a lamp-shaped companion robot prototype: a 4-l
 
 ## 固件
 
-`MCU/software/test_bringup/`，STM32CubeMX 生成外设初始化，CMake 构建，裸机主循环，不用 RTOS。
+`MCU/software/`，STM32CubeMX 生成外设初始化，CMake 构建，裸机主循环，不用 RTOS。
 
 - 分层：`BSP/` 外设驱动（电机 H 桥、灯光 PWM、ADC、按键、蜂鸣器、看门狗、串口流、参数 Flash、Flash 日志）；`Protocol/` 帧解析与命令层；`App/` 应用、调试控制台、板级测试、关节控制。
 - 与主控板的二进制串口协议：帧头、版本、CRC16，分包与粘包处理，重复帧去重，超时与错误恢复。
@@ -45,7 +45,7 @@ Motor and lighting controller for a lamp-shaped companion robot prototype: a 4-l
 - 主机端自测：`HostTest/` 用 PC 上的 gcc 编译协议层、命令层、关节模型、Flash 日志和调试控制的自测，不需要开发板。
 - 代码风格：`.clang-format`，规范见 `MCU/software/MCU_固件编码规范.md`。
 
-构建：安装 STM32CubeCLT，在 `test_bringup/` 下执行 `cmake --preset Debug` 和 `cmake --build --preset Debug`。主机端自测：`powershell -File HostTest\run.ps1`。调试配置在 `.vscode/`，使用 OpenOCD 和 gdb。
+构建：安装 STM32CubeCLT，在 `MCU/software/` 下执行 `cmake --preset Debug` 和 `cmake --build --preset Debug`。主机端自测：`powershell -File HostTest\run.ps1`。调试配置在 `.vscode/`，使用 OpenOCD 和 gdb。
 
 ## 调试上位机
 

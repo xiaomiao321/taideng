@@ -183,7 +183,7 @@ MCU 通过 `RESULT <请求序号> <项目名> <结果>` 上报结果，`BOARD <�
 
 ## 使用
 
-1. 在 `MCU/software/test_bringup` 构建 Debug 固件，按工程现有 F5 流程烧录。当前 `main.c` 已接入串口调试模式，上电全部电机停止。
+1. 在 `MCU/software` 构建 Debug 固件，按工程现有 F5 流程烧录。当前 `main.c` 已接入串口调试模式，上电全部电机停止。
 2. USB 转串口使用 3.3V TTL：适配器 TX 接 PB11/USART3_RX，RX 接 PB10/USART3_TX，GND 共地。电机由板上的电机电源供电。
 3. 关闭占用同一 COM 口的串口助手。运行 `dist/BoardDebugMulti.exe`，或双击 `start.bat`（需要 Python 3.10 及以上和 Tkinter；首次安装 pyserial）。
 4. 选择 COM 口，点击连接。程序会发送 PING 和 STOP，收到 MCU 应答后显示已连接；不会自动启动电机。
@@ -237,13 +237,13 @@ STATE 表示电机控制指令，不表示测得的转速或确认电机已停�
 
 - `app.py`：桌面界面、串口工作线程和模拟模式。
 - `protocol.py`：上位机文本协议和电位器数据模型。
-- `../../MCU/software/test_bringup/App/src/debug_control.c`：独立于 HAL 的命令与电机计时状态。
-- `../../MCU/software/test_bringup/App/src/debug_console.c`：USART3 接收、硬件接口和 ADC 上报。
-- `../../MCU/software/test_bringup/HostTest/debug_control_selftest.c`：MCU 控制逻辑主机测试。
+- `../../MCU/software/App/src/debug_control.c`：独立于 HAL 的命令与电机计时状态。
+- `../../MCU/software/App/src/debug_console.c`：USART3 接收、硬件接口和 ADC 上报。
+- `../../MCU/software/HostTest/debug_control_selftest.c`：MCU 控制逻辑主机测试。
 
 ```powershell
 python -m unittest -v
-# 在 MCU/software/test_bringup 下：
+# 在 MCU/software 下：
 powershell -ExecutionPolicy Bypass -File HostTest\run.ps1
 ```
 
