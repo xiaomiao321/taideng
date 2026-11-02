@@ -35,7 +35,7 @@ cmake --preset Debug
 cmake --build --preset Debug
 ```
 
-产物是 `build/Debug/test_bringup.elf`。用 VS Code 打开本目录，按 F5 会自动编译并烧录。`.vscode/launch.json` 里 OpenOCD 的路径写死成了 `D:/xpack-openocd-0.12.0-7`，换电脑后要改 `serverpath` 和 `searchDir` 两处。
+产物是 `build/Debug/test_bringup.elf`。不想编译的话，可以直接烧 Release 里编译好的 hex，步骤见 [烧录说明.md](烧录说明.md)。用 VS Code 打开本目录，按 F5 会自动编译并烧录。`.vscode/launch.json` 里 OpenOCD 的路径写死成了 `D:/xpack-openocd-0.12.0-7`，换电脑后要改 `serverpath` 和 `searchDir` 两处。
 
 标定和控制参数存在片内 Flash 的扇区 10 和 11，重新烧录程序不会清掉。
 
