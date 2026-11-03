@@ -168,6 +168,7 @@ typedef struct
     uint32_t pulse_ms;     /**< 点动脉冲当前段开始的时刻。 */
     uint32_t brake_ms;     /**< 本次制动开始的时刻。 */
     uint32_t timeout_ms;   /**< 本次运动的超时。 */
+    int32_t limit_excess;  /**< 允许超出限位加容差的量，毫度；从范围内启动为 0。 */
     int32_t initial_error; /**< 开始时的误差绝对值。 */
     int32_t best_error;    /**< 运动中达到过的最小误差。 */
     bool stable;           /**< 是否处于容差内。 */
@@ -374,8 +375,9 @@ uint8_t joint_fault_flags(const joint_control_t *j);
 /**
  * @brief 清除原因已消失的锁存故障，供 STOP 调用；调用前应已停止全部关节。
  *
- * 停滞、超时、方向错误随运动结束而消失，直接清除；电位器读数仍无效时保留
- * 传感器位，角度仍在允许范围外时保留越限位，再次停机仍失败时保留驱动位。
+ * 停滞、超时、方向错误、越限随运动结束而消失，直接清除；越限不等回到范围
+ * 内，因为减速箱自锁，关节只能靠下一次运动转回来。电位器读数仍无效时保留
+ * 传感器位，再次停机仍失败时保留驱动位。
  * 某关节故障位全部清除后回到空闲阶段。
  */
 void joint_clear_faults(joint_control_t *j, uint32_t now);

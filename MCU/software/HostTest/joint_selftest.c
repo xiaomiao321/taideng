@@ -134,6 +134,38 @@ static void speed_test(void)
     assert(k.states[0].has_target && k.states[0].target == 90000);
 }
 
+/* 停在限位外时照常接受定位，运动中只拦继续往外走。 */
+static void outside_limit_test(void)
+{
+    /* 范围 0～180°，容差 2°：189° 超出 7°。 */
+    joint_control_t j = fresh(normal());
+    feed(&j, 3100, 0);
+    assert(!joint_move(&j, 1, 0, 150000, 10000, 0));
+    assert(joint_tick(&j, 0) && j.states[0].faults == 0);
+    /* 往回走到 184.5°，超出 2.5°，允许量收紧到 2.5° 加一个容差。 */
+    feed(&j, 3050, 10);
+    assert(joint_tick(&j, 10) && j.states[0].faults == 0);
+    /* 往外反弹不到一个容差不算越限，超过就算。 */
+    feed(&j, 3060, 20); /* 185.4°，超出 3.4° */
+    assert(joint_tick(&j, 20) && j.states[0].faults == 0);
+    feed(&j, 3090, 30); /* 188.1°，超出 6.1° */
+    assert(!joint_tick(&j, 30) && j.states[0].faults == JOINT_FAULT_LIMIT);
+    assert(!strcmp(j.states[0].fault, "LIMIT"));
+    /* 停在范围外也能清故障并再次定位。 */
+    joint_clear_faults(&j, 40);
+    assert(j.states[0].faults == 0);
+    assert(!joint_move(&j, 2, 0, 150000, 10000, 40));
+    /* 回到范围内后保护和从范围内启动一样。 */
+    feed(&j, 2900, 50); /* 171° */
+    assert(joint_tick(&j, 50) && j.states[0].faults == 0);
+    feed(&j, 3050, 60); /* 184.5°，超出 2.5° */
+    assert(!joint_tick(&j, 60) && j.states[0].faults == JOINT_FAULT_LIMIT);
+    /* 读数打满仍按传感器问题拒绝。 */
+    j = fresh(normal());
+    feed(&j, 4095, 0);
+    assert(!strcmp(joint_move(&j, 3, 0, 150000, 10000, 0), "POSITION_RANGE"));
+}
+
 /* 故障锁存为故障位；清除时只保留原因仍在的。 */
 static void fault_latch_test(void)
 {
@@ -153,15 +185,13 @@ static void fault_latch_test(void)
     assert(j.states[0].faults == 0 && j.states[0].phase == JOINT_IDLE &&
            !strcmp(j.states[0].fault, "NONE"));
 
-    /* 越限：角度回到允许范围内才清除。 */
+    /* 越限：停下后就能清除，不用等回到范围内，减速箱自锁回不来。 */
     assert(!joint_move(&j, 2, 0, 170000, 10000, 30));
     feed(&j, 3100, 40); /* 189° */
     assert(!joint_tick(&j, 40) && j.states[0].faults == JOINT_FAULT_LIMIT);
     joint_clear_faults(&j, 50);
-    assert(j.states[0].faults == JOINT_FAULT_LIMIT);
+    assert(j.states[0].faults == 0 && j.states[0].phase == JOINT_IDLE);
     feed(&j, 2000, 60);
-    joint_clear_faults(&j, 60);
-    assert(j.states[0].faults == 0);
 
     /* 超时随运动结束消失，STOP 直接清除。 */
     assert(!joint_move(&j, 3, 0, 150000, 500, 60));
@@ -1113,6 +1143,7 @@ int main(void)
     multi_test();
     speed_test();
     fault_latch_test();
+    outside_limit_test();
     puts("joint control: calibration, inverse sensor, simulated plant, "
          "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
          "rollover, calibration export/import, nominal calibration, limits, "

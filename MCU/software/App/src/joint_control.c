@@ -271,11 +271,36 @@ static bool sensor_ok(const joint_control_t *j, unsigned i, uint32_t now)
            raw != 0 && raw < ADC_RAW_FULL;
 }
 
-/** @brief 角度是否超出允许范围（含一个容差的余量）。 */
-static bool out_of_limits(const joint_state_t *s)
+/** @brief 角度超出允许范围（限位外再加一个容差）的量，范围内为 0。 */
+static int32_t limit_excess(const joint_state_t *s)
 {
-    return s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
-           s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance;
+    int32_t low = s->cal.limit_min - (int32_t)s->cal.tolerance;
+    int32_t high = s->cal.limit_max + (int32_t)s->cal.tolerance;
+    if (s->angle < low)
+    {
+        return low - s->angle;
+    }
+    return s->angle > high ? s->angle - high : 0;
+}
+
+/**
+ * @brief 运动中是否越限：超出量大于本次运动允许的量。
+ *
+ * @note 减速箱自锁，关节停在限位外时只能靠电机转回来，所以从限位外启动的
+ *       运动允许保持启动时的超出量。往回走时允许量跟着收紧，只留一个容差
+ *       吸收读数噪声；回到范围内后允许量为 0，和从范围内启动一样。
+ */
+static bool out_of_limits(joint_state_t *s)
+{
+    joint_motion_t *m = &s->motion;
+    int32_t excess = limit_excess(s);
+    if (excess > m->limit_excess)
+    {
+        return true;
+    }
+    int32_t allow = excess > 0 ? excess + (int32_t)s->cal.tolerance : 0;
+    m->limit_excess = allow < m->limit_excess ? allow : m->limit_excess;
+    return false;
 }
 
 static bool finish(joint_control_t *j, unsigned i, const char *result,
@@ -323,10 +348,6 @@ void joint_clear_faults(joint_control_t *j, uint32_t now)
         if ((s->faults & JOINT_FAULT_SENSOR) && !sensor_ok(j, i, now))
         {
             keep |= JOINT_FAULT_SENSOR;
-        }
-        if ((s->faults & JOINT_FAULT_LIMIT) && s->calibrated && out_of_limits(s))
-        {
-            keep |= JOINT_FAULT_LIMIT;
         }
         if ((s->faults & JOINT_FAULT_HARDWARE) && !j->hw.drive(i, 0))
         {
@@ -630,9 +651,9 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
     {
         return "TARGET_RANGE";
     }
-    if (s->raw == 0 || s->raw >= ADC_RAW_FULL ||
-        s->angle < s->cal.limit_min - (int32_t)s->cal.tolerance ||
-        s->angle > s->cal.limit_max + (int32_t)s->cal.tolerance)
+    /* 当前角度在限位外不拒绝：减速箱自锁，不让动就永远回不来。越限保护
+     * 改在运动中只拦继续往外走，见 out_of_limits。 */
+    if (s->raw == 0 || s->raw >= ADC_RAW_FULL)
     {
         return "POSITION_RANGE";
     }
@@ -683,6 +704,7 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
     m->stable = false;
     m->goal = has_via ? via : target;
     m->via_pending = has_via;
+    m->limit_excess = limit_excess(s);
     m->initial_error = magnitude(m->goal - s->angle);
     m->best_error = m->initial_error;
     m->pulse_on = false;
