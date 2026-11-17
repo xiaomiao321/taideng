@@ -75,6 +75,7 @@ set(AITAID_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_traj.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/joint_service.c
     ${CMAKE_CURRENT_SOURCE_DIR}/App/src/chassis.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/App/src/home_key.c
 )
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${AITAID_SOURCES})
 # 只对手写代码加严警告；CubeMX 和 HAL 保持厂商原样，不加。

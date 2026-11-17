@@ -47,6 +47,13 @@ $suites = @(
         )
     }
     @{
+        Name = 'home_key'
+        Sources = @(
+            (Join-Path $projectDir 'App\src\home_key.c')
+            (Join-Path $projectDir 'HostTest\home_key_selftest.c')
+        )
+    }
+    @{
         Name = 'debug_board'
         Sources = @(
             (Join-Path $projectDir 'App\src\debug_board.c')

@@ -42,6 +42,21 @@ bool joint_service_update(void);
 /** @brief 把全部关节的标定和控制参数写入 Flash；返回是否成功。 */
 bool joint_service_save(void);
 
+/**
+ * @brief 把 Flash 里的启动计数加一并保存，作为本次启动的标识。
+ *
+ * @param[out] boot_id 返回 true 时写入新的计数，不允许为 NULL。
+ *
+ * @retval true 新计数已写入 Flash，下次启动一定得到不同的值。
+ * @retval false Flash 不可用或保存失败，boot_id 不变。
+ *
+ * @note 每次启动最多调用一次，在 joint_service_init() 之后、看门狗启动之前、
+ *       电机静止时调用：写满一个扇区（四百多次启动）后的那一次保存要擦除，
+ *       阻塞约 2 秒。
+ * @note 启动计数和标定存在同一条记录里，整片擦除会让计数从头开始。
+ */
+bool joint_service_next_boot_id(uint32_t *boot_id);
+
 /** @brief 标定的 Flash 存储是否可用。 */
 bool joint_service_store_ok(void);
 

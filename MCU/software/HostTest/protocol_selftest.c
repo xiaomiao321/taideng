@@ -520,6 +520,43 @@ static void test_encode_parse_round_trip(void)
           "round-trip: fields survive encode and parse");
 }
 
+/** @brief HOME_KEY_REPORT 编码结果与 SDK 0.5.1 接口文档的联调样例逐字节一致。 */
+static void test_encode_home_key_report(void)
+{
+    static const uint8_t k_expected[] = {
+        0xA5, 0x5A, 0x02, 0x01, 0x00, 0x39, 0x10, 0x00, 0x01,
+        0x01, 0x01, 0x00, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x49, 0xF5};
+    mcu_home_key_report_t report = {0};
+    mcu_frame_t frame;
+    uint8_t out[MCU_PROTOCOL_MAX_FRAME_SIZE];
+
+    report.input = 1U;
+    report.kind = MCU_PROTOCOL_HOME_KEY_KIND_PRESSED;
+    report.boot_id = 7U;
+    report.report_id = 1U;
+    report.press_count = 1U;
+    mcu_protocol_make_home_key_report(&frame, 0U, &report);
+    size_t length = mcu_protocol_encode(&frame, out, sizeof(out));
+    check((length == sizeof(k_expected)) &&
+              (memcmp(out, k_expected, sizeof(k_expected)) == 0),
+          "encode HOME_KEY_REPORT: matches SDK sample frame");
+
+    report.input = 0U;
+    report.kind = MCU_PROTOCOL_HOME_KEY_KIND_SNAPSHOT;
+    report.boot_id = 0x12345678U;
+    report.report_id = 0xFFFFFFFFU;
+    report.press_count = 0x80000001U;
+    mcu_protocol_make_home_key_report(&frame, 0x7FU, &report);
+    check((frame.seq == 0x7FU) && (frame.payload[0] == 1U) &&
+              (frame.payload[1] == 0U) && (frame.payload[2] == 0U) &&
+              (frame.payload[3] == 0U) && (frame.payload[4] == 0x78U) &&
+              (frame.payload[7] == 0x12U) && (frame.payload[8] == 0xFFU) &&
+              (frame.payload[11] == 0xFFU) && (frame.payload[12] == 0x01U) &&
+              (frame.payload[15] == 0x80U),
+          "encode HOME_KEY_REPORT: uint32 fields little-endian");
+}
+
 int main(void)
 {
     printf("--- CRC16/MODBUS ---\n");
@@ -540,6 +577,7 @@ int main(void)
     test_encode_ack_ok();
     test_encode_ack_error();
     test_encode_status();
+    test_encode_home_key_report();
     test_encode_rejects_bad_arguments();
     test_encode_parse_round_trip();
 

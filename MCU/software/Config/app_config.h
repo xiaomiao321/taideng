@@ -309,4 +309,11 @@
 /** @brief HOME 键消抖时间，单位毫秒。 */
 #define BSP_KEY_DEBOUNCE_MS (20U)
 
+/**
+ * @brief HOME 键状态快照的上报周期，单位毫秒。
+ *
+ * 主机超过 5 秒收不到报告就把按键状态当作未知，周期必须明显短于它。
+ */
+#define HOME_KEY_SNAPSHOT_PERIOD_MS (1000U)
+
 #endif /* AITAID_APP_CONFIG_H */

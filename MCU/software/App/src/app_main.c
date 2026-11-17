@@ -4,7 +4,8 @@
  *
  * Android 模式：支持灯光开关/亮度、PING、状态查询、底盘前进/后退/左右转和
  * 全电机 STOP，以及 extension-v2 的关节定位、回原点、分区灯、蜂鸣器、指示灯
- * 和它们的扩展状态查询。HOME 键按下立即停止全部电机。
+ * 和它们的扩展状态查询。HOME 键按下立即停止全部电机，并通过 HOME_KEY_REPORT
+ * 主动上报按键的状态快照和按下、松开事件。
  *
  * 扩展输出的 ID 由本文件定义，须与 App 端能力描述一致：
  *   - 分区灯 lightZoneIds：1～4 为上灯板 UP1～UP4，5～7 为下灯板 DOWN1～DOWN3；
@@ -27,6 +28,7 @@
 #include "bsp_log.h"
 #include "bsp_motor.h"
 #include "chassis.h"
+#include "home_key.h"
 #include "joint_service.h"
 #include "main.h"
 #include "mcu_command.h"
@@ -105,6 +107,12 @@ static bool s_comm_led_is_on = false;
 static uint32_t s_comm_led_off_ms = 0U;
 /** @brief 已处理过的 HOME 按下次数，用于发现新的按下。 */
 static uint32_t s_home_count = 0U;
+/** @brief HOME 键的消抖与上报状态。 */
+static home_key_t s_home_key;
+/** @brief HOME 键上报是否启用；拿不到本次启动的标识时不上报。 */
+static bool s_is_home_report_on = false;
+/** @brief HOME_KEY_REPORT 的帧序号，每发一帧加一，只用于诊断。 */
+static uint8_t s_home_report_seq = 0U;
 /** @brief 各关节当前运动的速度上限请求，毫度/秒；不在运动时无意义。 */
 static int32_t s_arm_speed[JOINT_COUNT];
 /** @brief 各关节 HOME_ARM 的目标角度，见 MCU_ARM_HOME_MDEG。 */
@@ -553,6 +561,36 @@ static void check_home_key(void)
     LOG_INFO("APP", "HOME pressed, all motors stopped");
 }
 
+/**
+ * @brief 推进 HOME 键消抖，需要时向主机发一帧 HOME_KEY_REPORT。
+ *
+ * @note 只上报，不停电机；急停由 check_home_key() 负责，不受发送结果影响。
+ * @note 发送失败只计数和打日志，不重发：下一份快照会带上当前状态。
+ */
+static void report_home_key(uint32_t now_ms)
+{
+    bool is_pressed = false;
+    mcu_home_key_report_t report;
+    if (!s_is_home_report_on || (bsp_key_read(&is_pressed) != BSP_OK) ||
+        !home_key_update(&s_home_key, is_pressed, now_ms, &report))
+    {
+        return;
+    }
+
+    mcu_frame_t frame;
+    mcu_protocol_make_home_key_report(&frame, s_home_report_seq++, &report);
+    size_t tx_length =
+        mcu_protocol_encode(&frame, s_tx_buffer, sizeof(s_tx_buffer));
+    bsp_status_t status =
+        bsp_linux_uart_write(s_tx_buffer, tx_length, APP_UART_TX_TIMEOUT_MS);
+    if (status != BSP_OK)
+    {
+        ++s_uart_error_count;
+        LOG_WARN("APP", "uart1 tx failed: %s (errors=%lu)",
+                 bsp_status_str(status), (unsigned long)s_uart_error_count);
+    }
+}
+
 /** @brief 报告一个不可恢复的初始化错误。 */
 static void fail_hard(void)
 {
@@ -723,6 +761,21 @@ void app_init(void)
     unsigned restored = joint_service_init(joint_log);
     LOG_INFO("APP", "joints: %u calibrated, flash %s", restored,
              joint_service_store_ok() ? "ok" : "unavailable");
+    /* HOME 键上报要求每次启动的标识都不同，所以用存在 Flash 里的启动计数；
+     * 拿不到就不上报，主机把按键状态当作未知，急停不受影响。 */
+    uint32_t boot_id = 0U;
+    bool is_pressed = false;
+    s_is_home_report_on = joint_service_next_boot_id(&boot_id) &&
+                          (bsp_key_read(&is_pressed) == BSP_OK);
+    if (s_is_home_report_on)
+    {
+        home_key_init(&s_home_key, boot_id, is_pressed, HAL_GetTick());
+        LOG_INFO("APP", "HOME report on, boot id %lu", (unsigned long)boot_id);
+    }
+    else
+    {
+        LOG_WARN("APP", "HOME report off: no boot id");
+    }
     if (bsp_linux_uart_init() != BSP_OK)
     {
         fail_hard();
@@ -773,6 +826,7 @@ void app_run_once(void)
     }
 
     check_home_key();
+    report_home_key(HAL_GetTick());
     if (!joint_service_update())
     {
         LOG_WARN("APP", "joint fault, flags 0x%02X",

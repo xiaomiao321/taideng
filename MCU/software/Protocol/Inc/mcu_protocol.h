@@ -92,6 +92,9 @@
 /** @brief 扩展命令字：设置一个指示灯的开关。 */
 #define MCU_PROTOCOL_CMD_SET_INDICATOR (0x37U)
 
+/** @brief 命令字：实体 HOME 键报告，MCU 主动上报，不需要 ACK。 */
+#define MCU_PROTOCOL_CMD_HOME_KEY_REPORT (0x39U)
+
 /** @brief 命令字：应答。 */
 #define MCU_PROTOCOL_CMD_ACK (0x7FU)
 
@@ -143,6 +146,21 @@
 /** @brief EXTENDED_STATUS 的 PAYLOAD 字节数，固定 20。 */
 #define MCU_PROTOCOL_EXTENDED_STATUS_PAYLOAD_SIZE (20U)
 
+/** @brief HOME_KEY_REPORT 的 PAYLOAD 字节数，固定 16。 */
+#define MCU_PROTOCOL_HOME_KEY_REPORT_PAYLOAD_SIZE (16U)
+
+/** @brief HOME_KEY_REPORT 的载荷版本。 */
+#define MCU_PROTOCOL_HOME_KEY_REPORT_REVISION (1U)
+
+/** @brief HOME_KEY_REPORT 的报告类型：周期或启动时的状态快照。 */
+#define MCU_PROTOCOL_HOME_KEY_KIND_SNAPSHOT (0U)
+
+/** @brief HOME_KEY_REPORT 的报告类型：消抖后的物理按下。 */
+#define MCU_PROTOCOL_HOME_KEY_KIND_PRESSED (1U)
+
+/** @brief HOME_KEY_REPORT 的报告类型：消抖后的物理松开。 */
+#define MCU_PROTOCOL_HOME_KEY_KIND_RELEASED (2U)
+
 /** @brief extension-v2 的关节 ID 范围，1～6 对应 M1～M6。 */
 #define MCU_PROTOCOL_JOINT_ID_MIN (1U)
 #define MCU_PROTOCOL_JOINT_ID_MAX (6U)
@@ -190,6 +208,21 @@ typedef struct
     int32_t actual_speed; /**< 偏移 12～15：实际速度。 */
     int32_t target_speed; /**< 偏移 16～19：目标速度。 */
 } mcu_extended_status_t;
+
+/**
+ * @brief HOME_KEY_REPORT 报文的内容，写入 PAYLOAD 时逐字段展开成小端字节。
+ *
+ * @note kind 为 PRESSED 时 input 必须为 1，为 RELEASED 时必须为 0，否则主机
+ *       会丢弃这份报告。
+ */
+typedef struct
+{
+    uint8_t input;        /**< 偏移 1：消抖后的状态，0 松开，1 按下。 */
+    uint8_t kind;         /**< 偏移 2：MCU_PROTOCOL_HOME_KEY_KIND_*。 */
+    uint32_t boot_id;     /**< 偏移 4～7：本次启动的标识，每次重启都不同。 */
+    uint32_t report_id;   /**< 偏移 8～11：本次启动内每份报告加一。 */
+    uint32_t press_count; /**< 偏移 12～15：本次启动消抖后的按下次数。 */
+} mcu_home_key_report_t;
 
 /**
  * @brief 一条已解析出来的完整报文。
@@ -305,6 +338,17 @@ void mcu_protocol_make_status(mcu_frame_t *frame, uint8_t seq,
  */
 void mcu_protocol_make_extended_status(mcu_frame_t *frame, uint8_t seq,
                                        const mcu_extended_status_t *status);
+
+/**
+ * @brief 构造一条 HOME_KEY_REPORT 报文。
+ * @param[out] frame 输出的报文，不允许为 NULL。
+ * @param[in] seq 帧序号，只用于诊断；主机按载荷里的 boot_id 和 report_id 去重。
+ * @param[in] report 要上报的内容，不允许为 NULL。
+ * @note FLAGS 恒为 RESPONSE；PAYLOAD 固定 16 字节，偏移 0 为载荷版本 1，
+ *       偏移 3 保留为 0。
+ */
+void mcu_protocol_make_home_key_report(mcu_frame_t *frame, uint8_t seq,
+                                       const mcu_home_key_report_t *report);
 
 /**
  * @brief 把一条报文编码成线路上要发送的字节。

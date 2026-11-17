@@ -42,7 +42,7 @@
 | [STOP](software/App/src/app_main.c) | 无 | 停止底盘和全部关节、取消目标，再清除原因已消失的故障 | 灯光、蜂鸣器、指示灯保持 |
 | [失联保护](software/Config/app_config.h) | 无 | 连续 5 秒没有收到任何合法帧即停止全部电机并关掉蜂鸣器 | SDK 需要至少每 5 秒发一帧，PING 或 GET_STATUS 都可以 |
 | [故障位](software/App/inc/joint_control.h) | 无 | `STATUS` 的 `fault_flags` 为各关节故障与底盘故障按位或，位定义与 SDK 文档一致；`EXTENDED_STATUS` 报单关节故障 | 有故障时拒绝非 STOP 的移动和关节动作；灯光、蜂鸣器、指示灯和查询不受限制 |
-| [HOME 按键](software/BSP/Inc/bsp_key.h) | 有，MCU 侧用作急停 | 不上报 | 按下立即停止全部电机；SDK 文档也注明协议里没有约定物理 HOME 输入 |
+| [HOME 按键](software/App/inc/home_key.h) | 有，MCU 侧用作急停 | `HOME_KEY_REPORT` 0x39 主动上报：每秒一份状态快照，按下和松开消抖 20ms 后各发一份 | 按下立即停止全部电机，与上报是否发出无关。载荷里的 bootId 是存在片内 Flash 的启动计数，Flash 不可用时不上报。对应 SDK 0.5.1 的实体 HOME 键接口 |
 | [软关机](software/BSP/Inc/bsp_linux_power.h) | 有电源键脉冲 | 0x38 未实现 | 涉及核心板电源时序，需要单独商量 |
 | [未知命令](software/Protocol/Src/mcu_command.c) | 无 | 要求 ACK 的命令回 `INVALID_COMMAND`；不要求 ACK 的直接丢弃 | 后者在 SDK 侧会表现为 STATE_TIMEOUT |
 
@@ -61,6 +61,7 @@
 | [indicatorIds](software/App/src/app_main.c) | 1、2 | STATE、ACT |
 | [lightModes](software/Protocol/Src/mcu_command.c) | 空 | 0x30 未实现 |
 | [supportsSoftShutdown](software/Protocol/Src/mcu_command.c) | false | 0x38 未实现 |
+| [supportsPhysicalHomeKey](software/App/src/home_key.c) | true | 需要 SDK 0.5.1；固件已按其接口文档实现 0x39 上报，实物联调通过后再启用 |
 
 ## 6. 固件的两种工作模式
 
@@ -71,7 +72,7 @@
 | [APP_MODE_DEBUG](software/App/src/debug_console.c) | 开发、板级测试、关节标定，开放全部功能 | USART3 文本命令，PC 上位机 `BoardDebugMulti.exe` |
 | [APP_MODE_ANDROID](software/App/src/app_main.c) | 最终机器人 | USART1 二进制协议，与核心板通信；USART3 只输出日志 |
 
-关节标定和控制参数保存在片内 Flash 的扇区 10 和 11，正常重新烧录不会清除，整片擦除会清除。流程是先烧调试模式固件，用上位机完成标定和限位设置，再烧安卓模式固件，标定参数保留。烧录方法见 `MCU/software/烧录说明.md`。
+关节标定和控制参数保存在片内 Flash 的扇区 10 和 11，正常重新烧录不会清除，整片擦除会清除。安卓模式每次上电还会把同一条记录里的启动计数加一后重新保存，用作 HOME 键上报的 bootId。流程是先烧调试模式固件，用上位机完成标定和限位设置，再烧安卓模式固件，标定参数保留。烧录方法见 `MCU/software/烧录说明.md`。
 
 ## 7. 原待商定问题的现状
 
@@ -83,7 +84,7 @@
 | [能力描述的数值](software/App/src/joint_control.c) | 待实测。每个关节的允许范围和最大速度要在实物上测，硬件这边提供 |
 | [多关节同时运动](software/App/src/joint_control.c) | 已支持，六个关节可以同时运动 |
 | [fault_flags 位定义](software/App/inc/joint_control.h) | 已按 SDK 文档实现：bit0 停滞，bit1 定位超时，bit2 方向错误，bit3 超出允许范围，bit4 电位器失效，bit5 驱动失败，bit6 底盘故障 |
-| [物理 HOME 键与标定状态上报](software/BSP/Inc/bsp_key.h) | 仍未上报，需要的话再扩展协议 |
+| [物理 HOME 键与标定状态上报](software/App/inc/home_key.h) | HOME 键已按 SDK 0.5.1 用 `HOME_KEY_REPORT` 0x39 上报，待实物联调；标定状态仍未上报 |
 | [重复定位精度](software/App/src/joint_control.c) | 关节停在容差带内的任意位置，到位后不再保持，重复定位的分散程度大致等于容差带宽度。在调电机时评估缩小容差、单方向逼近或到位后保持 |
 
 ## 8. 验证状态与下一步
@@ -98,6 +99,7 @@
 
 - 与安卓核心板的 UART 实物联调，以及安卓模式下的扩展命令；
 - 蜂鸣器音量档位的实际听感；
+- HOME 键上报 0x39 与 SDK 0.5.1 的实物联调，目前只有电脑端单元测试，组包结果与 SDK 接口文档的联调样例逐字节一致；
 - 电源键脉冲接入核心板，目前只在未接核心板时看过波形。
 
 下一步：

@@ -309,6 +309,28 @@ void mcu_protocol_make_extended_status(mcu_frame_t *frame, uint8_t seq,
     put_i32(&frame->payload[16], status->target_speed);
 }
 
+void mcu_protocol_make_home_key_report(mcu_frame_t *frame, uint8_t seq,
+                                       const mcu_home_key_report_t *report)
+{
+    if ((frame == NULL) || (report == NULL))
+    {
+        return;
+    }
+
+    frame->version = MCU_PROTOCOL_VERSION;
+    frame->flags = MCU_PROTOCOL_FLAG_RESPONSE;
+    frame->seq = seq;
+    frame->cmd = MCU_PROTOCOL_CMD_HOME_KEY_REPORT;
+    frame->payload_length = MCU_PROTOCOL_HOME_KEY_REPORT_PAYLOAD_SIZE;
+    frame->payload[0] = MCU_PROTOCOL_HOME_KEY_REPORT_REVISION;
+    frame->payload[1] = report->input;
+    frame->payload[2] = report->kind;
+    frame->payload[3] = 0U;
+    put_i32(&frame->payload[4], (int32_t)report->boot_id);
+    put_i32(&frame->payload[8], (int32_t)report->report_id);
+    put_i32(&frame->payload[12], (int32_t)report->press_count);
+}
+
 size_t mcu_protocol_encode(const mcu_frame_t *frame, uint8_t *out,
                            size_t out_size)
 {
