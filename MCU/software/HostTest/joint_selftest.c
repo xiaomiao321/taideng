@@ -1040,6 +1040,27 @@ static void pi_test(void)
     output_duty = 0;
     assert(!joint_calibrate(&j, 0, normal()));
 
+    /* 读数还没开始变化时只给起转占空比：电位器和连杆之间有旷量，不能因为
+     * 误差大就把占空比一路加上去。读数动了之后才放开。 */
+    feed(&j, 2000, 0);
+    assert(!joint_move(&j, 29, 0, 150000, 20000, 0));
+    int peak = 0;
+    for (uint32_t t = 0; t <= 600; t += 10)
+    {
+        feed(&j, 2000, t);
+        assert(joint_tick(&j, t));
+        peak = abs(output_duty) > peak ? abs(output_duty) : peak;
+    }
+    assert(peak == (int)j.states[0].tune.pi.duty_min[0]);
+    for (uint32_t t = 610; t <= 700; t += 10)
+    {
+        feed(&j, (uint16_t)(2000 + (t - 600) / 2), t); /* 读数开始动，约 4.5 度 */
+        assert(joint_tick(&j, t));
+        peak = abs(output_duty) > peak ? abs(output_duty) : peak;
+    }
+    assert(peak > (int)j.states[0].tune.pi.duty_min[0]);
+    assert(joint_cancel(&j));
+
     /* 到位后先进 HOLD，仍算忙；稳定满 JOINT_PI_HOLD_MS 后才是 DONE。 */
     double raw = 2000;
     uint32_t reached = pi_run(&j, &raw, 120000, 20000, 0);

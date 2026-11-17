@@ -49,6 +49,8 @@ static const uint16_t k_pi_ki[JOINT_COUNT][2] = JOINT_PI_KI_TABLE;
 static const uint16_t k_pi_i_max[JOINT_COUNT][2] = JOINT_PI_I_MAX_TABLE;
 static const uint16_t k_pi_duty_min[JOINT_COUNT][2] = JOINT_PI_DUTY_MIN_TABLE;
 static const uint16_t k_pi_duty_max[JOINT_COUNT][2] = JOINT_PI_DUTY_MAX_TABLE;
+/** @brief 各关节提前刹车时是否瞄准容差近侧边缘，见 JOINT_PI_BRAKE_EARLY。 */
+static const uint8_t k_pi_brake_early[JOINT_COUNT] = JOINT_PI_BRAKE_EARLY;
 
 static int32_t magnitude(int32_t n)
 {
@@ -822,6 +824,8 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
         m->duty_cmd = 0;
         m->kick = s->tune.mode == JOINT_MODE_PI;
         m->kick_ms = 0U;
+        m->blind = m->kick;
+        m->blind_angle = s->angle;
     }
     /* 到位后的漂移监视被新命令接管；积分从零开始，避免旧目标的累积量。 */
     m->holding = false;
@@ -1226,6 +1230,35 @@ static bool pi_apply(joint_control_t *j, unsigned i, int32_t error, uint32_t now
         u = (float)sign * (float)p->duty_min[idx];
         m->integral = old_i;
     }
+    /* 起步或换向后，读数开始变化之前只给起转占空比。电位器和连杆之间有旷量，
+     * 连杆要先走完旷量读数才会动；这段时间里误差看起来一点没减小，比例项和
+     * 积分项会一路把占空比加上去，等读数开始变时连杆已经被加速得很快。 */
+    if (m->blind)
+    {
+        /* 只认朝目标方向的变化：换向时上一段的滑行还在让读数往反方向走，
+         * 那不代表这一段已经带动了电位器。 */
+        if (sign * (s->angle - m->blind_angle) > JOINT_PI_BLIND_EXIT)
+        {
+            m->blind = false;
+        }
+        else if (sign * (s->angle - m->blind_angle) < 0)
+        {
+            m->blind_angle = s->angle;
+        }
+        else
+        {
+            /* 这一段固定用起转占空比，不受慢速段限幅的约束：慢速段的占空比
+             * 可以比起转值低，用它来走完旷量要等一两秒，看起来像停住了。
+             * 读数一动就回到正常的限幅。 */
+            float limit = (float)p->duty_min[idx];
+            u = (float)sign * limit;
+            if ((float)cap < limit)
+            {
+                cap = (unsigned)limit;
+            }
+            m->integral = old_i;
+        }
+    }
     if (u > (float)cap)
     {
         u = (float)cap;
@@ -1286,6 +1319,12 @@ static bool tick_pi(joint_control_t *j, unsigned i, uint32_t now)
         int32_t stop = (int32_t)((int64_t)magnitude(speed) *
                                  (int64_t)(s->tune.brake_ms + JOINT_PI_COAST_MS) / 1000) +
                        JOINT_PI_BRAKE_MARGIN;
+        if (k_pi_brake_early[i])
+        {
+            /* 带重力负载的关节宁可停在近侧：冲过头就要反向修正，而反向的
+             * 头一段读数看不见。 */
+            stop += (int32_t)s->cal.tolerance;
+        }
         if (distance <= stop)
         {
             if (!brake(j, i, now))
@@ -1406,6 +1445,8 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
                 m->integral = 0.0f;
                 m->kick = true;
                 m->kick_ms = 0U;
+                m->blind = true;
+                m->blind_angle = s->angle;
                 m->duty_cmd = 0;
             }
         }
@@ -1413,7 +1454,14 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
     int32_t error = m->goal - s->angle, distance = magnitude(error);
     bool proportional = s->tune.mode == JOINT_MODE_P;
     bool uses_brake = proportional || s->tune.mode == JOINT_MODE_PI;
-    if (distance <= (int32_t)s->cal.tolerance)
+    /* 已经进了容差、正在数稳定时间时放宽一点：读数在容差边缘来回跳，会变成
+     * “停一下、推一下”的抖动，推的那几十毫秒又不足以让读数变化，最后判停滞。 */
+    int32_t arrive_band = (int32_t)s->cal.tolerance;
+    if (m->stable && s->tune.mode == JOINT_MODE_PI)
+    {
+        arrive_band += JOINT_PI_ARRIVE_HYS;
+    }
+    if (distance <= arrive_band)
     {
         if (!m->stable)
         {
@@ -1486,6 +1534,8 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
             m->integral = 0.0f;
             m->kick = true;
             m->kick_ms = 0U;
+            m->blind = true;
+            m->blind_angle = s->angle;
             m->duty_cmd = 0;
         }
         s->phase = JOINT_SETTLE;

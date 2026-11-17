@@ -223,6 +223,8 @@ typedef struct
     uint32_t hold_ms;       /**< 进入 HOLD 的时刻。 */
     bool holding;           /**< 是否处于到位后的漂移监视。 */
     bool kick;              /**< 起步增量是否还在有效期内。 */
+    bool blind;             /**< 起步或换向后读数还没开始变化，见 JOINT_PI_BLIND_EXIT。 */
+    int32_t blind_angle;    /**< 进入上述状态时的角度，毫度。 */
 } joint_motion_t;
 
 /** @brief 转速估计用的最近若干次角度采样，环形缓冲。 */
