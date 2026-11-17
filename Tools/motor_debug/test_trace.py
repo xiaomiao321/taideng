@@ -16,7 +16,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(command("JTRACE", 4, 2, 1), "JTRACE 4 M2 1\n")
         self.assertEqual(command("MPWM", 5, None), "MPWM 5\n")
         self.assertEqual(command("MPWM", 6, 5, 1), "MPWM 6 5 1\n")
-        for bad in ((1, 30, -300, 50), (3, 30, 300, 50), (1, 1001, 300, 50), (1, 30, 99, 50), (1, 30, 300, 201)):
+        for bad in ((1, 30, -300, 50), (4, 30, 300, 50), (1, 1001, 300, 50), (1, 30, 99, 50), (1, 30, 300, 201)):
             with self.assertRaises(ValueError): command("JTUNE", 1, 1, bad)
         with self.assertRaises(ValueError): command("JTUNE", 1, 7, (1, 30, 300, 50))
         with self.assertRaises(ValueError): command("JTRACE", 1, 1, 2)

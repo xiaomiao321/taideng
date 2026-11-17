@@ -101,12 +101,13 @@
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief 没保存过控制参数时的默认值：比例式，每度 1%，起转 30%，制动 50ms。
+ * @brief 没保存过控制参数时的默认值：比例积分式。
  *
- * 2026-10-24 在 5kHz 刹车 PWM 下实测 M1：3°～30° 的定位 1～1.5 秒到位，
- * 过冲不超过 2.4°。已保存到 Flash 的参数优先。
+ * 参数只是整定起点：M1 的 5kHz 刹车 PWM 旧数据（3°～30° 约 1～1.5 秒、
+ * 过冲不超过 2.4°）来自比例式，不能直接当作 PI 的验收数据。已保存到
+ * Flash 的参数优先。
  */
-#define JOINT_DEFAULT_MODE (JOINT_MODE_P)
+#define JOINT_DEFAULT_MODE (JOINT_MODE_PI)
 #define JOINT_DEFAULT_KP (10U)
 #define JOINT_DEFAULT_DUTY_MIN (300U)
 #define JOINT_DEFAULT_BRAKE_MS (50U)
@@ -146,6 +147,94 @@
 /** @brief 开关式点动脉冲：驱动段与停顿段时长，单位毫秒。 */
 #define JOINT_PULSE_ON_MS (30U)
 #define JOINT_PULSE_OFF_MS (100U)
+
+/* -------------------------------------------------------------------------- */
+/* 比例积分式控制（JTUNE 模式 3）                                               */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * 下面全是整定起点，不是实测结论。每度误差的稳态占空比由 kp 和 ki 共同决定，
+ * 起转占空比 duty_min 是静摩擦前馈。上板后按“先方向、再 kp、再 ki、最后
+ * 斜坡与制动”的顺序整定，方法见 docs/PI_改造说明.md。
+ */
+
+/** @brief 误差大于慢速段门限时每度误差增加的占空比，千分比/度。 */
+#define JOINT_PI_KP_FAST (40U)
+/** @brief 慢速段每度误差增加的占空比，千分比/度；压低以避免末端来回。 */
+#define JOINT_PI_KP_SLOW (15U)
+/** @brief 积分增益，千分比/(度·秒)。 */
+#define JOINT_PI_KI (8U)
+/** @brief 积分项限幅，千分比；不小于起转占空比与动摩擦的差值。 */
+#define JOINT_PI_I_MAX (200U)
+/** @brief 起转占空比的默认值，千分比；逐关节表会覆盖它。 */
+#define JOINT_PI_DUTY_MIN (300U)
+/** @brief 最高占空比的默认值，千分比；逐关节表会覆盖它。 */
+#define JOINT_PI_DUTY_MAX (700U)
+/** @brief 慢速段门限，毫度；误差小于它时改用 kp_slow 并压低限幅。 */
+#define JOINT_PI_SLOW_BAND (8000U)
+/** @brief 已起步后的维持占空比占 duty_min 的百分比。 */
+#define JOINT_PI_RUN_PCT (80U)
+/** @brief 输出斜坡，千分比/秒；换向和起步时限制占空比变化率。 */
+#define JOINT_PI_SLEW_PERMILLE_S (3000U)
+/** @brief 每次起步（含换向后重新起步）加 duty_min 前馈的时长，毫秒。 */
+#define JOINT_PI_KICK_MS (150U)
+/** @brief 自适应制动的进入门限转速，毫度/秒；低于它只靠斜坡和 PI。 */
+#define JOINT_PI_BRAKE_SPEED (3000)
+/** @brief 自适应制动的距离余量，毫度。 */
+#define JOINT_PI_BRAKE_MARGIN (300U)
+/** @brief 制动后按滑行估算的额外行程时间，毫秒。 */
+#define JOINT_PI_COAST_MS (100U)
+/** @brief 慢速段的最高占空比占该方向 duty_max 的百分比。 */
+#define JOINT_PI_SLOW_CAP_PCT (60U)
+/** @brief 判到达后继续监视漂移的时长，毫秒；超时不再纠正。 */
+#define JOINT_PI_HOLD_MS (1000U)
+/** @brief 漂移超过容差加该值才重新纠正，毫度；避免在容差边界抖动。 */
+#define JOINT_PI_HOLD_HYS (500)
+/** @brief 起步后只在该时间内判方向错误，毫秒；短行程高速过冲不再误报。 */
+#define JOINT_PI_DIR_CHECK_MS (1000U)
+
+/**
+ * @brief 旧记录（版本 2～4）里的比例式参数是否自动迁移成 PI。
+ *
+ * 迁移只沿用 kp 与 duty_min，ki、限幅和分方向差异必须重新整定；设为 0 时
+ * 旧记录保持原控制方式，可用 JTUNE 手动切换。
+ */
+#define JOINT_PI_MIGRATE_LEGACY (1)
+
+/**
+ * @brief 各关节 PI 参数的整定起点，依次为 M1～M6，每个关节两个方向：
+ *        [0] 角度增大方向，[1] 角度减小方向。
+ *
+ * M3、M6 是负载较大的关节，先给不对称的占空比与增益，方向与数值都要在
+ * 台架上确认（哪一侧举升、哪一侧下放取决于装配，不能从代码推断）。
+ */
+#define JOINT_PI_KP_FAST_TABLE                                                 \
+    {                                                                          \
+        {40U, 40U}, {40U, 40U}, {60U, 30U}, {40U, 40U}, {40U, 40U}, {60U, 30U}  \
+    }
+#define JOINT_PI_KP_SLOW_TABLE                                                 \
+    {                                                                          \
+        {15U, 15U}, {15U, 15U}, {25U, 10U}, {15U, 15U}, {15U, 15U}, {25U, 10U}  \
+    }
+#define JOINT_PI_KI_TABLE                                                      \
+    {                                                                          \
+        {8U, 8U}, {8U, 8U}, {12U, 6U}, {8U, 8U}, {8U, 8U}, {12U, 6U}            \
+    }
+#define JOINT_PI_I_MAX_TABLE                                                   \
+    {                                                                          \
+        {200U, 200U}, {200U, 200U}, {260U, 160U}, {200U, 200U},                \
+        {200U, 200U}, {260U, 160U}                                             \
+    }
+#define JOINT_PI_DUTY_MIN_TABLE                                                \
+    {                                                                          \
+        {300U, 300U}, {300U, 300U}, {380U, 250U}, {300U, 300U},                \
+        {300U, 300U}, {380U, 250U}                                             \
+    }
+#define JOINT_PI_DUTY_MAX_TABLE                                                \
+    {                                                                          \
+        {700U, 700U}, {700U, 700U}, {800U, 600U}, {700U, 700U},                \
+        {700U, 700U}, {800U, 600U}                                             \
+    }
 
 /* 轨迹式控制（JTUNE 模式 2）。以下数值都是占位值，要在实物上辨识后再改。 */
 

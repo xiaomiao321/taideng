@@ -7,10 +7,12 @@
  * 也可以由电位器理论参数加一个实测参考点算出（joint_cal_from_nominal）。
  * 允许运动的范围 [limit_min, limit_max] 与标定点分开设置，
  * 应按机构实际能转的范围设定，避免顶到机械限位。
- * 三种控制方式由 joint_tune_t 选择：开关式（远离目标时持续驱动，接近目标时
+ * 四种控制方式由 joint_tune_t 选择：开关式（远离目标时持续驱动，接近目标时
  * 改为短脉冲点动）、比例式（占空比 = 起转占空比 + kp × 误差，进入容差和换向
- * 时先短路制动再滑行）和轨迹式（按五次多项式规划位置、速度、加速度都连续的
- * 参考轨迹，用速度前馈、摩擦前馈加 PI 反馈跟踪它，见 joint_traj.h；可设定
+ * 时先短路制动再滑行）、比例积分式（分方向 PI、起转前馈、占空比斜坡和自适应
+ * 制动，到位后继续监视漂移，见 joint_pi_t）和轨迹式（按五次多项式规划位置、
+ * 速度、加速度都连续的参考轨迹，用速度前馈、摩擦前馈加 PI 反馈跟踪它，
+ * 见 joint_traj.h；可设定
  * 可设定单向逼近，三种方式都适用：反向到达时先越过目标再回来，让最后一段
  * 总朝同一个方向走，消除背隙和回程误差）。
  * 进入容差后保持一段时间判定到达；传感器失效、超时、
@@ -37,16 +39,19 @@
 #define JOINT_POT_MAX_OHMS (1000000U)
 
 /** @brief 标定数据序列化格式的版本；格式变化时加一。 */
-#define JOINT_CAL_BLOB_VERSION (4U)
+#define JOINT_CAL_BLOB_VERSION (5U)
 
 /**
  * @brief 序列化后每个关节占用的字节数：28 字节标定、8 字节控制参数、
- *        8 字节单向逼近参数。
+ *        8 字节单向逼近参数、28 字节 PI 参数。
  */
-#define JOINT_CAL_BLOB_ENTRY_SIZE (44U)
+#define JOINT_CAL_BLOB_ENTRY_SIZE (72U)
 
 /** @brief 序列化后的总字节数：4 字节头加每个关节一项，是 4 的倍数。 */
 #define JOINT_CAL_BLOB_SIZE (4U + JOINT_COUNT * JOINT_CAL_BLOB_ENTRY_SIZE)
+
+/** @brief 旧格式（版本 4，没有 PI 参数）的总字节数，用于迁移。 */
+#define JOINT_CAL_BLOB_V4_SIZE (4U + JOINT_COUNT * 44U)
 
 /** @brief 旧格式（版本 3，没有单向逼近参数）的总字节数，用于迁移。 */
 #define JOINT_CAL_BLOB_V3_SIZE (4U + JOINT_COUNT * 36U)
@@ -110,27 +115,50 @@ typedef enum
     JOINT_MODE_BANG = 0, /**< 开关式：全速接近，近处点动，停止时滑行。 */
     JOINT_MODE_P = 1,    /**< 比例式：起转占空比加比例项，停止时先制动。 */
     JOINT_MODE_TRAJ = 2, /**< 轨迹式：平滑轨迹加前馈和 PI 跟踪，不制动。 */
+    JOINT_MODE_PI = 3,   /**< 比例积分式：分方向 PI 加占空比斜坡，见 joint_pi_t。 */
     JOINT_MODE_COUNT
 } joint_mode_t;
 
 /**
- * @brief 控制参数；随标定一起保存到 Flash，没保存过时用比例式默认值。
+ * @brief 比例积分式的逐关节参数。两个方向各一套，按电机的物理转向索引：
+ *        [0] 为角度增大的方向（电机正转），[1] 为角度减小的方向。
  *
- * 轨迹式中 kp 是 PI 反馈的比例系数，duty_min 是实测起转占空比，摩擦前馈由它
- * 推出；brake_ms 不使用。
+ * 同一关节两个方向的静摩擦、传动效率和重力负载不同，M3、M6 尤其明显，
+ * 所以比例增益、起转占空比和最高占空比都分开设置。
+ */
+typedef struct
+{
+    uint16_t kp_fast[2]; /**< 误差大于 slow_band 时的比例增益，千分比/度。 */
+    uint16_t kp_slow[2]; /**< 误差小于等于 slow_band 时的比例增益，千分比/度。 */
+    uint16_t ki[2];      /**< 积分增益，千分比/(度·秒)。 */
+    uint16_t i_max[2];   /**< 积分项限幅，千分比。 */
+    uint16_t duty_min[2]; /**< 该方向的起转占空比（静摩擦前馈），千分比。 */
+    uint16_t duty_max[2]; /**< 该方向的最高占空比，千分比；不超过 cal.duty。 */
+    uint16_t slow_band;  /**< 慢速段误差门限，毫度；进入后改用 kp_slow 并压低限幅。 */
+    uint8_t run_pct;     /**< 已起步后的维持占空比，为 duty_min 的百分比。 */
+    uint8_t flags;       /**< 保留，必须为 0。 */
+} joint_pi_t;
+
+/**
+ * @brief 控制参数；随标定一起保存到 Flash，没保存过时用 app_config.h 的默认值。
+ *
+ * 比例式用 kp、duty_min、brake_ms；轨迹式中 kp 是 PI 反馈的比例系数，
+ * duty_min 是实测起转占空比，摩擦前馈由它推出，brake_ms 不使用；
+ * 比例积分式只用 pi 字段。
  */
 typedef struct
 {
     joint_mode_t mode;
-    unsigned kp;       /**< 每度误差增加的占空比，千分比/度。 */
-    unsigned duty_min; /**< 起转占空比，千分比；不超过 cal.duty。 */
+    unsigned kp;       /**< 比例式与轨迹式的比例增益，千分比/度。 */
+    unsigned duty_min; /**< 比例式与轨迹式的起转占空比，千分比。 */
     unsigned brake_ms; /**< 比例式进入容差或换向时的制动时长，0 为不制动。 */
+    joint_pi_t pi;     /**< 比例积分式使用的分方向参数；其他方式忽略。 */
 } joint_tune_t;
 
 /**
  * @brief 单向逼近和轨迹式的逐关节参数，上电取 app_config.h 的默认值。
  *
- * approach、backlash、overshoot 对三种控制方式都有效，随标定保存到 Flash；
+ * approach、backlash、overshoot 对四种控制方式都有效，随标定保存到 Flash；
  * kv 只用于轨迹式，不保存。
  */
 typedef struct
@@ -152,6 +180,7 @@ typedef enum
     JOINT_MOVING,
     JOINT_DONE,
     JOINT_FAULT,
+    JOINT_HOLD, /**< 已判到达，正在监视漂移并做小幅纠正。 */
     JOINT_PHASE_COUNT
 } joint_phase_t;
 
@@ -188,6 +217,12 @@ typedef struct
     bool via_pending;       /**< 单向逼近时是否还在去中间点的路上。 */
     float integral;         /**< PI 积分项，千分比。 */
     uint32_t tick_ms;       /**< 上一次控制的时刻，用于积分。 */
+    /* 以下只在比例积分式中使用。 */
+    int duty_cmd;           /**< 上一次下发的带符号占空比，用于斜坡限速。 */
+    uint32_t kick_ms;       /**< 起步增量的起始时刻。 */
+    uint32_t hold_ms;       /**< 进入 HOLD 的时刻。 */
+    bool holding;           /**< 是否处于到位后的漂移监视。 */
+    bool kick;              /**< 起步增量是否还在有效期内。 */
 } joint_motion_t;
 
 /** @brief 转速估计用的最近若干次角度采样，环形缓冲。 */
@@ -312,6 +347,29 @@ const char *joint_set_duty_max(joint_control_t *j, unsigned index,
                                unsigned duty);
 
 /**
+ * @brief 写入比例积分式的分方向参数；不要求已标定。
+ *
+ * 最高占空比不能超过该关节标定里的 cal.duty；两个方向的起转占空比必须
+ * 大于 MOTOR_DUTY_MIN 且不超过对应方向的最高占空比。
+ *
+ * @return NULL 表示成功；"JOINT_ID"、"BUSY" 或 "TUNE_PARAM"。
+ */
+const char *joint_set_pi(joint_control_t *j, unsigned index,
+                         const joint_pi_t *pi);
+
+/**
+ * @brief 按 app_config.h 的逐关节默认值填一组 PI 参数，供初始化用。
+ *
+ * 逐关节表的最高占空比若超过 duty_max，会被压到 duty_max，保证默认值不会
+ * 超过该关节标定的上限。
+ *
+ * @param[in] index 关节下标，0 对应 M1。
+ * @param[in] duty_max 该关节允许的最高占空比（通常为 cal.duty 或
+ *            MOTOR_DUTY_LIMIT）。
+ */
+void joint_pi_defaults(joint_pi_t *pi, unsigned index, unsigned duty_max);
+
+/**
  * @brief 把多次扫描的读数合成一组：每路去掉最大、最小各四分之一后取平均。
  *
  * @param[in] samples count 组读数，每组 JOINT_COUNT 个。
@@ -393,8 +451,11 @@ const char *joint_phase_name(joint_phase_t phase);
  *   每个关节：已标定 u8、方向 i8、占空比 u16、raw_a u16、raw_b u16、
  *            angle_a i32、angle_b i32、容差 u32、limit_min i32、limit_max i32，
  *            控制参数有效 u8、控制方式 u8、kp u16、起转占空比 u16、制动 u16，
- *            逼近参数有效 u8、逼近方向 i8、保留 u16、背隙 u16、超调量 u16。
- * 版本 3 没有最后 8 字节，版本 2 没有最后 16 字节，其余相同。
+ *            逼近参数有效 u8、逼近方向 i8、保留 u16、背隙 u16、超调量 u16，
+ *            正方向 kp_fast、kp_slow、ki、i_max、duty_min、duty_max（u16×6），
+ *            反方向同上（u16×6），慢速段 u16，已起步占比 u8，保留 u8。
+ * PI 参数只在该关节控制方式为 PI 时使用；版本 4 没有最后 28 字节，
+ * 版本 3 没有最后 36 字节，版本 2 没有最后 44 字节，其余相同。
  */
 void joint_cal_export(const joint_control_t *j,
                       uint8_t blob[JOINT_CAL_BLOB_SIZE]);
@@ -402,7 +463,8 @@ void joint_cal_export(const joint_control_t *j,
 /**
  * @brief 从 joint_cal_export() 的结果恢复标定和控制参数。
  *
- * 接受版本 4（size 为 JOINT_CAL_BLOB_SIZE）、版本 3（size 为
+ * 接受版本 5（size 为 JOINT_CAL_BLOB_SIZE）、版本 4（size 为
+ * JOINT_CAL_BLOB_V4_SIZE，没有 PI 参数）、版本 3（size 为
  * JOINT_CAL_BLOB_V3_SIZE，没有逼近参数）和版本 2（size 为
  * JOINT_CAL_BLOB_V2_SIZE，只有标定）。版本、长度或关节数不符时什么都不做；
  * 每个关节的参数仍经 joint_calibrate()、joint_set_tune() 校验，不合法的项

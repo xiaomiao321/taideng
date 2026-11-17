@@ -43,6 +43,23 @@ static joint_cal_t normal(void)
     joint_cal_t c = {1000, 3000, 0, 180000, 1, 800, 2000, 0, 180000};
     return c;
 }
+/**
+ * 默认控制方式现在是比例积分式。下面大部分用例验证的是比例式、开关式和
+ * 轨迹式的既有行为，所以统一先切回比例式；比例积分式见 pi_test()。
+ */
+static void use_p_mode(joint_control_t *j)
+{
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        j->states[i].tune.mode = JOINT_MODE_P;
+    }
+}
+/** 比例式、开关式、轨迹式共用的四个控制参数是否相同；不比较 PI 参数。 */
+static bool same_tune(const joint_tune_t *a, const joint_tune_t *b)
+{
+    return a->mode == b->mode && a->kp == b->kp &&
+           a->duty_min == b->duty_min && a->brake_ms == b->brake_ms;
+}
 static joint_control_t fresh(joint_cal_t cal)
 {
     joint_control_t j;
@@ -56,6 +73,7 @@ static joint_control_t fresh(joint_cal_t cal)
     memset(duties, 0, sizeof(duties));
     memset(braked, 0, sizeof(braked));
     joint_init(&j, hw);
+    use_p_mode(&j);
     assert(!joint_calibrate(&j, 0, cal));
     return j;
 }
@@ -285,8 +303,8 @@ static void tune_test(void)
     joint_tune_t def = j.states[0].tune;
     assert(def.mode == JOINT_MODE_P && def.kp == 10 && def.duty_min == 300 &&
            def.brake_ms == 50);
-    joint_tune_t bang_tune = {JOINT_MODE_BANG, 30, 500, 50};
-    joint_tune_t p = {JOINT_MODE_P, 30, 300, 50};
+    joint_tune_t bang_tune = {.mode = JOINT_MODE_BANG, .kp = 30, .duty_min = 500, .brake_ms = 50};
+    joint_tune_t p = {.mode = JOINT_MODE_P, .kp = 30, .duty_min = 300, .brake_ms = 50};
     assert(!joint_set_tune(&j, 1, p)); /* 不要求已标定 */
     joint_tune_t bad = p;
     bad.mode = JOINT_MODE_COUNT;
@@ -369,7 +387,7 @@ static void tune_test(void)
 }
 static joint_tune_t p_tune(void)
 {
-    joint_tune_t t = {JOINT_MODE_BANG, 55, 420, 120};
+    joint_tune_t t = {.mode = JOINT_MODE_BANG, .kp = 55, .duty_min = 420, .brake_ms = 120};
     return t;
 }
 /** 控制参数随标定保存；未标定关节的控制参数也保存；版本 2 只恢复标定。 */
@@ -383,10 +401,8 @@ static void tune_blob_test(void)
     joint_control_t restored = fresh(normal());
     restored.states[0].calibrated = false;
     assert(joint_cal_import(&restored, blob, sizeof(blob)) == 1U);
-    assert(!memcmp(&restored.states[0].tune, &source.states[0].tune,
-                   sizeof(joint_tune_t)));
-    assert(!memcmp(&restored.states[3].tune, &source.states[3].tune,
-                   sizeof(joint_tune_t)));
+    assert(same_tune(&restored.states[0].tune, &source.states[0].tune));
+    assert(same_tune(&restored.states[3].tune, &source.states[3].tune));
     assert(!restored.states[3].calibrated);
     assert(restored.states[1].tune.mode == JOINT_MODE_P);
 
@@ -635,7 +651,7 @@ static uint16_t plant_raw(const friction_plant_t *p)
 
 static joint_tune_t traj_tune(void)
 {
-    joint_tune_t t = {JOINT_MODE_TRAJ, 50, 250, 0};
+    joint_tune_t t = {.mode = JOINT_MODE_TRAJ, .kp = 50, .duty_min = 250, .brake_ms = 0};
     return t;
 }
 
@@ -906,7 +922,7 @@ static void approach_blob_test(void)
     assert(!joint_set_tune(&source, 0, p_tune()));
     uint8_t blob[JOINT_CAL_BLOB_SIZE];
     joint_cal_export(&source, blob);
-    assert(blob[0] == 4U);
+    assert(blob[0] == JOINT_CAL_BLOB_VERSION);
     joint_control_t restored = fresh(normal());
     assert(joint_cal_import(&restored, blob, sizeof(blob)) == 1U);
     assert(restored.states[0].traj.approach == -1 &&
@@ -927,13 +943,161 @@ static void approach_blob_test(void)
     assert(joint_cal_import(&migrated, v3, sizeof(v3)) == 1U);
     assert(!memcmp(&migrated.states[0].cal, &source.states[0].cal,
                    sizeof(joint_cal_t)));
-    assert(!memcmp(&migrated.states[0].tune, &source.states[0].tune,
-                   sizeof(joint_tune_t)));
+    assert(same_tune(&migrated.states[0].tune, &source.states[0].tune));
     assert(migrated.states[0].traj.approach == 0);
     /* 版本号和长度对不上时不导入。 */
     assert(joint_cal_import(&migrated, v3, sizeof(blob)) == 0U);
     v3[0] = 4U;
     assert(joint_cal_import(&migrated, v3, sizeof(v3)) == 0U);
+}
+
+/** 用带惯性的模型跑一次比例积分式定位，直到报 REACHED；返回到达时刻。 */
+static uint32_t pi_run(joint_control_t *j, double *raw, int32_t target,
+                       uint32_t timeout_ms, uint32_t start_ms)
+{
+    double speed = 0;
+    reply[0] = 0;
+    feed(j, (uint16_t)*raw, start_ms);
+    assert(!joint_move(j, 30, 0, target, timeout_ms, start_ms));
+    uint32_t now = start_ms;
+    for (; now < start_ms + 20000U && !strstr(reply, "JRESULT"); now += 10)
+    {
+        double steady = output_duty / 1000.0 * 8.0;
+        speed += is_braking ? -speed * 0.8
+                 : output_duty ? (steady - speed) * 0.2
+                               : -speed * 0.05;
+        *raw += speed;
+        feed(j, (uint16_t)*raw, now);
+        assert(joint_tick(j, now));
+    }
+    assert(strstr(reply, "REACHED"));
+    return now;
+}
+
+/** 比例积分式：默认方式、到位后的 HOLD、取消、超时边界、限位外启动和存取。 */
+static void pi_test(void)
+{
+    /* 默认就是比例积分式，参数来自 app_config.h 的逐关节表。 */
+    joint_control_t j;
+    joint_init(&j, (joint_hw_t){drive, emit, brake_motor});
+    assert(j.states[0].tune.mode == JOINT_MODE_PI &&
+           j.states[0].tune.pi.kp_fast[0] == 40 &&
+           j.states[2].tune.pi.duty_min[0] == 380 &&
+           j.states[2].tune.pi.duty_min[1] == 250);
+    hardware_ok = true;
+    is_braking = false;
+    output_duty = 0;
+    assert(!joint_calibrate(&j, 0, normal()));
+
+    /* 到位后先进 HOLD，仍算忙；稳定满 JOINT_PI_HOLD_MS 后才是 DONE。 */
+    double raw = 2000;
+    uint32_t reached = pi_run(&j, &raw, 120000, 20000, 0);
+    assert(j.states[0].phase == JOINT_HOLD && joint_any_active(&j));
+    assert(j.states[0].angle >= 118000 && j.states[0].angle <= 122000);
+    assert(!strcmp(joint_set_tune(&j, 0, j.states[0].tune), "BUSY"));
+    uint32_t now = reached;
+    for (; now < reached + 5000U && joint_any_active(&j); now += 10)
+    {
+        feed(&j, (uint16_t)raw, now);
+        assert(joint_tick(&j, now));
+    }
+    assert(j.states[0].phase == JOINT_DONE && output_duty == 0 &&
+           j.states[0].faults == 0);
+    assert(now - reached >= JOINT_PI_HOLD_MS);
+
+    /* HOLD 期间漂出容差加回差：重新驱动拉回，不再发 JRESULT。 */
+    reached = pi_run(&j, &raw, 90000, 20000, now);
+    reply[0] = 0;
+    feed(&j, 2060, reached); /* 95.4°，目标 90° */
+    assert(joint_tick(&j, reached));
+    feed(&j, 2060, reached + 10);
+    assert(joint_tick(&j, reached + 10));
+    feed(&j, 2060, reached + 200);
+    assert(joint_tick(&j, reached + 200) && output_duty < 0 && !reply[0]);
+    assert(j.states[0].phase == JOINT_HOLD);
+
+    /* HOLD 期间取消：停输出、回到空闲，不发 JRESULT。 */
+    assert(joint_cancel(&j) && output_duty == 0 && !reply[0]);
+    assert(j.states[0].phase == JOINT_IDLE && !joint_any_active(&j));
+
+    /* 运动超时落在 HOLD 期间：已经报过 REACHED，不能再报 TIMEOUT。 */
+    raw = 2000;
+    uint32_t took = pi_run(&j, &raw, 120000, 20000, 100000) - 100000U;
+    assert(joint_cancel(&j));
+    raw = 2000;
+    reached = pi_run(&j, &raw, 120000, took + 300U, 200000);
+    for (now = reached; now < reached + 5000U && joint_any_active(&j);
+         now += 10)
+    {
+        feed(&j, (uint16_t)raw, now);
+        assert(joint_tick(&j, now));
+    }
+    assert(j.states[0].phase == JOINT_DONE && j.states[0].faults == 0);
+
+    /* 停在限位外也能用比例积分式转回来，往回走的过程中不报 LIMIT。 */
+    feed(&j, 3090, 300000); /* 188.1°，限位 180° 加容差 2° 之外 */
+    assert(!joint_move(&j, 31, 0, 150000, 10000, 300000));
+    feed(&j, 3090, 300010);
+    assert(joint_tick(&j, 300010) && j.states[0].faults == 0);
+    feed(&j, 3070, 300200);
+    assert(joint_tick(&j, 300200) && j.states[0].faults == 0);
+    assert(joint_cancel(&j));
+
+    /* 参数校验。 */
+    joint_pi_t pi = j.states[0].tune.pi;
+    pi.duty_min[1] = 50;
+    assert(!strcmp(joint_set_pi(&j, 0, &pi), "TUNE_PARAM"));
+    pi = j.states[0].tune.pi;
+    pi.duty_max[0] = (uint16_t)(pi.duty_min[0] - 1U);
+    assert(!strcmp(joint_set_pi(&j, 0, &pi), "TUNE_PARAM"));
+    pi = j.states[0].tune.pi;
+    assert(!strcmp(joint_set_pi(&j, 6, &pi), "JOINT_ID"));
+
+    /* 版本 5：PI 参数随标定保存和恢复。 */
+    pi.kp_fast[0] = 55;
+    pi.kp_slow[1] = 9;
+    pi.ki[0] = 5;
+    pi.i_max[1] = 150;
+    pi.duty_min[0] = 320;
+    pi.duty_max[1] = 650;
+    pi.slow_band = 6000;
+    pi.run_pct = 70;
+    assert(!joint_set_pi(&j, 0, &pi));
+    uint8_t blob[JOINT_CAL_BLOB_SIZE];
+    joint_cal_export(&j, blob);
+    assert(blob[0] == 5U);
+    joint_control_t restored;
+    joint_init(&restored, (joint_hw_t){drive, emit, brake_motor});
+    assert(joint_cal_import(&restored, blob, sizeof(blob)) == 1U);
+    assert(restored.states[0].tune.mode == JOINT_MODE_PI &&
+           !memcmp(&restored.states[0].tune.pi, &pi, sizeof(pi)));
+
+    /* 版本 4 的比例式记录迁移成比例积分式：沿用 kp 和起转占空比，其余取
+     * 默认表；开关式记录保持原样。 */
+    joint_control_t old = fresh(normal());
+    joint_tune_t p = j.states[0].tune;
+    p.mode = JOINT_MODE_P;
+    p.kp = 22;
+    p.duty_min = 350;
+    assert(!joint_set_tune(&old, 0, p));
+    assert(!joint_set_tune(&old, 1, p_tune()));
+    joint_cal_export(&old, blob);
+    uint8_t v4[JOINT_CAL_BLOB_V4_SIZE];
+    memcpy(v4, blob, 4);
+    v4[0] = 4U;
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        memcpy(&v4[4 + i * 44], &blob[4 + i * JOINT_CAL_BLOB_ENTRY_SIZE], 44);
+    }
+    joint_control_t migrated;
+    joint_init(&migrated, (joint_hw_t){drive, emit, brake_motor});
+    assert(joint_cal_import(&migrated, v4, sizeof(v4)) == 1U);
+    const joint_tune_t *t = &migrated.states[0].tune;
+    assert(t->mode == JOINT_MODE_PI && t->pi.kp_fast[0] == 22 &&
+           t->pi.kp_slow[1] == 22 && t->pi.duty_min[0] == 350 &&
+           t->pi.duty_min[1] == 350 && t->pi.ki[0] == 8);
+    assert(migrated.states[1].tune.mode == JOINT_MODE_BANG);
+    assert(joint_cal_import(&migrated, v4, sizeof(blob)) == 0U);
 }
 
 int main(void)
@@ -1144,10 +1308,11 @@ int main(void)
     speed_test();
     fault_latch_test();
     outside_limit_test();
+    pi_test();
     puts("joint control: calibration, inverse sensor, simulated plant, "
          "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
          "rollover, calibration export/import, nominal calibration, limits, "
          "proportional mode with braking, ADC filter, concurrent joints, "
-         "speed estimate and fault latching passed");
+         "speed estimate, fault latching and PI mode with hold passed");
     return 0;
 }

@@ -30,7 +30,8 @@ def command(kind, seq, motor=1, duty=800, duration=500):
         return f"MPWM {seq} {motor} {duty}\n"
     if kind in ("PING", "STOP", "INFO"):
         return f"{kind} {seq}" + (" ALL\n" if kind == "STOP" else "\n")
-    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "JDIR"):
+    if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "JDIR",
+                "JPI", "JBL"):
         if type(motor) is not int or not 1 <= motor <= 6:
             raise ValueError("只有 M1～M6 支持角度控制")
         if kind == "CAL":
@@ -66,11 +67,26 @@ def command(kind, seq, motor=1, duty=800, duration=500):
             if duty not in (0, 1):
                 raise ValueError("数据记录参数须为 on 或 off")
             return f"JTRACE {seq} M{motor} {duty}\n"
+        if kind == "JPI":
+            if not isinstance(duty, (tuple, list)) or len(duty) != 15:
+                raise ValueError("PI 参数不完整")
+            if any(type(v) is not int or v < 0 for v in duty):
+                raise ValueError("PI 参数须为非负整数")
+            return f"JPI {seq} M{motor} " + " ".join(map(str, duty)) + "\n"
+        if kind == "JBL":
+            if not isinstance(duty, (tuple, list)) or len(duty) != 2:
+                raise ValueError("背隙参数不完整")
+            direction, backlash = duty
+            if direction not in (-1, 1):
+                raise ValueError("逼近方向须为 + 或 -")
+            if type(backlash) is not int or not 0 <= backlash <= 10000:
+                raise ValueError("背隙须为 0～10°")
+            return f"JBL {seq} M{motor} {direction} {backlash}\n"
         if kind == "JTUNE":
             if not isinstance(duty, (tuple, list)) or len(duty) not in (4, 5):
                 raise ValueError("控制参数不完整")
             mode, kp, low, brake, *high = duty
-            if mode not in (0, 1, 2) or type(kp) is not int or not 0 <= kp <= 1000:
+            if mode not in (0, 1, 2, 3) or type(kp) is not int or not 0 <= kp <= 1000:
                 raise ValueError("比例系数须为 0～100%/度")
             if type(low) is not int or low <= 0:
                 raise ValueError("起转占空比须为正数")
@@ -104,14 +120,14 @@ def parse(line):
             tick, raw, spread, angle, target, duty, brake = (int(p[1]), *map(int, p[3:9]))
             if not 0 <= raw <= 4095 or not 0 <= spread <= 4095 or not -1000 <= duty <= 1000 or brake not in (0, 1):
                 raise ValueError()
-            if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT"):
+            if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT", "HOLD"):
                 raise ValueError()
             # 参考位置：轨迹式运动中为轨迹参考点，旧固件没有这一项时用目标代替
             ref = int(p[10]) if len(p) == 11 else target
             return "JT", tick, int(p[2][1]), raw, spread, angle, target, duty, bool(brake), p[9], ref
         if p[0] == "JTUNE" and len(p) in (7, 8) and p[2] in tuple(f"M{i}" for i in range(1, 7)):
             mode, kp, low, brake, *high = map(int, p[3:])
-            if mode not in (0, 1, 2):
+            if mode not in (0, 1, 2, 3):
                 raise ValueError()
             # 最高占空比：旧固件不报为 None，未标定时固件报 0
             return "JTUNE", int(p[1]), int(p[2][1]), mode, kp, low, brake, (high or [None])[0]
@@ -120,6 +136,11 @@ def parse(line):
             if direction not in (-1, 0, 1) or not 0 <= backlash <= overshoot <= 30000:
                 raise ValueError()
             return "JDIR", int(p[1]), int(p[2][1]), direction, backlash, overshoot
+        if p[0] == "JPI" and len(p) == 18 and p[2] in tuple(f"M{i}" for i in range(1, 7)):
+            values = tuple(map(int, p[3:18]))
+            if any(v < 0 for v in values):
+                raise ValueError()
+            return "JPI", int(p[1]), int(p[2][1]), values
         if p[0] == "MPWM" and len(p) == 3:
             khz, slow = int(p[1]), int(p[2])
             if slow not in (0, 1):
@@ -152,7 +173,7 @@ def parse(line):
                 calibrated, valid, raw, angle, target, duty = map(int, p[3:9])
                 if calibrated not in (0, 1) or valid not in (0, 1) or not 0 <= raw <= 4095 or not -1000 <= duty <= 1000:
                     raise ValueError()
-                if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT") or p[10] not in ("NONE", "SENSOR", "LIMIT", "STALL", "DIRECTION", "TIMEOUT", "HARDWARE"):
+                if p[9] not in ("IDLE", "SETTLE", "MOVE", "DONE", "FAULT", "HOLD") or p[10] not in ("NONE", "SENSOR", "LIMIT", "STALL", "DIRECTION", "TIMEOUT", "HARDWARE"):
                     raise ValueError()
                 return "JSTATE", int(p[1]), joint, bool(calibrated), bool(valid), raw, angle, target, duty, p[9], p[10]
             if p[0] == "JRESULT" and len(p) == 4 and p[3] in ("REACHED", "CANCELLED", "SUPERSEDED", "SENSOR", "LIMIT", "STALL", "DIRECTION", "TIMEOUT", "HARDWARE"):

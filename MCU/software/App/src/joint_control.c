@@ -21,6 +21,9 @@
 /** @brief 序列化中版本 2 每个关节的字节数，控制参数从这里开始。 */
 #define BLOB_V2_ENTRY_SIZE (28U)
 
+/** @brief 序列化中版本 4 每个关节的字节数，PI 参数从这里开始。 */
+#define BLOB_V4_ENTRY_SIZE (44U)
+
 /** @brief 序列化中版本 3 每个关节的字节数，逼近参数从这里开始。 */
 #define BLOB_V3_ENTRY_SIZE (36U)
 
@@ -38,6 +41,14 @@ static const int k_traj_approach[JOINT_COUNT] = JOINT_APPROACH_DIR;
 static const int32_t k_traj_backlash[JOINT_COUNT] = JOINT_BACKLASH_MDEG;
 static const int32_t k_traj_overshoot[JOINT_COUNT] = JOINT_OVERSHOOT_MDEG;
 static const unsigned k_traj_kv[JOINT_COUNT] = JOINT_TRAJ_KV;
+
+/** @brief 比例积分式的逐关节默认参数，见 app_config.h 的说明。 */
+static const uint16_t k_pi_kp_fast[JOINT_COUNT][2] = JOINT_PI_KP_FAST_TABLE;
+static const uint16_t k_pi_kp_slow[JOINT_COUNT][2] = JOINT_PI_KP_SLOW_TABLE;
+static const uint16_t k_pi_ki[JOINT_COUNT][2] = JOINT_PI_KI_TABLE;
+static const uint16_t k_pi_i_max[JOINT_COUNT][2] = JOINT_PI_I_MAX_TABLE;
+static const uint16_t k_pi_duty_min[JOINT_COUNT][2] = JOINT_PI_DUTY_MIN_TABLE;
+static const uint16_t k_pi_duty_max[JOINT_COUNT][2] = JOINT_PI_DUTY_MAX_TABLE;
 
 static int32_t magnitude(int32_t n)
 {
@@ -166,9 +177,12 @@ void joint_init(joint_control_t *j, joint_hw_t hw)
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         j->states[i].fault = "NONE";
-        j->states[i].tune =
-            (joint_tune_t){JOINT_DEFAULT_MODE, JOINT_DEFAULT_KP,
-                           JOINT_DEFAULT_DUTY_MIN, JOINT_DEFAULT_BRAKE_MS};
+        joint_tune_t tune = {.mode = JOINT_DEFAULT_MODE,
+                             .kp = JOINT_DEFAULT_KP,
+                             .duty_min = JOINT_DEFAULT_DUTY_MIN,
+                             .brake_ms = JOINT_DEFAULT_BRAKE_MS};
+        joint_pi_defaults(&tune.pi, i, MOTOR_DUTY_LIMIT);
+        j->states[i].tune = tune;
         j->states[i].traj =
             (joint_traj_cfg_t){k_traj_approach[i], k_traj_backlash[i],
                                k_traj_overshoot[i], k_traj_kv[i]};
@@ -178,7 +192,7 @@ bool joint_any_active(const joint_control_t *j)
 {
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        if (j->states[i].motion.active)
+        if (j->states[i].motion.active || j->states[i].motion.holding)
         {
             return true;
         }
@@ -340,7 +354,7 @@ void joint_clear_faults(joint_control_t *j, uint32_t now)
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         joint_state_t *s = &j->states[i];
-        if (s->faults == 0U || s->motion.active)
+        if (s->faults == 0U || s->motion.active || s->motion.holding)
         {
             continue;
         }
@@ -362,14 +376,35 @@ void joint_clear_faults(joint_control_t *j, uint32_t now)
     }
 }
 
+/** @brief 运动中或到位后监视漂移期间都算忙，参数不能改。 */
+static bool is_busy(const joint_state_t *s)
+{
+    return s->motion.active || s->motion.holding;
+}
+
 bool joint_cancel(joint_control_t *j)
 {
     bool ok = true;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        if (j->states[i].motion.active && !finish(j, i, "CANCELLED", JOINT_IDLE))
+        joint_state_t *s = &j->states[i];
+        if (s->motion.active)
         {
-            ok = false;
+            if (!finish(j, i, "CANCELLED", JOINT_IDLE))
+            {
+                ok = false;
+            }
+        }
+        else if (s->motion.holding)
+        {
+            /* 到位后的漂移监视不是正式运动，不发 JRESULT，只停输出。 */
+            s->motion.holding = false;
+            s->phase = JOINT_IDLE;
+            if (!j->hw.drive(i, 0))
+            {
+                ok = false;
+            }
+            s->duty = 0;
         }
     }
     return ok;
@@ -381,10 +416,11 @@ const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c)
         return "CAL_PARAM";
     }
     joint_state_t *s = &j->states[index];
-    if (s->motion.active)
+    if (is_busy(s))
     {
         return "BUSY";
     }
+    s->motion.holding = false;
     s->cal = c;
     s->calibrated = true;
     s->phase = JOINT_IDLE;
@@ -413,7 +449,7 @@ const char *joint_set_limits(joint_control_t *j, unsigned index,
     {
         return "NOT_CALIBRATED";
     }
-    if (s->motion.active)
+    if (is_busy(s))
     {
         return "BUSY";
     }
@@ -423,6 +459,76 @@ const char *joint_set_limits(joint_control_t *j, unsigned index,
     }
     s->cal.limit_min = limit_min;
     s->cal.limit_max = limit_max;
+    return NULL;
+}
+
+/** @brief PI 参数是否合法；不检查与 cal.duty 的关系，运行时再压上限。 */
+static bool pi_is_valid(const joint_pi_t *p)
+{
+    if (p->flags != 0U || p->run_pct < 10U || p->run_pct > 100U ||
+        p->slow_band > 45000U)
+    {
+        return false;
+    }
+    for (unsigned d = 0U; d < 2U; ++d)
+    {
+        if (p->kp_fast[d] > JOINT_KP_MAX || p->kp_slow[d] > JOINT_KP_MAX ||
+            p->ki[d] > JOINT_KP_MAX || p->i_max[d] > MOTOR_DUTY_LIMIT ||
+            p->duty_min[d] < MOTOR_DUTY_MIN ||
+            p->duty_min[d] > p->duty_max[d] ||
+            p->duty_max[d] > MOTOR_DUTY_LIMIT)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void joint_pi_defaults(joint_pi_t *pi, unsigned index, unsigned duty_max)
+{
+    joint_pi_t p = {0};
+    unsigned cap = duty_max < MOTOR_DUTY_LIMIT ? duty_max : MOTOR_DUTY_LIMIT;
+    if (index >= JOINT_COUNT)
+    {
+        index = 0U;
+    }
+    for (unsigned d = 0U; d < 2U; ++d)
+    {
+        unsigned high = k_pi_duty_max[index][d];
+        high = high < cap ? high : cap;
+        high = high >= MOTOR_DUTY_MIN ? high : MOTOR_DUTY_MIN;
+        unsigned low = k_pi_duty_min[index][d];
+        low = low < high ? low : high;
+        low = low >= MOTOR_DUTY_MIN ? low : MOTOR_DUTY_MIN;
+        p.kp_fast[d] = k_pi_kp_fast[index][d];
+        p.kp_slow[d] = k_pi_kp_slow[index][d];
+        p.ki[d] = k_pi_ki[index][d];
+        p.i_max[d] = k_pi_i_max[index][d];
+        p.duty_min[d] = (uint16_t)low;
+        p.duty_max[d] = (uint16_t)high;
+    }
+    p.slow_band = JOINT_PI_SLOW_BAND;
+    p.run_pct = JOINT_PI_RUN_PCT;
+    p.flags = 0U;
+    *pi = p;
+}
+
+const char *joint_set_pi(joint_control_t *j, unsigned index,
+                         const joint_pi_t *pi)
+{
+    if (index >= JOINT_COUNT || pi == NULL)
+    {
+        return "JOINT_ID";
+    }
+    if (!pi_is_valid(pi))
+    {
+        return "TUNE_PARAM";
+    }
+    if (is_busy(&j->states[index]))
+    {
+        return "BUSY";
+    }
+    j->states[index].tune.pi = *pi;
     return NULL;
 }
 
@@ -439,7 +545,11 @@ const char *joint_set_tune(joint_control_t *j, unsigned index,
     {
         return "TUNE_PARAM";
     }
-    if (j->states[index].motion.active)
+    if (tune.mode == JOINT_MODE_PI && !pi_is_valid(&tune.pi))
+    {
+        return "TUNE_PARAM";
+    }
+    if (is_busy(&j->states[index]))
     {
         return "BUSY";
     }
@@ -460,7 +570,7 @@ const char *joint_set_traj(joint_control_t *j, unsigned index,
     {
         return "TUNE_PARAM";
     }
-    if (j->states[index].motion.active)
+    if (is_busy(&j->states[index]))
     {
         return "BUSY";
     }
@@ -484,7 +594,7 @@ const char *joint_set_duty_max(joint_control_t *j, unsigned index,
     {
         return "TUNE_PARAM";
     }
-    if (s->motion.active)
+    if (is_busy(s))
     {
         return "BUSY";
     }
@@ -695,7 +805,13 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
         m->last_sign = 0;
         m->braking = false;
         m->switch_ms = now;
+        m->duty_cmd = 0;
+        m->kick = s->tune.mode == JOINT_MODE_PI;
+        m->kick_ms = 0U;
     }
+    /* 到位后的漂移监视被新命令接管；积分从零开始，避免旧目标的累积量。 */
+    m->holding = false;
+    m->integral = 0.0f;
     m->active = true;
     m->seq = seq;
     m->start_ms = now;
@@ -967,11 +1083,248 @@ static bool tick_traj(joint_control_t *j, unsigned i, uint32_t now)
     return true;
 }
 
+/** @brief 按误差方向选择分方向参数的下标：0=角度增大，1=角度减小。 */
+static unsigned pi_index(const joint_state_t *s, int32_t error)
+{
+    int dir = error > 0 ? 1 : -1;
+    return (dir * s->cal.direction > 0) ? 0U : 1U;
+}
+
+/** @brief 该方向的占空比上限，同时受标定上限和全局上限约束。 */
+static unsigned pi_cap(const joint_state_t *s, unsigned idx)
+{
+    unsigned cap = s->tune.pi.duty_max[idx];
+    unsigned high = duty_max(s);
+    return cap < high ? cap : high;
+}
+
+/** @brief 执行一拍 PI：前馈 + 分方向 P + 条件积分 + 斜坡，返回 false 表示输出失败。 */
+static bool pi_apply(joint_control_t *j, unsigned i, int32_t error, uint32_t now,
+                     unsigned cap_pct, bool allow_kick)
+{
+    joint_state_t *s = &j->states[i];
+    joint_motion_t *m = &s->motion;
+    const joint_pi_t *p = &s->tune.pi;
+    int32_t distance = magnitude(error);
+    int sign = error > 0 ? 1 : -1;
+    unsigned idx = pi_index(s, error);
+
+    float dt = (float)(uint32_t)(now - m->tick_ms) / 1000.0f;
+    m->tick_ms = now;
+    if (dt < 0.0f)
+    {
+        dt = 0.0f;
+    }
+    if (dt > 0.05f)
+    {
+        dt = 0.05f;
+    }
+
+    unsigned cap = pi_cap(s, idx) * cap_pct / 100U;
+    if (distance <= (int32_t)p->slow_band)
+    {
+        cap = cap * JOINT_PI_SLOW_CAP_PCT / 100U;
+    }
+    if (cap > duty_max(s))
+    {
+        cap = duty_max(s);
+    }
+
+    /* 前馈：静止起步用 duty_min 顶开静摩擦（kick 窗口），之后退回维持量。 */
+    int ff;
+    unsigned run = (unsigned)p->duty_min[idx] * p->run_pct / 100U;
+    if (allow_kick && m->kick)
+    {
+        if (m->kick_ms == 0U)
+        {
+            m->kick_ms = now;
+        }
+        if ((uint32_t)(now - m->kick_ms) < JOINT_PI_KICK_MS)
+        {
+            ff = (int)p->duty_min[idx];
+        }
+        else
+        {
+            m->kick = false;
+            ff = (int)run;
+        }
+    }
+    else
+    {
+        ff = (int)run;
+    }
+
+    unsigned kp = (distance > (int32_t)p->slow_band) ? p->kp_fast[idx] : p->kp_slow[idx];
+
+    /* 条件积分：输出饱和且误差仍同向时回退本拍积分，避免越绕越深。 */
+    float old_i = m->integral;
+    m->integral += (float)p->ki[idx] * (float)error / 1000.0f * dt;
+    float i_max = (float)p->i_max[idx];
+    m->integral = m->integral > i_max ? i_max : m->integral;
+    m->integral = m->integral < -i_max ? -i_max : m->integral;
+
+    /* 统一在带符号域计算：前馈、P、积分同号相加才是朝目标的合力。 */
+    float u = (float)sign * (float)ff + (float)kp * (float)error / 1000.0f +
+              m->integral;
+    if (fabsf(u) > (float)cap && ((u > 0.0f) == (error > 0)))
+    {
+        m->integral = old_i;
+        u = (float)sign * (float)ff + (float)kp * (float)error / 1000.0f +
+            m->integral;
+    }
+    /* 远离目标时不允许输出低于起转占空比：否则积分会把合力压到摩擦区以下，
+     * 电机停转、误差不变、积分继续反向累积，最后必然报 STALL。 */
+    if (distance > (int32_t)s->cal.tolerance + 500 &&
+        fabsf(u) < (float)p->duty_min[idx])
+    {
+        u = (float)sign * (float)p->duty_min[idx];
+        m->integral = old_i;
+    }
+    if (u > (float)cap)
+    {
+        u = (float)cap;
+    }
+    if (u < -(float)cap)
+    {
+        u = -(float)cap;
+    }
+
+    int duty = s->cal.direction * (int)lroundf(u);
+    int step = (int)((float)JOINT_PI_SLEW_PERMILLE_S * dt);
+    if (step < 1)
+    {
+        step = 1;
+    }
+    if (duty > m->duty_cmd + step)
+    {
+        duty = m->duty_cmd + step;
+    }
+    if (duty < m->duty_cmd - step)
+    {
+        duty = m->duty_cmd - step;
+    }
+    m->duty_cmd = duty;
+    s->phase = JOINT_MOVING;
+
+    int out = duty;
+    if (out > -MOTOR_DUTY_MIN && out < MOTOR_DUTY_MIN)
+    {
+        out = 0;
+    }
+    if (!output(j, i, out))
+    {
+        return finish(j, i, "HARDWARE", JOINT_FAULT);
+    }
+    return true;
+}
+
+/** @brief PI 运动的一拍：自适应制动 + PI。 */
+static bool tick_pi(joint_control_t *j, unsigned i, uint32_t now)
+{
+    joint_state_t *s = &j->states[i];
+    joint_motion_t *m = &s->motion;
+    int32_t error = m->goal - s->angle;
+    int32_t distance = magnitude(error);
+    int sign = error > 0 ? 1 : -1;
+    if (distance <= (int32_t)s->cal.tolerance)
+    {
+        return true;
+    }
+    /* 速度足够大且仍是朝目标的方向时，按“制动+滑行”距离提前刹车。 */
+    int32_t speed = s->speed;
+    if (!m->braking && magnitude(speed) > JOINT_PI_BRAKE_SPEED &&
+        m->last_sign == sign)
+    {
+        int32_t stop = (int32_t)s->cal.tolerance +
+                       (int32_t)((int64_t)magnitude(speed) *
+                                 (int64_t)(s->tune.brake_ms + JOINT_PI_COAST_MS) / 1000) +
+                       JOINT_PI_BRAKE_MARGIN;
+        if (distance <= stop)
+        {
+            if (!brake(j, i, now))
+            {
+                return finish(j, i, "HARDWARE", JOINT_FAULT);
+            }
+            m->integral = 0.0f;
+            m->duty_cmd = 0;
+        }
+    }
+    if (m->braking)
+    {
+        if (!release_brake(j, i, now))
+        {
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
+        }
+        if (m->braking)
+        {
+            return true;
+        }
+        /* 松刹后重新计时，避免把制动期间的时间算进积分。 */
+        m->tick_ms = now;
+    }
+    return pi_apply(j, i, error, now, 100U, true);
+}
+
+/** @brief REACHED 之后的漂移监视：容差外才用限幅 PI 纠回，不产生新的 JRESULT。 */
+static bool tick_hold(joint_control_t *j, unsigned i, uint32_t now)
+{
+    joint_state_t *s = &j->states[i];
+    joint_motion_t *m = &s->motion;
+    if (s->tune.mode != JOINT_MODE_PI)
+    {
+        m->holding = false;
+        s->phase = JOINT_DONE;
+        return true;
+    }
+    if (!sensor_ok(j, i, now))
+    {
+        m->holding = false;
+        return finish(j, i, "SENSOR", JOINT_FAULT);
+    }
+    if (out_of_limits(s))
+    {
+        m->holding = false;
+        return finish(j, i, "LIMIT", JOINT_FAULT);
+    }
+    int32_t error = m->goal - s->angle;
+    int32_t distance = magnitude(error);
+    int32_t band = (int32_t)s->cal.tolerance + (int32_t)JOINT_PI_HOLD_HYS;
+    /* 监视从判到达起只持续 JOINT_PI_HOLD_MS，到时不论在不在容差内都停止
+     * 输出并结束：HOLD 里没有停滞和超时保护，不能无限期地驱动下去。 */
+    bool is_over = (uint32_t)(now - m->hold_ms) >= JOINT_PI_HOLD_MS;
+    if (is_over || distance <= band)
+    {
+        if (!output(j, i, 0))
+        {
+            return finish(j, i, "HARDWARE", JOINT_FAULT);
+        }
+        if (is_over)
+        {
+            m->holding = false;
+            s->phase = JOINT_DONE;
+        }
+        return true;
+    }
+    bool ok = pi_apply(j, i, error, now, JOINT_PI_SLOW_CAP_PCT, false);
+    if (ok)
+    {
+        /* pi_apply 会把阶段写成 MOVING，纠偏期间对外仍是 HOLD。 */
+        s->phase = JOINT_HOLD;
+    }
+    return ok;
+}
+
 /** @brief 推进一个运动中关节的控制；返回 false 表示产生了新故障。 */
 static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
 {
     joint_state_t *s = &j->states[i];
     joint_motion_t *m = &s->motion;
+    if (!m->active)
+    {
+        /* 到位后的漂移监视走独立路径，不推进原运动；它自己查传感器和限位，
+         * 并且不受运动超时约束：运动已经报过 REACHED，不能再报 TIMEOUT。 */
+        return tick_hold(j, i, now);
+    }
     if (!sensor_ok(j, i, now))
     {
         return finish(j, i, "SENSOR", JOINT_FAULT);
@@ -1001,10 +1354,18 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
             m->initial_error = magnitude(m->goal - s->angle);
             m->best_error = m->initial_error;
             m->progress_ms = now;
+            if (s->tune.mode == JOINT_MODE_PI)
+            {
+                m->integral = 0.0f;
+                m->kick = true;
+                m->kick_ms = 0U;
+                m->duty_cmd = 0;
+            }
         }
     }
     int32_t error = m->goal - s->angle, distance = magnitude(error);
     bool proportional = s->tune.mode == JOINT_MODE_P;
+    bool uses_brake = proportional || s->tune.mode == JOINT_MODE_PI;
     if (distance <= (int32_t)s->cal.tolerance)
     {
         if (!m->stable)
@@ -1012,18 +1373,30 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
             m->stable = true;
             m->stable_ms = now;
             /* 比例式到点先短路制动，吃掉惯性，再松开滑行。 */
-            if (proportional && !brake(j, i, now))
+            if (uses_brake && !brake(j, i, now))
             {
                 return finish(j, i, "HARDWARE", JOINT_FAULT);
             }
         }
-        if (!(proportional ? release_brake(j, i, now) : output(j, i, 0)))
+        if (!(uses_brake ? release_brake(j, i, now) : output(j, i, 0)))
         {
             return finish(j, i, "HARDWARE", JOINT_FAULT);
         }
         if ((uint32_t)(now - m->stable_ms) >= JOINT_REACHED_HOLD_MS)
         {
-            return finish(j, i, "REACHED", JOINT_DONE);
+            if (!finish(j, i, "REACHED", JOINT_DONE))
+            {
+                return false;
+            }
+            if (s->tune.mode == JOINT_MODE_PI)
+            {
+                /* 到位后继续监视漂移，漂出容差才纠回；对外仍是 REACHED。 */
+                m->holding = true;
+                m->hold_ms = now;
+                m->integral = 0.0f;
+                s->phase = JOINT_HOLD;
+            }
+            return true;
         }
         return true;
     }
@@ -1033,7 +1406,13 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
         m->best_error = distance;
         m->progress_ms = now;
     }
-    if (distance > m->initial_error + (int32_t)(2U * s->cal.tolerance +
+    /* PI 只在起步窗口内判反走：短行程高速过冲会超过 2*tol+1° 的阈值，
+     * 全程判会把它误报成 DIRECTION。 */
+    bool direction_check =
+        (s->tune.mode != JOINT_MODE_PI) ||
+        ((uint32_t)(now - m->start_ms) <= JOINT_PI_DIR_CHECK_MS);
+    if (direction_check &&
+        distance > m->initial_error + (int32_t)(2U * s->cal.tolerance +
                                                 JOINT_DIRECTION_MARGIN))
     {
         return finish(j, i, "DIRECTION", JOINT_FAULT);
@@ -1047,13 +1426,21 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
     {
         /* 比例式过冲换向时先制动；刚启动（last_sign 为 0）时电机本来就停着。 */
         bool ok =
-            (proportional && m->last_sign != 0) ? brake(j, i, now) : output(j, i, 0);
+            (uses_brake && m->last_sign != 0) ? brake(j, i, now) : output(j, i, 0);
         if (!ok)
         {
             return finish(j, i, "HARDWARE", JOINT_FAULT);
         }
         m->last_sign = sign;
         m->switch_ms = now;
+        if (s->tune.mode == JOINT_MODE_PI)
+        {
+            /* 换向后积分和前馈都要重来，占空比从 0 重新爬升。 */
+            m->integral = 0.0f;
+            m->kick = true;
+            m->kick_ms = 0U;
+            m->duty_cmd = 0;
+        }
         s->phase = JOINT_SETTLE;
     }
     if ((uint32_t)(now - m->switch_ms) < JOINT_REVERSE_SETTLE_MS)
@@ -1064,7 +1451,16 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
         }
         return true;
     }
+    bool entering_move = s->phase != JOINT_MOVING;
     s->phase = JOINT_MOVING;
+    if (s->tune.mode == JOINT_MODE_PI)
+    {
+        if (entering_move)
+        {
+            m->tick_ms = now;
+        }
+        return tick_pi(j, i, now);
+    }
     if (proportional)
     {
         unsigned high = duty_max(s);
@@ -1125,7 +1521,8 @@ bool joint_tick(joint_control_t *j, uint32_t now)
     bool ok = true;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
-        if (j->states[i].motion.active && !tick_one(j, i, now))
+        if ((j->states[i].motion.active || j->states[i].motion.holding) &&
+            !tick_one(j, i, now))
         {
             ok = false;
         }
@@ -1135,7 +1532,7 @@ bool joint_tick(joint_control_t *j, uint32_t now)
 const char *joint_phase_name(joint_phase_t phase)
 {
     static const char *const names[JOINT_PHASE_COUNT] = {
-        "IDLE", "SETTLE", "MOVE", "DONE", "FAULT"};
+        "IDLE", "SETTLE", "MOVE", "DONE", "FAULT", "HOLD"};
     return ((unsigned)phase < JOINT_PHASE_COUNT) ? names[phase] : "?";
 }
 
@@ -1161,6 +1558,40 @@ static uint32_t get_u32(const uint8_t *p)
     return (uint32_t)get_u16(p) | ((uint32_t)get_u16(&p[2]) << 16);
 }
 
+static void put_pi(uint8_t *p, const joint_pi_t *pi)
+{
+    for (unsigned d = 0; d < 2U; ++d)
+    {
+        uint8_t *q = &p[d * 12U];
+        put_u16(&q[0], pi->kp_fast[d]);
+        put_u16(&q[2], pi->kp_slow[d]);
+        put_u16(&q[4], pi->ki[d]);
+        put_u16(&q[6], pi->i_max[d]);
+        put_u16(&q[8], pi->duty_min[d]);
+        put_u16(&q[10], pi->duty_max[d]);
+    }
+    put_u16(&p[24], pi->slow_band);
+    p[26] = pi->run_pct;
+    p[27] = pi->flags;
+}
+
+static void get_pi(const uint8_t *p, joint_pi_t *pi)
+{
+    for (unsigned d = 0; d < 2U; ++d)
+    {
+        const uint8_t *q = &p[d * 12U];
+        pi->kp_fast[d] = get_u16(&q[0]);
+        pi->kp_slow[d] = get_u16(&q[2]);
+        pi->ki[d] = get_u16(&q[4]);
+        pi->i_max[d] = get_u16(&q[6]);
+        pi->duty_min[d] = get_u16(&q[8]);
+        pi->duty_max[d] = get_u16(&q[10]);
+    }
+    pi->slow_band = get_u16(&p[24]);
+    pi->run_pct = p[26];
+    pi->flags = p[27];
+}
+
 void joint_cal_export(const joint_control_t *j,
                       uint8_t blob[JOINT_CAL_BLOB_SIZE])
 {
@@ -1182,6 +1613,7 @@ void joint_cal_export(const joint_control_t *j,
         a[1] = (uint8_t)(int8_t)s->traj.approach;
         put_u16(&a[4], (uint16_t)s->traj.backlash);
         put_u16(&a[6], (uint16_t)s->traj.overshoot);
+        put_pi(&p[BLOB_V4_ENTRY_SIZE], &s->tune.pi);
         if (!s->calibrated)
         {
             continue;
@@ -1202,36 +1634,93 @@ void joint_cal_export(const joint_control_t *j,
 unsigned joint_cal_import(joint_control_t *j, const uint8_t *blob,
                           uint32_t size)
 {
-    bool is_v4 =
-        blob[0] == JOINT_CAL_BLOB_VERSION && size == JOINT_CAL_BLOB_SIZE;
-    bool is_v3 = (blob[0] == 3U && size == JOINT_CAL_BLOB_V3_SIZE) || is_v4;
-    bool is_v2 = blob[0] == 2U && size == JOINT_CAL_BLOB_V2_SIZE;
-    if ((!is_v3 && !is_v2) || blob[1] != JOINT_COUNT)
+    /* 先查长度再读版本号：旧实现先读 blob[0]，越界读在极端情况下会踩内存。 */
+    if (blob == NULL || size < 4U)
     {
         return 0U;
     }
-    unsigned entry = is_v4   ? JOINT_CAL_BLOB_ENTRY_SIZE
-                     : is_v3 ? BLOB_V3_ENTRY_SIZE
-                             : BLOB_V2_ENTRY_SIZE;
+    unsigned version = blob[0];
+    unsigned entry;
+    bool has_tune = false, has_traj = false, has_pi = false;
+    if (version == 5U && size == JOINT_CAL_BLOB_SIZE)
+    {
+        entry = JOINT_CAL_BLOB_ENTRY_SIZE;
+        has_tune = has_traj = has_pi = true;
+    }
+    else if (version == 4U && size == JOINT_CAL_BLOB_V4_SIZE)
+    {
+        entry = BLOB_V4_ENTRY_SIZE;
+        has_tune = has_traj = true;
+    }
+    else if (version == 3U && size == JOINT_CAL_BLOB_V3_SIZE)
+    {
+        entry = BLOB_V3_ENTRY_SIZE;
+        has_tune = true;
+    }
+    else if (version == 2U && size == JOINT_CAL_BLOB_V2_SIZE)
+    {
+        entry = BLOB_V2_ENTRY_SIZE;
+    }
+    else
+    {
+        return 0U;
+    }
+    if (blob[1] != JOINT_COUNT)
+    {
+        return 0U;
+    }
     unsigned restored = 0U;
     for (unsigned i = 0; i < JOINT_COUNT; ++i)
     {
         const uint8_t *p = &blob[4U + i * entry];
-        const uint8_t *t = &p[BLOB_V2_ENTRY_SIZE];
-        if (is_v3 && t[0] == 1U)
+        joint_tune_t tune = j->states[i].tune;
+        bool have_tune = false;
+        if (has_tune)
         {
-            joint_tune_t tune = {(joint_mode_t)t[1], get_u16(&t[2]),
-                                 get_u16(&t[4]), get_u16(&t[6])};
-            (void)joint_set_tune(j, i, tune);
+            const uint8_t *t = &p[BLOB_V2_ENTRY_SIZE];
+            if (t[0] == 1U)
+            {
+                tune.mode = (joint_mode_t)t[1];
+                tune.kp = get_u16(&t[2]);
+                tune.duty_min = get_u16(&t[4]);
+                tune.brake_ms = get_u16(&t[6]);
+                have_tune = true;
+            }
         }
-        const uint8_t *a = &p[BLOB_V3_ENTRY_SIZE];
-        if (is_v4 && a[0] == 1U)
+        if (has_traj)
         {
-            joint_traj_cfg_t cfg = j->states[i].traj;
-            cfg.approach = (int8_t)a[1];
-            cfg.backlash = get_u16(&a[4]);
-            cfg.overshoot = get_u16(&a[6]);
-            (void)joint_set_traj(j, i, cfg);
+            const uint8_t *a = &p[BLOB_V3_ENTRY_SIZE];
+            if (a[0] == 1U)
+            {
+                joint_traj_cfg_t cfg = j->states[i].traj;
+                cfg.approach = (int8_t)a[1];
+                cfg.backlash = get_u16(&a[4]);
+                cfg.overshoot = get_u16(&a[6]);
+                (void)joint_set_traj(j, i, cfg);
+            }
+        }
+        if (has_pi)
+        {
+            get_pi(&p[BLOB_V4_ENTRY_SIZE], &tune.pi);
+        }
+        else if (have_tune && tune.mode == JOINT_MODE_P &&
+                 JOINT_PI_MIGRATE_LEGACY)
+        {
+            /* v2–v4 的 P 参数迁移成 PI 初值：kp、duty_min 两方向取同值，
+             * 其余用默认表；M3/M6 的方向差异只能上台架重新整定。 */
+            unsigned cap = (p[0] == 1U) ? get_u16(&p[2]) : MOTOR_DUTY_LIMIT;
+            joint_pi_defaults(&tune.pi, i, cap);
+            for (unsigned d = 0; d < 2U; ++d)
+            {
+                tune.pi.kp_fast[d] = tune.kp;
+                tune.pi.kp_slow[d] = tune.kp;
+                tune.pi.duty_min[d] = tune.duty_min;
+            }
+            tune.mode = JOINT_MODE_PI;
+        }
+        if (have_tune || has_pi)
+        {
+            (void)joint_set_tune(j, i, tune);
         }
         if (p[0] != 1U)
         {

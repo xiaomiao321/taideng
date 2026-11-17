@@ -369,6 +369,15 @@ static void joint_report(unsigned index, uint32_t now, bool config)
                        (unsigned long)now, index + 1U, s->traj.approach,
                        (long)s->traj.backlash, (long)s->traj.overshoot);
         (void)send_line(out);
+        const joint_pi_t *p = &s->tune.pi;
+        (void)snprintf(
+            out, sizeof(out),
+            "JPI %lu M%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\r\n",
+            (unsigned long)now, index + 1U, p->kp_fast[0], p->kp_slow[0],
+            p->ki[0], p->i_max[0], p->duty_min[0], p->duty_max[0],
+            p->kp_fast[1], p->kp_slow[1], p->ki[1], p->i_max[1], p->duty_min[1],
+            p->duty_max[1], p->slow_band, p->run_pct, p->flags);
+        (void)send_line(out);
     }
     bool is_fresh =
         s_joints->valid &&
@@ -524,8 +533,13 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
             return "TUNE_PARAM";
         }
         joint_tune_t old = s_joints->states[index].tune;
-        joint_tune_t tune = {(joint_mode_t)v[0], (unsigned)v[1], (unsigned)v[2],
-                             (unsigned)v[3]};
+        /* 从当前值出发只改这四项，PI 参数原样保留；否则它会被清零并存进
+         * Flash，之后也无法再切回比例积分式。 */
+        joint_tune_t tune = old;
+        tune.mode = (joint_mode_t)v[0];
+        tune.kp = (unsigned)v[1];
+        tune.duty_min = (unsigned)v[2];
+        tune.brake_ms = (unsigned)v[3];
         const char *err = joint_set_tune(s_joints, index, tune);
         if (!err && count == 5U)
         {
@@ -548,6 +562,57 @@ static const char *joint_command(const char *op, unsigned seq, unsigned index,
         cfg.approach = (int)v[0];
         cfg.backlash = v[1];
         cfg.overshoot = v[2];
+        const char *err = joint_set_traj(s_joints, index, cfg);
+        if (!err)
+        {
+            commit_calibration(now);
+        }
+        return err;
+    }
+    /* 分方向 PI 参数：0 增大方向、1 减小方向，顺序见 JPI 上报。 */
+    if (!strcmp(op, "JPI") && count == 15U)
+    {
+        for (unsigned k = 0; k < 15U; ++k)
+        {
+            if (v[k] < 0)
+            {
+                return "TUNE_PARAM";
+            }
+        }
+        joint_pi_t pi = {
+            .kp_fast = {(uint16_t)v[0], (uint16_t)v[6]},
+            .kp_slow = {(uint16_t)v[1], (uint16_t)v[7]},
+            .ki = {(uint16_t)v[2], (uint16_t)v[8]},
+            .i_max = {(uint16_t)v[3], (uint16_t)v[9]},
+            .duty_min = {(uint16_t)v[4], (uint16_t)v[10]},
+            .duty_max = {(uint16_t)v[5], (uint16_t)v[11]},
+            .slow_band = (uint16_t)v[12],
+            .run_pct = (uint8_t)v[13],
+            .flags = (uint8_t)v[14],
+        };
+        const char *err = joint_set_pi(s_joints, index, &pi);
+        if (!err)
+        {
+            commit_calibration(now);
+        }
+        return err;
+    }
+    /* 背隙实测：JBL M dir backlash，超调量取三倍背隙（至少 3°）。 */
+    if (!strcmp(op, "JBL") && count == 2U)
+    {
+        if ((v[0] != 1 && v[0] != -1) || v[1] < 0)
+        {
+            return "TUNE_PARAM";
+        }
+        joint_traj_cfg_t cfg = s_joints->states[index].traj;
+        uint32_t over = (uint32_t)v[1] * 3U;
+        if (over < 3000U)
+        {
+            over = 3000U;
+        }
+        cfg.approach = (int)v[0];
+        cfg.backlash = (uint32_t)v[1];
+        cfg.overshoot = over;
         const char *err = joint_set_traj(s_joints, index, cfg);
         if (!err)
         {

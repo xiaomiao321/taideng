@@ -14,6 +14,7 @@ _Static_assert(JOINT_COUNT == BSP_ADC_CHANNEL_COUNT,
                "each joint needs one potentiometer channel");
 _Static_assert(JOINT_CAL_BLOB_SIZE % 4U == 0U && JOINT_CAL_BLOB_SIZE <= 1024U &&
                    JOINT_CAL_BLOB_SIZE + 4U <= 1024U &&
+                   JOINT_CAL_BLOB_V4_SIZE % 4U == 0U &&
                    JOINT_CAL_BLOB_V3_SIZE % 4U == 0U &&
                    JOINT_CAL_BLOB_V2_SIZE % 4U == 0U,
                "param flash records must be multiples of 4, at most 1024");
@@ -57,8 +58,8 @@ static bool joint_brake(unsigned index)
 /**
  * @brief 初始化 Flash 参数存储并恢复上次保存的标定和控制参数。
  *
- * 只有旧格式（不带启动计数的版本 4、版本 3 或版本 2）记录时，恢复其中的参数
- * 并立即按新格式保存，免得刷新固件后丢失标定。
+ * 只有旧格式（不带启动计数的版本 5、版本 4、版本 3 或版本 2）记录时，恢复
+ * 其中的参数并立即按新格式保存，免得刷新固件后丢失标定。
  *
  * @return 恢复的关节数。
  * @note 需要擦除备用扇区时会阻塞约 2 秒，只在初始化阶段调用。
@@ -66,9 +67,10 @@ static bool joint_brake(unsigned index)
 static unsigned load_calibration(void)
 {
     /* 必须在 init 之前读旧记录：init 换用新长度后可能擦掉旧记录所在扇区。
-     * 从新到旧依次找：不带启动计数的版本 4、版本 3、版本 2。 */
+     * 从新到旧依次找：不带启动计数的版本 5、版本 4、版本 3、版本 2。 */
     static const uint32_t k_old_sizes[] = {
-        JOINT_CAL_BLOB_SIZE, JOINT_CAL_BLOB_V3_SIZE, JOINT_CAL_BLOB_V2_SIZE};
+        JOINT_CAL_BLOB_SIZE, JOINT_CAL_BLOB_V4_SIZE, JOINT_CAL_BLOB_V3_SIZE,
+        JOINT_CAL_BLOB_V2_SIZE};
     static uint8_t old[JOINT_CAL_BLOB_SIZE];
     uint32_t old_size = 0U;
     bool has_old = false;
