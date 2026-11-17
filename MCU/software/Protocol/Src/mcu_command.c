@@ -24,12 +24,43 @@ static uint32_t s_last_rx_ms = 0U;
 static bool s_has_link = false;
 /** @brief 本次失联是否已经执行过安全停止，避免重复停。 */
 static bool s_has_stopped = true;
-/** @brief 是否记有上一次请求，用于去重。 */
-static bool s_has_last = false;
-/** @brief 上一次有副作用的请求原文，用于识别主机的原样重发。 */
-static mcu_frame_t s_last_request;
-/** @brief 上一次请求对应的回复，重复请求时原样重发。 */
-static mcu_frame_t s_last_reply;
+/** @brief STATUS.status_flags 里当前挂着、等主机读走的扩展位。 */
+static uint8_t s_status_flags = 0U;
+/** @brief 底盘是否正按 SET_MOTION 运动，用来选失联时限。 */
+static bool s_is_chassis_active = false;
+/** @brief 是否下发过关节动作、且还没到它自己的期限。 */
+static bool s_is_arm_active = false;
+/** @brief 关节动作的固件内部期限，见 MCU_ARM_MOVE_TIMEOUT_MS。 */
+static uint32_t s_arm_deadline_ms = 0U;
+
+/** @brief 重发识别环的深度：足够覆盖“丢 ACK 后继续发新指令再回头重发”。 */
+#define MCU_COMMAND_DEDUP_SLOTS (4U)
+
+/**
+ * @brief 重发识别环里的一项：控制帧摘要 + 当时的回复。
+ *
+ * @note 只留摘要（SEQ、CMD、VERSION、FLAGS、LENGTH、PAYLOAD）而不留整帧是为了
+ *       省 RAM；回复必须整帧保留，重发时要逐字节原样回给主机。一项约 80 字节，
+ *       四项约 320 字节。
+ */
+typedef struct
+{
+    bool is_valid;                             /**< 该项是否已经写过。 */
+    uint8_t seq;                               /**< 请求的 SEQ。 */
+    uint8_t cmd;                               /**< 请求的 CMD。 */
+    uint8_t version;                           /**< 请求的协议版本。 */
+    uint8_t flags;                             /**< 请求的 FLAGS。 */
+    uint8_t payload_length;                    /**< 请求的 PAYLOAD 长度。 */
+    uint8_t payload[MCU_PROTOCOL_MAX_PAYLOAD]; /**< 请求的 PAYLOAD 原文。 */
+    mcu_frame_t reply;                         /**< 当时的回复，重发时原样返回。 */
+} dedup_entry_t;
+
+/** @brief 最近若干条带副作用控制帧，环形使用，最旧的被覆盖。 */
+static dedup_entry_t s_dedup[MCU_COMMAND_DEDUP_SLOTS];
+/** @brief 下一条写入的下标。 */
+static uint8_t s_dedup_next = 0U;
+/** @brief 已经写过的项数；未写满环时只扫这么多项。 */
+static uint8_t s_dedup_used = 0U;
 
 /* -------------------------------------------------------------------------- */
 /* 内部工具                                                                    */
@@ -94,21 +125,77 @@ static uint8_t current_faults(void)
 }
 
 /**
- * @brief 判断请求是否是上一次控制帧的原样重发。
+ * @brief 环项与请求是否完全一致，即是否为同一条控制帧的原样重发。
  *
  * @note 只比 (SEQ, CMD) 不够：主机重启后 SEQ 从头开始，新命令可能恰好和
  *       MCU 记住的上一条撞上 SEQ 与 CMD，被误当成重发而不执行。原样重发的
  *       报文逐字节相同，所以把版本、标志和 PAYLOAD 一起比较。
  */
-static bool is_retransmission(const mcu_frame_t *request)
+static bool dedup_matches(const dedup_entry_t *entry, const mcu_frame_t *request)
 {
-    return s_has_last && (request->seq == s_last_request.seq) &&
-           (request->cmd == s_last_request.cmd) &&
-           (request->version == s_last_request.version) &&
-           (request->flags == s_last_request.flags) &&
-           (request->payload_length == s_last_request.payload_length) &&
-           (memcmp(request->payload, s_last_request.payload,
-                   request->payload_length) == 0);
+    return entry->is_valid && (request->seq == entry->seq) &&
+           (request->cmd == entry->cmd) &&
+           (request->version == entry->version) &&
+           (request->flags == entry->flags) &&
+           (request->payload_length == entry->payload_length) &&
+           (memcmp(request->payload, entry->payload, request->payload_length) == 0);
+}
+
+/**
+ * @brief 在环里找原样重发；命中时把当时的回复原样写进 reply。
+ *
+ * @retval true 是重发，reply 已填好，不应再执行一次副作用。
+ * @retval false 不是重发。
+ *
+ * @note 用环而不是只记上一条（问题清单 A5）：主机丢了一个 ACK 后继续发新指令，
+ *       回头再重发旧指令时，单槽实现已经把它挤掉了，于是 X→Y→X 会把第二个 X
+ *       重新执行一遍。
+ */
+static bool dedup_lookup(const mcu_frame_t *request, mcu_frame_t *reply)
+{
+    for (uint8_t i = 0U; i < s_dedup_used; ++i)
+    {
+        if (dedup_matches(&s_dedup[i], request))
+        {
+            *reply = s_dedup[i].reply;
+            return true;
+        }
+    }
+    return false;
+}
+
+/** @brief 记一条带副作用控制帧及其回复，写满后覆盖最旧的一项。 */
+static void dedup_store(const mcu_frame_t *request, const mcu_frame_t *reply)
+{
+    /* 解析层已经保证长度不超限，这里只做防御性检查。 */
+    if (request->payload_length > MCU_PROTOCOL_MAX_PAYLOAD)
+    {
+        return;
+    }
+
+    dedup_entry_t *entry = &s_dedup[s_dedup_next];
+    entry->seq = request->seq;
+    entry->cmd = request->cmd;
+    entry->version = request->version;
+    entry->flags = request->flags;
+    entry->payload_length = request->payload_length;
+    (void)memcpy(entry->payload, request->payload, request->payload_length);
+    entry->reply = *reply;
+    entry->is_valid = true;
+
+    s_dedup_next = (uint8_t)((s_dedup_next + 1U) % MCU_COMMAND_DEDUP_SLOTS);
+    if (s_dedup_used < MCU_COMMAND_DEDUP_SLOTS)
+    {
+        ++s_dedup_used;
+    }
+}
+
+/** @brief 清空重发识别环，初始化时调用。 */
+static void dedup_reset(void)
+{
+    (void)memset(s_dedup, 0, sizeof(s_dedup));
+    s_dedup_next = 0U;
+    s_dedup_used = 0U;
 }
 
 /** @brief 组装一条 STATUS 回复。 */
@@ -118,10 +205,13 @@ static void build_status(mcu_frame_t *reply, uint8_t seq, uint32_t now_ms)
 
     s_hw->read_status(&status);
 
-    /* 协议规定这些字段由 MCU 自己维护，不看回调填了什么。 */
-    status.status_flags = 0U;
+    /* 协议规定这些字段由 MCU 自己维护，不看回调填了什么。
+     * status_flags 平时为 0，只有失联停机后挂一个 LINK_LOST 位；读到即清，
+     * 所以主机下一次 GET_STATUS 就能看到这次停机的真实原因。 */
+    status.status_flags = s_status_flags;
+    s_status_flags = 0U;
     status.uptime_seconds = (now_ms - s_start_ms) / 1000U;
-    status.protocol_errors = mcu_protocol_error_count();
+    status.protocol_errors = (uint16_t)mcu_protocol_error_count();
 
     mcu_protocol_make_status(reply, seq, &status);
 }
@@ -137,7 +227,8 @@ static void build_error_ack(mcu_frame_t *reply, const mcu_frame_t *request,
  * @brief 处理关节动作（SET_ARM_POSITION、HOME_ARM）：校验参数、故障门控，
  *        再交给回调。
  */
-static void handle_arm_action(const mcu_frame_t *request, mcu_frame_t *reply)
+static void handle_arm_action(const mcu_frame_t *request, mcu_frame_t *reply,
+                              uint32_t now_ms)
 {
     bool is_move = request->cmd == MCU_PROTOCOL_CMD_SET_ARM_POSITION;
     uint8_t length = is_move ? MCU_PROTOCOL_ARM_POSITION_PAYLOAD_SIZE : 4U;
@@ -169,6 +260,13 @@ static void handle_arm_action(const mcu_frame_t *request, mcu_frame_t *reply)
     uint8_t result = is_move ? s_hw->arm_move(p[0], target, speed)
                              : s_hw->arm_home(p[0]);
     mcu_protocol_make_ack(reply, request->seq, request->cmd, result, 0U);
+
+    /* 真正动起来的关节才按“运动中”时限计时；忙、参数错、未标定都不算。 */
+    if (result == MCU_PROTOCOL_RESULT_OK)
+    {
+        s_is_arm_active = true;
+        s_arm_deadline_ms = now_ms + MCU_ARM_MOVE_TIMEOUT_MS;
+    }
 }
 
 /**
@@ -317,9 +415,7 @@ static void remember_request(const mcu_frame_t *request,
         return;
     }
 
-    s_last_request = *request;
-    s_last_reply = *reply;
-    s_has_last = true;
+    dedup_store(request, reply);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -340,7 +436,11 @@ void mcu_command_init(const mcu_command_hw_t *hw, uint32_t now_ms)
     s_last_rx_ms = now_ms;
     s_has_link = false;
     s_has_stopped = true;
-    s_has_last = false;
+    s_status_flags = 0U;
+    s_is_chassis_active = false;
+    s_is_arm_active = false;
+    s_arm_deadline_ms = 0U;
+    dedup_reset();
 }
 
 bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
@@ -359,10 +459,10 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
 
     /* 重复的控制帧：只重发上次的回复，绝不重复执行副作用。
      * 注意这里也要刷新链路计时，否则主机一直重发同一条帧会被误判成失联。 */
-    if (has_side_effect(request->cmd) && is_retransmission(request))
+    /* 环里任一历史控制帧的原样重发：只重发当时的回复，绝不重复执行副作用。 */
+    if (has_side_effect(request->cmd) && dedup_lookup(request, reply))
     {
         note_link_activity(now_ms);
-        *reply = s_last_reply;
         return true;
     }
 
@@ -466,6 +566,9 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
                 break;
             }
 
+            /* 底盘只要有动作就按“运动中”的短时限保护，STOP 后恢复空闲时限。 */
+            s_is_chassis_active = (motion != MCU_PROTOCOL_MOTION_STOP);
+
             mcu_protocol_make_ack(reply, request->seq, request->cmd,
                                   MCU_PROTOCOL_RESULT_OK, 0U);
             break;
@@ -473,7 +576,7 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
 
         case MCU_PROTOCOL_CMD_SET_ARM_POSITION:
         case MCU_PROTOCOL_CMD_HOME_ARM:
-            handle_arm_action(request, reply);
+            handle_arm_action(request, reply, now_ms);
             break;
 
         case MCU_PROTOCOL_CMD_GET_EXTENDED_STATUS:
@@ -501,6 +604,21 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
     return true;
 }
 
+/** @brief 现在是否有电机在动；优先问上层，没注册回调则用命令层自己记的状态。 */
+static bool is_any_motion_active(uint32_t now_ms)
+{
+    if ((s_hw != NULL) && (s_hw->is_motion_active != NULL))
+    {
+        return s_hw->is_motion_active();
+    }
+
+    /* 关节动作只在它自己的期限内算数：到期后不再按运动计时，避免动作早已
+     * 完成、主机也不再频繁发帧时被误判失联。 */
+    bool is_arm_moving = s_is_arm_active &&
+                         ((int32_t)(s_arm_deadline_ms - now_ms) > 0);
+    return s_is_chassis_active || is_arm_moving;
+}
+
 bool mcu_command_poll(uint32_t now_ms)
 {
     if ((s_hw == NULL) || (!s_has_link) || (s_has_stopped))
@@ -508,12 +626,21 @@ bool mcu_command_poll(uint32_t now_ms)
         return false;
     }
 
-    if ((now_ms - s_last_rx_ms) < MCU_COMMAND_LINK_TIMEOUT_MS)
+    /* 运动中用短时限：失联后不该让电机再跑满 5 秒（问题清单 A4）。 */
+    uint32_t timeout_ms = is_any_motion_active(now_ms)
+                              ? MCU_COMMAND_MOTION_LINK_TIMEOUT_MS
+                              : MCU_COMMAND_LINK_TIMEOUT_MS;
+    if ((now_ms - s_last_rx_ms) < timeout_ms)
     {
         return false;
     }
 
     s_hw->safe_stop();
     s_has_stopped = true;
+    s_is_chassis_active = false;
+    s_is_arm_active = false;
+    s_arm_deadline_ms = 0U;
+    /* 挂一个“失联停机”标志，主机重连后第一次 GET_STATUS 就能读到。 */
+    s_status_flags |= MCU_COMMAND_STATUS_FLAG_LINK_LOST;
     return true;
 }

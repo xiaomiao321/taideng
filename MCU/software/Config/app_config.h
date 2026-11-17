@@ -87,6 +87,37 @@
 /** @brief 电位器读数距上次采样超过该时间即视为失效，单位毫秒。 */
 #define JOINT_SENSOR_STALE_MS (50U)
 
+/**
+ * @brief 电位器读数“抖得离谱”的阈值与连续次数（问题清单 B4）。
+ *
+ * spread 是单次 10ms 采样里 16 次过采样去掉两端各 1/4 后的极差，正常只有几个
+ * 计数。碳膜磨损、滑片接触不良或断线时会突然跳到几十上百个计数；连续
+ * JOINT_POT_SPREAD_SAMPLES 次超过 JOINT_POT_SPREAD_MAX 就锁存 SENSOR 故障并
+ * 停下该关节，等读数恢复正常后由 joint_clear_faults() 自动清掉。只检查已标定的
+ * 关节：没接电位器的通道输入悬空，读数本来就乱跳。
+ *
+ * 200 计数约合 13°（270° 行程对应 4095 计数），远大于正常噪声，又能在读数
+ * 明显不可信时及时停下。现场标定后可按实测噪声收紧。
+ */
+#define JOINT_POT_SPREAD_MAX (200U)
+#define JOINT_POT_SPREAD_SAMPLES (3U)
+
+/**
+ * @brief ADC 排名顺序到关节下标的映射（问题清单 B1）。
+ *
+ * Core/Src/adc.c 的扫描顺序是 rank1..6 = ADC_CHANNEL_12、11、10、13、14、15，
+ * 即 PC0、PC1、PC2、PC3、PC4、PC5；而 Core/Inc/main.h 的网表把 PC0 标成
+ * POT3、PC2 标成 POT1。两边都以“1”为起点，于是排第 1 的 M1 可能读到 M3 的
+ * 电位器。哪一方是对的只能上板验证：手动转某一个关节，看调试终端的 POT 行里
+ * 是哪一路在变（步骤见 docs/通讯与采样问题清单.md 的 B1 条）。
+ *
+ * 默认按顺序一致处理；实测确认 M1/M3 对调后，把下面改成 {2U, 1U, 0U, 3U, 4U, 5U}。
+ * 改动只影响采样与关节的对应关系，不影响标定数据本身。
+ */
+#ifndef JOINT_ADC_ORDER
+#define JOINT_ADC_ORDER {0U, 1U, 2U, 3U, 4U, 5U}
+#endif
+
 /** @brief 电位器标称电气行程，毫度。 */
 #define JOINT_POT_TRAVEL_MDEG (270000)
 
@@ -351,11 +382,39 @@
 /** @brief 调试终端心跳超时：超过该时间没收到 PING 即停止输出并锁定，毫秒。 */
 #define DEBUG_CONTROL_HEARTBEAT_TIMEOUT_MS (1000U)
 
-/** @brief 调试终端周期状态上报的间隔，单位毫秒。 */
+/**
+ * @brief 调试终端周期状态上报的间隔，单位毫秒。
+ *
+ * 保持 100ms：非焦点的空闲关节每六个周期才轮到一次 JSTATE，上位机按 1 秒判断
+ * 状态是否新鲜，周期加到 200ms 会让它们时有时无。带宽已由 460800 和发送队列
+ * 解决，不需要靠降低周期来省。
+ */
 #define STATUS_REPORT_PERIOD_MS (100U)
 
-/** @brief Android 协议失联保护：超过该时间没收到合法帧即停止全部电机，毫秒。 */
+/**
+ * @brief JTRACE 相邻两行的最小间隔，单位毫秒。
+ *
+ * 采样 10ms 一次，取 10 即每个采样都上报，上位机的阶跃指标按这个间隔计算。
+ * 需要把调试串口降回 115200 时可以改成 20，带宽减半，指标相应变粗。
+ */
+#define JOINT_TRACE_MIN_PERIOD_MS (10U)
+
+/** @brief Android 协议失联保护：空闲时超过该时间没收到合法帧即停止全部电机，毫秒。 */
 #define MCU_COMMAND_LINK_TIMEOUT_MS (5000U)
+
+/**
+ * @brief 运动期间的 Android 失联保护时限，单位毫秒（问题清单 A4）。
+ *
+ * 空闲时 5 秒失联只意味着没有新指令；一旦有电机在动，同样的 5 秒就变成最多
+ * 5 秒的失控运动。所以运动期间改用更短的时限：主机（Android 侧）在关节动作、
+ * 底盘运动期间必须至少每该时长发一帧，PING 或 GET_STATUS 都算。
+ *
+ * 目前与空闲时限相同，即这一档还没有启用：SDK 文档约定主机每 2 秒查询一次
+ * 状态、下位机 5 秒无帧才停，运动中缩短到 1.5 秒会把正常运动中的底盘停掉。
+ * 要缩短必须先和安卓端约定运动期间的发帧间隔，再把这里改成略大于它两倍的值。
+ * 触发时停机并置 STATUS.status_flags 的 LINK_LOST 位。
+ */
+#define MCU_COMMAND_MOTION_LINK_TIMEOUT_MS (5000U)
 
 /**
  * @brief Android SET_ARM_POSITION 的固件内部单次运动期限，单位毫秒。

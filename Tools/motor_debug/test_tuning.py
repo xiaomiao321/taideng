@@ -30,6 +30,14 @@ class PiFormTests(unittest.TestCase):
         self.assertEqual(pi_values(texts)[4], 100)
 
 
+class StatTests(unittest.TestCase):
+    def test_stat_line(self):
+        self.assertEqual(parse("STAT 5000 3 0 1 2 14"), ("STAT", 5000, 3, 0, 1, 2, 14))
+        for bad in ("STAT 5000 3 0 1 2 -1", "STAT 5000 3 0 1 2 x"):
+            self.assertEqual(parse(bad)[0], "BAD")
+        self.assertEqual(parse("STAT 5000 3 0 1 2")[0], "LOG")  # 项数不对的当普通日志显示
+
+
 class StepTests(unittest.TestCase):
     def samples(self, angles, duty=500, period=.01):
         return [(i * period, a, duty if i < len(angles) - 5 else 0) for i, a in enumerate(angles)]

@@ -95,6 +95,7 @@ typedef struct
     bool last_output_on;
     uint8_t last_output_level;
     uint8_t output_result;
+    bool is_moving;
 } fake_hw_t;
 
 static fake_hw_t s_fake;
@@ -240,6 +241,20 @@ static const mcu_command_hw_t k_output_hw = {
     .buzzer = fake_buzzer,
     .indicator = fake_indicator,
     .output_status = fake_output_status,
+};
+
+static bool fake_is_motion_active(void)
+{
+    return s_fake.is_moving;
+}
+
+/* 带运动状态回调：失联时限按是否有电机在动分两档。 */
+static const mcu_command_hw_t k_motion_hw = {
+    .read_status = fake_read_status,
+    .apply_light = fake_apply_light,
+    .apply_motion = fake_apply_motion,
+    .safe_stop = fake_safe_stop,
+    .is_motion_active = fake_is_motion_active,
 };
 
 static void fake_reset(void)
@@ -606,6 +621,97 @@ static void test_link_timeout(void)
     check(!mcu_command_poll(14999U), "timeout: timer restarts after a request");
     check(mcu_command_poll(15000U), "timeout: stops again after another 5 s");
     check(s_fake.safe_stop_calls == 2U, "timeout: safe stop called twice");
+}
+
+/** @brief 丢了 ACK 后主机先发了别的命令再回头重发：仍认得出，不重复执行。 */
+static void test_dedup_ring(void)
+{
+    const uint8_t forward[4] = {MCU_PROTOCOL_MOTION_FORWARD, 50U, 0U, 0U};
+    const uint8_t light[4] = {1U, 30U, 0U, 0U};
+    mcu_frame_t x = make_request(0x40U, MCU_PROTOCOL_CMD_SET_MOTION, forward, 4U,
+                                 MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t y = make_request(0x41U, MCU_PROTOCOL_CMD_SET_LIGHT, light, 4U,
+                                 MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+    mcu_frame_t first = {0};
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_fake_hw, 0U);
+    (void)mcu_command_handle(&x, &first, 10U);
+    (void)mcu_command_handle(&y, &reply, 20U);
+    (void)mcu_command_handle(&x, &reply, 30U);
+    check(s_fake.apply_motion_calls == 1U, "ring: X after Y is not re-executed");
+    check((reply.cmd == first.cmd) && (reply.seq == first.seq) &&
+              bytes_equal(reply.payload, first.payload, first.payload_length),
+          "ring: original ACK is replayed");
+    (void)mcu_command_handle(&y, &reply, 40U);
+    check(s_fake.apply_light_calls == 1U, "ring: Y is still remembered too");
+
+    /* 之后又来了四条新命令，X 被挤出去，再来就当新命令执行。 */
+    for (uint8_t i = 0U; i < 4U; ++i)
+    {
+        mcu_frame_t other =
+            make_request((uint8_t)(0x50U + i), MCU_PROTOCOL_CMD_SET_LIGHT,
+                         light, 4U, MCU_PROTOCOL_FLAG_ACK_REQUIRED);
+        (void)mcu_command_handle(&other, &reply, 50U + i);
+    }
+    (void)mcu_command_handle(&x, &reply, 100U);
+    check(s_fake.apply_motion_calls == 2U,
+          "ring: forgotten after four newer commands");
+
+    /* 重新初始化后不认旧帧。 */
+    mcu_command_init(&k_fake_hw, 200U);
+    (void)mcu_command_handle(&x, &reply, 210U);
+    check(s_fake.apply_motion_calls == 3U, "ring: cleared by init");
+}
+
+/** @brief 失联停机后 STATUS 带一次 LINK_LOST 标志，读走即清。 */
+static void test_link_lost_flag(void)
+{
+    mcu_frame_t query =
+        make_request(0x60U, MCU_PROTOCOL_CMD_GET_STATUS, NULL, 0U, 0U);
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_fake_hw, 0U);
+    (void)mcu_command_handle(&query, &reply, 10U);
+    check(reply.payload[7] == 0U, "link lost: flag clear in normal operation");
+
+    check(mcu_command_poll(10U + MCU_COMMAND_LINK_TIMEOUT_MS),
+          "link lost: timeout fires");
+    (void)mcu_command_handle(&query, &reply, 20000U);
+    check(reply.payload[7] == MCU_COMMAND_STATUS_FLAG_LINK_LOST,
+          "link lost: flag reported once");
+    (void)mcu_command_handle(&query, &reply, 20100U);
+    check(reply.payload[7] == 0U, "link lost: flag cleared after being read");
+}
+
+/** @brief 有电机在动时用运动期间的失联时限，静止时用空闲时限。 */
+static void test_motion_link_timeout(void)
+{
+    mcu_frame_t query =
+        make_request(0x61U, MCU_PROTOCOL_CMD_GET_STATUS, NULL, 0U, 0U);
+    mcu_frame_t reply = {0};
+
+    fake_reset();
+    mcu_command_init(&k_motion_hw, 0U);
+    (void)mcu_command_handle(&query, &reply, 1000U);
+    s_fake.is_moving = true;
+    check(!mcu_command_poll(999U + MCU_COMMAND_MOTION_LINK_TIMEOUT_MS),
+          "motion timeout: not before the motion limit");
+    check(mcu_command_poll(1000U + MCU_COMMAND_MOTION_LINK_TIMEOUT_MS),
+          "motion timeout: stops at the motion limit");
+    check(s_fake.safe_stop_calls == 1U, "motion timeout: safe stop called");
+
+    query = make_request(0x62U, MCU_PROTOCOL_CMD_GET_STATUS, NULL, 0U, 0U);
+    (void)mcu_command_handle(&query, &reply, 50000U);
+    s_fake.is_moving = false;
+    check(!mcu_command_poll(49999U + MCU_COMMAND_LINK_TIMEOUT_MS),
+          "motion timeout: idle uses the idle limit");
+    check(mcu_command_poll(50000U + MCU_COMMAND_LINK_TIMEOUT_MS),
+          "motion timeout: idle limit still stops");
+    check(MCU_COMMAND_MOTION_LINK_TIMEOUT_MS <= MCU_COMMAND_LINK_TIMEOUT_MS,
+          "motion timeout: never longer than the idle limit");
 }
 
 /** @brief 重复的查询必须返回当前状态，不能重放缓存里的旧状态。 */
@@ -1271,6 +1377,9 @@ int main(void)
     test_repeated_query_is_fresh();
     test_dedup_survives_interleaved_query();
     test_duplicate_refreshes_link();
+    test_dedup_ring();
+    test_link_lost_flag();
+    test_motion_link_timeout();
     test_set_light_on();
     test_set_light_off_keeps_brightness();
     test_set_light_parameter_errors();

@@ -1,6 +1,6 @@
 /**
  * @file mcu_protocol.c
- * @brief MCU 协议模块实现：CRC16/MODBUS 与帧解析。
+ * @brief MCU 协议模块实现：CRC16/MODBUS、帧解析与组包。
  *
  * 帧格式（协议版本 0x02）：
  *   A5 5A | VERSION | FLAGS | SEQ | CMD | LEN低 LEN高 | PAYLOAD | CRC低 CRC高
@@ -9,7 +9,14 @@
  * 上层。解析层只保证"字节完整、帧头与 CRC 正确"，版本号、命令字和参数是否
  * 合法由命令层判断。
  *
- * @note 本文件在接入硬件之前不包含任何 HAL 头，保证能直接在 PC 上编译单测。
+ * 与上一版的差别（通讯与采样问题清单 A2/A6）：
+ * - 新增 mcu_protocol_poll()：半帧超过 MCU_PROTOCOL_INTER_FRAME_GAP_MS 就丢弃，
+ *   不再让半帧长期占用缓冲；
+ * - 重新同步时直接跳到下一个 A5 5A，而不是一次只丢一个字节，减少 CRC 失败后
+ *   在坏数据里反复滑窗的开销；
+ * - 错误计数改为 32 位，长时间运行不回绕。
+ *
+ * @note 本文件不包含任何 HAL 头，保证能直接在 PC 上编译单测。
  */
 
 #include "mcu_protocol.h"
@@ -33,7 +40,11 @@ static uint8_t s_queue_head = 0U;
 /** @brief 队列中当前的报文数。 */
 static uint8_t s_queue_count = 0U;
 /** @brief 协议错误累计数，供 STATUS 上报。 */
-static uint16_t s_error_count = 0U;
+static uint32_t s_error_count = 0U;
+/** @brief 最近一次收到字节的时刻，单位毫秒。 */
+static uint32_t s_last_byte_ms = 0U;
+/** @brief 最近一次由调用者告知的当前时刻，单位毫秒。 */
+static uint32_t s_now_ms = 0U;
 
 /* -------------------------------------------------------------------------- */
 /* CRC16/MODBUS */
@@ -66,18 +77,42 @@ uint16_t mcu_protocol_crc16(const uint8_t *data, size_t length)
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief 丢弃候选缓冲里最早的一个字节，用于重新寻找帧头。
+ * @brief 丢掉候选缓冲里从帧头到下一个候选帧头之前的所有字节。
  *
- * @note 校验失败时只能丢一个字节：真正的帧头可能就藏在刚丢掉的那串坏数据里，
- *       整段清空会把紧随其后的好帧一起丢掉。
+ * @note 同步失败时不能整段清空：真正的帧头可能就藏在刚丢掉的坏数据里。
+ *       这里直接把窗口滑到下一个 A5 5A；如果缓冲里没有别的候选帧头，
+ *       只保留最后一个字节（它可能是被截断的 A5），其余全部丢弃。
  */
-static void drop_leading_byte(void)
+static void drop_to_next_header(void)
 {
-    if (s_used > 0U)
+    if (s_used < 2U)
     {
-        memmove(s_buffer, &s_buffer[1], s_used - 1U);
-        --s_used;
+        return;
     }
+
+    for (size_t i = 1U; (i + 1U) < s_used; ++i)
+    {
+        if ((s_buffer[i] == MCU_PROTOCOL_SOF1) &&
+            (s_buffer[i + 1U] == MCU_PROTOCOL_SOF2))
+        {
+            memmove(s_buffer, &s_buffer[i], s_used - i);
+            s_used -= i;
+            return;
+        }
+    }
+
+    /* 没有找到新的帧头，只保留最后一个字节。 */
+    s_buffer[0] = s_buffer[s_used - 1U];
+    s_used = 1U;
+}
+
+/**
+ * @brief 把最前面 frame_size 个字节移出候选缓冲。
+ */
+static void consume_frame_bytes(size_t frame_size)
+{
+    memmove(s_buffer, &s_buffer[frame_size], s_used - frame_size);
+    s_used -= frame_size;
 }
 
 /**
@@ -97,7 +132,7 @@ static void try_extract_frames(void)
         if ((s_buffer[0] != MCU_PROTOCOL_SOF1) ||
             (s_buffer[1] != MCU_PROTOCOL_SOF2))
         {
-            drop_leading_byte(); /* 不是帧头，滑窗一格继续找 */
+            drop_to_next_header(); /* 不是帧头，跳到下一个候选帧头 */
             continue;
         }
         if (s_used < 8U)
@@ -110,7 +145,7 @@ static void try_extract_frames(void)
         if (payload_length > MCU_PROTOCOL_MAX_PAYLOAD)
         {
             ++s_error_count;
-            drop_leading_byte(); /* 长度非法，重新同步 */
+            drop_to_next_header(); /* 长度非法，重新同步 */
             continue;
         }
 
@@ -128,7 +163,7 @@ static void try_extract_frames(void)
         if (computed_crc != received_crc)
         {
             ++s_error_count;
-            drop_leading_byte(); /* CRC 不符，重新同步 */
+            drop_to_next_header(); /* CRC 不符，重新同步 */
             continue;
         }
 
@@ -143,8 +178,7 @@ static void try_extract_frames(void)
         ++s_queue_count;
 
         /* 把这一帧从缓冲里移走，剩余字节前移，继续找下一帧。 */
-        memmove(s_buffer, &s_buffer[frame_size], s_used - frame_size);
-        s_used -= frame_size;
+        consume_frame_bytes(frame_size);
     }
 }
 
@@ -158,10 +192,14 @@ void mcu_protocol_reset(void)
     s_queue_head = 0U;
     s_queue_count = 0U;
     s_error_count = 0U;
+    s_last_byte_ms = 0U;
 }
 
-size_t mcu_protocol_feed(const uint8_t *data, size_t length)
+size_t mcu_protocol_feed_at(const uint8_t *data, size_t length,
+                            uint32_t now_ms)
 {
+    s_now_ms = now_ms;
+
     /* 上次因队列满而留在缓冲里的完整报文，在调用者取走报文后先切出来。 */
     try_extract_frames();
 
@@ -190,10 +228,28 @@ size_t mcu_protocol_feed(const uint8_t *data, size_t length)
         memcpy(&s_buffer[s_used], &data[offset], chunk);
         s_used += chunk;
         offset += chunk;
+        s_last_byte_ms = now_ms;
 
         try_extract_frames();
     }
     return offset;
+}
+
+size_t mcu_protocol_feed(const uint8_t *data, size_t length)
+{
+    return mcu_protocol_feed_at(data, length, s_now_ms);
+}
+
+void mcu_protocol_poll(uint32_t now_ms)
+{
+    s_now_ms = now_ms;
+    if ((s_used > 0U) &&
+        ((uint32_t)(now_ms - s_last_byte_ms) >
+         (uint32_t)MCU_PROTOCOL_INTER_FRAME_GAP_MS))
+    {
+        /* 半帧超时：整段丢弃。已经解析好的报文队列不动。 */
+        s_used = 0U;
+    }
 }
 
 bool mcu_protocol_pop_frame(mcu_frame_t *frame)
@@ -210,7 +266,7 @@ bool mcu_protocol_pop_frame(mcu_frame_t *frame)
     return true;
 }
 
-uint16_t mcu_protocol_error_count(void)
+uint32_t mcu_protocol_error_count(void)
 {
     return s_error_count;
 }

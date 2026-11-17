@@ -190,6 +190,17 @@ def cmd_get(link, args):
             print("JTUNE mode=%d kp=%d low=%d brake=%d" % event[3:7])
 
 
+def read_pi(link, joint, timeout=1.0):
+    """发一条 JGET，等 JPI 回报，返回 15 个整数；超时返回 None。"""
+    link.send("JGET", motor=joint)
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        event = link.read(0.2)
+        if event and event[0] == "JPI" and event[2] == joint:
+            return list(event[3])
+    return None
+
+
 def cmd_set_pi(link, args):
     values = [int(v) for v in args.values]
     if len(values) != 15:
@@ -197,6 +208,17 @@ def cmd_set_pi(link, args):
                          "kp_fast1 kp_slow1 ki1 imax1 dmin1 dmax1 slowband run_pct flags")
     seq = link.send("JPI", motor=args.joint, duty=values)
     print(expect_ack(link, seq))
+    # 文本协议没有校验和，写完回读确认，免得一次串口噪声让参数看起来写了、
+    # 实际没写。
+    back = read_pi(link, args.joint)
+    if back is None:
+        print("回读失败：没有收到 JPI 回报，无法确认写入是否生效")
+    elif back == values:
+        print("回读一致，参数已生效")
+    else:
+        print("回读不一致，写入没有生效或只写了一部分：")
+        print("  期望 %s" % values)
+        print("  实际 %s" % back)
 
 
 def simulate():

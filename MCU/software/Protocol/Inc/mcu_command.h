@@ -32,6 +32,15 @@
 #include "mcu_protocol.h"
 
 /**
+ * @brief STATUS.status_flags 的扩展位：刚才的停机是运动期间失联触发的。
+ *
+ * 协议原文把 status_flags 规定为 0；这里只用从未占用的 bit0，不改变 STATUS
+ * 布局，老主机忽略它也不会解析错。该位一直保留到下一次 GET_STATUS 被读走，
+ * 用来区分“失联停机”和“硬件故障停机”。
+ */
+#define MCU_COMMAND_STATUS_FLAG_LINK_LOST (0x01U)
+
+/**
  * @brief 命令层需要的硬件动作，由上层实现并在初始化时注册。
  *
  * @note 前四个函数指针必须有效，其余扩展回调可为 NULL（表示不支持），
@@ -152,6 +161,18 @@ typedef struct
      */
     uint8_t (*output_status)(uint8_t command, uint8_t selector,
                              mcu_extended_status_t *status);
+
+    /**
+     * @brief 当前是否有电机在真正运动；可选，NULL 表示不支持。
+     *
+     * 失联保护的时限分两档：空闲 MCU_COMMAND_LINK_TIMEOUT_MS，运动中
+     * MCU_COMMAND_MOTION_LINK_TIMEOUT_MS。命令层自己也能跟踪 SET_MOTION 和
+     * 刚下发的关节动作，但关节可能提前到位、也可能被 STOP 取消，只有上层
+     * 知道真实状态；没注册该回调时退回命令层自己记的状态。
+     *
+     * @retval true 至少一个电机正在按指令运动（到位后的 HOLD 保持不算）。
+     */
+    bool (*is_motion_active)(void);
 } mcu_command_hw_t;
 
 /**
@@ -193,7 +214,13 @@ bool mcu_command_handle(const mcu_frame_t *request, mcu_frame_t *reply,
  * @retval true 本次调用刚刚触发了安全停止。
  * @retval false 链路正常，或已经停过一次、不需要重复停。
  *
- * @note 连续 MCU_COMMAND_LINK_TIMEOUT_MS 没有收到合法请求时调用 safe_stop()，
+ * @note 时限分两档：空闲时用 MCU_COMMAND_LINK_TIMEOUT_MS（5 秒），有电机在
+ *       运动时用 MCU_COMMAND_MOTION_LINK_TIMEOUT_MS（1.5 秒），避免失联后
+ *       继续跑满 5 秒。运动状态优先问 hw->is_motion_active，没注册则用命令层
+ *       自己记的 SET_MOTION / 刚下发的关节动作，关节动作还受
+ *       MCU_ARM_MOVE_TIMEOUT_MS 限制。
+ * @note 停机时置 STATUS.status_flags 的 MCU_COMMAND_STATUS_FLAG_LINK_LOST 位，
+ *       一直保留到下一次 GET_STATUS 被读走，主机据此区分失联停机与硬件故障。
  *       灯光保持最近状态；一旦重新收到合法请求，计时重新开始。
  */
 bool mcu_command_poll(uint32_t now_ms);

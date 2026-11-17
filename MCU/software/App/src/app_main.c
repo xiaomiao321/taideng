@@ -33,39 +33,25 @@
 #include "main.h"
 #include "mcu_command.h"
 
-/** @brief 单次接收的空闲/超时时间，单位毫秒。 */
-#define APP_UART_RX_TIMEOUT_MS (1000U)
-
-/** @brief 单次发送的超时时间，单位毫秒。 */
+/** @brief 发送参数，BSP 已改为非阻塞队列，这个值不再生效，保留以便日志对照。 */
 #define APP_UART_TX_TIMEOUT_MS (100U)
 
 /** @brief 通信指示灯每次闪烁的持续时间，单位毫秒。 */
 #define APP_COMM_LED_PULSE_MS (50U)
 
-/** @brief 重新启动接收失败后，下一次重试前的等待时间，单位毫秒。 */
-#define APP_UART_REARM_RETRY_MS (100U)
-
 /* -------------------------------------------------------------------------- */
 /* 内部状态                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/**
- * @brief USART1 双接收缓冲，容量沿用 BSP 允许的最大值。
- *
- * 一块交给 UART 接收下一批字节，另一块留给主循环慢慢解析；
- * 解析过程中可能要多次发送回复，期间不能让新数据覆盖还没喂完的字节。
- */
-static uint8_t s_rx_buffers[2][BSP_LINUX_UART_RX_MAX_SIZE];
-/** @brief 当前交给 UART 接收的缓冲下标，0 或 1。 */
-static uint8_t s_rx_index = 0U;
 /** @brief 发送缓冲，最大一帧即可。 */
 static uint8_t s_tx_buffer[MCU_PROTOCOL_MAX_FRAME_SIZE];
-/** @brief 当前是否有一次接收正在进行。 */
-static bool s_is_receive_started = false;
-/** @brief 上一次启动接收是否失败；用于只在状态变化时打一次日志。 */
-static bool s_is_rearm_failing = false;
-/** @brief 启动接收失败后，允许下一次重试的时刻。 */
-static uint32_t s_rearm_retry_ms = 0U;
+/**
+ * @brief 取接收数据的暂存块。
+ *
+ * BSP 内部已经是双缓冲乒乓接收，这里只需要一块小栈缓冲把数据搬出来喂给解析器；
+ * 每轮先取空，主循环再处理，处理期间接收照常进行，不再有重新启动接收的空窗。
+ */
+static uint8_t s_rx_chunk[64];
 /** @brief USART1 收发错误累计数，只用于日志排查。 */
 static uint32_t s_uart_error_count = 0U;
 /** @brief SET_LIGHT 最近一次设定的统一亮度 0～100，STATUS 回读用。 */
@@ -157,6 +143,18 @@ static void hw_read_status(mcu_status_t *status)
     status->target_speed = s_chassis.speed;
     status->fault_flags = joint_fault_flags(joint_service_joints()) |
                           chassis_fault_flags(&s_chassis);
+}
+
+/**
+ * @brief 现在是否有电机在动：关节在运动中或底盘有动作。
+ *
+ * 传给协议命令层决定失联时限：运动中用 1.5 秒，空闲用 5 秒。到位后的 HOLD
+ * 保持不算运动，否则一次定位之后会一直要求主机高频发帧。
+ */
+static bool hw_is_motion_active(void)
+{
+    return joint_any_moving(joint_service_joints()) ||
+           (s_chassis.motion != MCU_PROTOCOL_MOTION_STOP);
 }
 
 /** @brief 取消全部关节运动、停下底盘并让八路电机滑行；返回是否全部成功。 */
@@ -535,6 +533,7 @@ static const mcu_command_hw_t g_mcu_hw = {
     .buzzer = hw_buzzer,
     .indicator = hw_indicator,
     .output_status = hw_output_status,
+    .is_motion_active = hw_is_motion_active,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -624,39 +623,6 @@ static void update_comm_led(uint32_t now_ms)
 }
 
 /**
- * @brief 在当前接收缓冲上启动一次 USART1 接收。
- *
- * @param[in] now_ms 当前时刻。
- *
- * @note 失败不进 Error_Handler：串口出错是现场常态（插拔线、上电毛刺），
- *       整机停死只能靠复位恢复。这里记录错误，APP_UART_REARM_RETRY_MS
- *       后由 app_run_once() 重试；一直收不到报文时由命令层的失联保护停电机。
- */
-static void arm_receive(uint32_t now_ms)
-{
-    bsp_status_t status = bsp_linux_uart_start_receive(
-        s_rx_buffers[s_rx_index], sizeof(s_rx_buffers[s_rx_index]),
-        APP_UART_RX_TIMEOUT_MS);
-    if (status != BSP_OK)
-    {
-        if (!s_is_rearm_failing)
-        {
-            LOG_WARN("APP", "uart1 rx start failed: %s",
-                     bsp_status_str(status));
-        }
-        s_is_rearm_failing = true;
-        s_rearm_retry_ms = now_ms + APP_UART_REARM_RETRY_MS;
-        return;
-    }
-    if (s_is_rearm_failing)
-    {
-        LOG_INFO("APP", "uart1 rx restarted");
-    }
-    s_is_rearm_failing = false;
-    s_is_receive_started = true;
-}
-
-/**
  * @brief 取出并处理解析器队列里的全部请求，需要时发送回复。
  *
  * @retval true 至少处理了一条请求。
@@ -725,7 +691,9 @@ static void process_received(const uint8_t *data, size_t length)
 
     while (has_progress)
     {
-        size_t consumed = mcu_protocol_feed(&data[offset], length - offset);
+        /* 带上时间戳，mcu_protocol_poll() 才能判断半帧超时（A2 修复）。 */
+        size_t consumed =
+            mcu_protocol_feed_at(&data[offset], length - offset, HAL_GetTick());
         offset += consumed;
         bool has_handled = handle_pending_frames();
         /* 既没取走字节也没处理请求就停下，避免任何意外情况下死循环。 */
@@ -783,7 +751,6 @@ void app_init(void)
 
     mcu_protocol_reset();
     mcu_command_init(&g_mcu_hw, HAL_GetTick());
-    arm_receive(HAL_GetTick());
     LOG_INFO("APP", "protocol ready");
 }
 
@@ -791,38 +758,32 @@ void app_run_once(void)
 {
     uint32_t now_ms = HAL_GetTick();
 
-    if (!s_is_receive_started && ((int32_t)(now_ms - s_rearm_retry_ms) >= 0))
+    /* 推进发送队列，并从接收错误中恢复（双缓冲乒乓接收由 BSP 自己续挂）。 */
+    if (bsp_linux_uart_update() != BSP_OK)
     {
-        arm_receive(now_ms);
+        LOG_WARN("APP", "uart1 rx restart failed");
     }
 
-    if (s_is_receive_started)
+    /* 处理这一轮收到的全部字节。解析器半帧超时由 poll() 负责清理。 */
+    size_t received = 0U;
+    while ((received = bsp_linux_uart_read(s_rx_chunk, sizeof(s_rx_chunk))) >
+           0U)
     {
-        size_t received_length = 0U;
-        bsp_status_t status = bsp_linux_uart_receive_update(&received_length);
-        if (status != BSP_BUSY)
-        {
-            s_is_receive_started = false;
-            const uint8_t *received = s_rx_buffers[s_rx_index];
-            s_rx_index ^= 1U;
+        process_received(s_rx_chunk, received);
+    }
+    mcu_protocol_poll(now_ms);
 
-            if ((status != BSP_OK) && (status != BSP_ERR_TIMEOUT))
-            {
-                /* 帧错误、噪声、溢出等：丢掉这一批，重新接收即可。 */
-                ++s_uart_error_count;
-                LOG_WARN("APP", "uart1 rx failed: %s (errors=%lu)",
-                         bsp_status_str(status),
-                         (unsigned long)s_uart_error_count);
-            }
-
-            /* 先在另一块缓冲上重新接收再处理：处理和回复期间不漏主机下一帧。 */
-            arm_receive(now_ms);
-
-            if ((status == BSP_OK) && (received_length > 0U))
-            {
-                process_received(received, received_length);
-            }
-        }
+    /* 收发错误只在变化时打一条日志，避免日志本身再占带宽。 */
+    uint32_t uart_errors = bsp_linux_uart_error_count() +
+                           bsp_linux_uart_rx_overflow_count() +
+                           bsp_linux_uart_tx_overflow_count();
+    if (uart_errors != s_uart_error_count)
+    {
+        s_uart_error_count = uart_errors;
+        LOG_WARN("APP", "uart1 stats: err=%lu rx_ovf=%lu tx_drop=%lu",
+                 (unsigned long)bsp_linux_uart_error_count(),
+                 (unsigned long)bsp_linux_uart_rx_overflow_count(),
+                 (unsigned long)bsp_linux_uart_tx_overflow_count());
     }
 
     check_home_key();
@@ -832,7 +793,11 @@ void app_run_once(void)
         LOG_WARN("APP", "joint fault, flags 0x%02X",
                  (unsigned)joint_fault_flags(joint_service_joints()));
     }
-    (void)mcu_command_poll(HAL_GetTick());
+    if (mcu_command_poll(HAL_GetTick()))
+    {
+        /* 运动期间失联 1.5 秒、空闲 5 秒触发；已经停机并挂上 LINK_LOST 标志。 */
+        LOG_WARN("APP", "link timeout, all motors stopped");
+    }
     update_comm_led(HAL_GetTick());
     update_buzzer(HAL_GetTick());
 }

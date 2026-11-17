@@ -41,6 +41,9 @@ _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
 /** @brief 报告发送队列丢弃情况的最短间隔，单位毫秒。 */
 #define CONSOLE_TX_DROP_REPORT_MS (1000U)
 
+/** @brief STAT 统计行的上报周期，单位毫秒。 */
+#define CONSOLE_STAT_PERIOD_MS (5000U)
+
 /** @brief 每次 update 最多处理的接收字节数，限制单次循环耗时。 */
 #define CONSOLE_RX_BUDGET (128U)
 
@@ -81,6 +84,16 @@ static uint32_t s_tx_error_count = 0U;
 /** @brief 已报告过的发送丢弃数，以及上一次报告的时刻。 */
 static uint32_t s_seen_tx_drops = 0U;
 static uint32_t s_tx_drop_report_ms = 0U;
+/** @brief 主循环上一次执行的时刻，用来统计循环间隔的峰值。 */
+static uint32_t s_last_loop_ms = 0U;
+/** @brief 上一行 STAT 之后主循环间隔的峰值，单位毫秒。 */
+static uint32_t s_max_loop_gap_ms = 0U;
+/** @brief 上一行 STAT 的时刻。 */
+static uint32_t s_last_stat_ms = 0U;
+/** @brief 上一次发出 JT 行的采样时刻，用于按 JOINT_TRACE_MIN_PERIOD_MS 抽稀。 */
+static uint32_t s_trace_last_ms = 0U;
+/** @brief 是否已经发过 JT 行；采样时刻可以为 0，不能拿它当"没发过"的标记。 */
+static bool s_has_trace_sent = false;
 
 /** @brief JTRACE 打开时每次采样上报一行 JT。 */
 static bool s_is_trace_on = false;
@@ -950,6 +963,15 @@ static void report_trace(void)
         return;
     }
     s_trace_sample_ms = s_joints->sample_ms;
+    /* 每个采样都有一行太密时按 JOINT_TRACE_MIN_PERIOD_MS 抽稀。 */
+    if (s_has_trace_sent &&
+        ((uint32_t)(s_joints->sample_ms - s_trace_last_ms) <
+         JOINT_TRACE_MIN_PERIOD_MS))
+    {
+        return;
+    }
+    s_trace_last_ms = s_joints->sample_ms;
+    s_has_trace_sent = true;
     const joint_state_t *s = &s_joints->states[s_joint_focus];
     int16_t duty = 0;
     (void)bsp_motor_hbridge_get_duty(
@@ -985,6 +1007,41 @@ static void report_tx_drops(uint32_t now)
              (unsigned long)(drops - s_seen_tx_drops), (unsigned long)drops);
     s_seen_tx_drops = drops;
     s_tx_drop_report_ms = now;
+}
+
+/**
+ * @brief 记录主循环间隔的峰值，并每 CONSOLE_STAT_PERIOD_MS 上报一行统计：
+ *        STAT 时刻 发送丢弃行数 接收溢出字节数 回复入队失败数 接收错误数 循环间隔峰值。
+ *
+ * 前四项是上电以来的累计值；循环间隔峰值只统计上一行 STAT 之后的这一段，
+ * 单位毫秒。它反映关节控制被拖住的最长时间：Flash 擦除、长命令都会把它顶高。
+ */
+static void report_stat(uint32_t now)
+{
+    if (s_last_loop_ms != 0U)
+    {
+        uint32_t gap = now - s_last_loop_ms;
+        if (gap > s_max_loop_gap_ms)
+        {
+            s_max_loop_gap_ms = gap;
+        }
+    }
+    s_last_loop_ms = now;
+    if ((uint32_t)(now - s_last_stat_ms) < CONSOLE_STAT_PERIOD_MS)
+    {
+        return;
+    }
+    s_last_stat_ms = now;
+    char out[96];
+    (void)snprintf(out, sizeof(out), "STAT %lu %lu %lu %lu %lu %lu\r\n",
+                   (unsigned long)now,
+                   (unsigned long)bsp_debug_uart_tx_drop_count(),
+                   (unsigned long)bsp_debug_uart_rx_overflow_count(),
+                   (unsigned long)s_tx_error_count,
+                   (unsigned long)bsp_debug_uart_rx_error_count(),
+                   (unsigned long)s_max_loop_gap_ms);
+    send_status(out);
+    s_max_loop_gap_ms = 0U;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1045,6 +1102,7 @@ void debug_console_update(void)
     process_console_rx();
     check_control();
 
+    report_stat(HAL_GetTick());
     report_trace();
 
     uint32_t now = HAL_GetTick();

@@ -93,6 +93,14 @@ $suites = @(
         )
     }
     @{
+        Name = 'linux_uart'
+        Includes = @((Join-Path $projectDir 'HostTest\fake_hal'))
+        Sources = @(
+            (Join-Path $projectDir 'BSP\Src\bsp_linux_uart.c')
+            (Join-Path $projectDir 'HostTest\linux_uart_selftest.c')
+        )
+    }
+    @{
         Name = 'protocol'
         Sources = @(
             (Join-Path $projectDir 'Protocol\Src\mcu_protocol.c')

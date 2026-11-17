@@ -245,6 +245,8 @@ typedef struct
     int32_t target;  /**< 目标角度，毫度。 */
     int duty;        /**< 当前输出占空比。 */
     uint16_t spread; /**< 最近一次采样中各样本的极差，反映噪声。 */
+    /** @brief 连续超出 JOINT_POT_SPREAD_MAX 的采样次数，用于判定传感器故障。 */
+    uint8_t spread_bad;
     joint_tune_t tune;
     joint_traj_cfg_t traj;
     joint_phase_t phase;
@@ -289,8 +291,17 @@ bool joint_cal_valid(const joint_cal_t *c);
 /** @brief 按标定把 ADC 读数换算成角度，毫度。 */
 int32_t joint_angle(const joint_cal_t *c, uint16_t raw);
 
-/** @brief 是否有任一关节正在运动。 */
+/** @brief 是否有任一关节还在占用（运动中或到位后的 HOLD 监视）。 */
 bool joint_any_active(const joint_control_t *j);
+
+/**
+ * @brief 是否有任一关节正在真正运动（HOLD 保持不算）。
+ *
+ * 与 joint_any_active 的区别：到位后 PI 会长期保持 HOLD 盯漂移，这时电机基本
+ * 已经停了。失联保护、看门狗这类“还要不要人盯着”的判断要用本函数，否则运动
+ * 结束后会一直要求主机高频发帧。
+ */
+bool joint_any_moving(const joint_control_t *j);
 
 /** @brief 写入标定；返回 NULL 表示成功，否则为错误名（该关节运动中为 BUSY）。 */
 const char *joint_calibrate(joint_control_t *j, unsigned index, joint_cal_t c);

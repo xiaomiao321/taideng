@@ -44,6 +44,18 @@
 /** @brief 已解析报文的排队深度。 */
 #define MCU_PROTOCOL_FRAME_QUEUE_SIZE (4U)
 
+/**
+ * @brief 半帧等待时长，单位毫秒。
+ *
+ * 超过这个时间没有收到新字节，就认为上一帧已被截断（主机复位、线缆抖动、
+ * 波特率不匹配等），清空候选缓冲重新同步，避免半帧一直占着缓冲把后面
+ * 正常的帧一起吃掉。
+ *
+ * @note 必须大于一帧在最大波特率下的传输时间（115200 下 74 字节约 6.4 ms），
+ *       并留出主机发送线程的调度抖动余量。
+ */
+#define MCU_PROTOCOL_INTER_FRAME_GAP_MS (25U)
+
 /** @brief 本模块实现的协议版本。 */
 #define MCU_PROTOCOL_VERSION (0x02U)
 
@@ -283,6 +295,29 @@ void mcu_protocol_reset(void);
 size_t mcu_protocol_feed(const uint8_t *data, size_t length);
 
 /**
+ * @brief 带时间戳的 feed：额外记录最近一次收到字节的时刻，供 poll 判断半帧。
+ *
+ * @param[in] data 收到的字节首地址，可以为 NULL。
+ * @param[in] length 本次收到的字节数。
+ * @param[in] now_ms 当前时刻，单位毫秒；允许回绕。
+ *
+ * @return 与 mcu_protocol_feed() 相同。
+ */
+size_t mcu_protocol_feed_at(const uint8_t *data, size_t length,
+                            uint32_t now_ms);
+
+/**
+ * @brief 周期调用：半帧超时后丢弃候选缓冲，重新寻找帧头。
+ *
+ * @param[in] now_ms 当前时刻，单位毫秒；允许回绕。
+ *
+ * @note 必须在主循环里周期调用（建议每轮都调），否则收完半帧就断线的场景
+ *       会一直占用最多 74 字节的缓冲，后续正常帧被吞掉。
+ * @note 只清候选缓冲，不清已解析的报文队列和错误计数。
+ */
+void mcu_protocol_poll(uint32_t now_ms);
+
+/**
  * @brief 取出队列中最早的一条完整报文。
  *
  * @param[out] frame 输出报文，不允许为 NULL。
@@ -300,8 +335,9 @@ bool mcu_protocol_pop_frame(mcu_frame_t *frame);
  * @return 自上次 reset 以来被丢弃的非法帧数量；无错误时为 0。
  *
  * @note 计什么由实现决定，但至少要包含 CRC 校验失败和长度非法的帧。
+ * @note 返回 32 位计数，长时间运行不会回绕成 0（STATUS 报文里只带低 16 位）。
  */
-uint16_t mcu_protocol_error_count(void);
+uint32_t mcu_protocol_error_count(void);
 
 /**
  * @brief 构造一条 ACK 应答报文。

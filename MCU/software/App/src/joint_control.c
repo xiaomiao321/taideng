@@ -199,6 +199,18 @@ bool joint_any_active(const joint_control_t *j)
     }
     return false;
 }
+bool joint_any_moving(const joint_control_t *j)
+{
+    for (unsigned i = 0; i < JOINT_COUNT; ++i)
+    {
+        /* 到位后的 HOLD 只是压着位置等漂移纠偏，不算“正在运动”。 */
+        if (j->states[i].motion.active && !j->states[i].motion.holding)
+        {
+            return true;
+        }
+    }
+    return false;
+}
 static bool output(joint_control_t *j, unsigned i, int duty)
 {
     joint_state_t *s = &j->states[i];
@@ -325,6 +337,8 @@ static bool finish(joint_control_t *j, unsigned i, const char *result,
     s->duty = 0;
     s->motion.braking = false;
     s->motion.active = false;
+    /* 出故障时把到位后的漂移监视也关掉，否则 holding 会让 tick_hold 继续纠偏。 */
+    s->motion.holding = false;
     if (!ok)
     {
         result = "HARDWARE";
@@ -939,8 +953,40 @@ void joint_feed(joint_control_t *j, const uint16_t *raw, const uint16_t *spread,
         joint_state_t *s = &j->states[i];
         s->raw = raw[i];
         s->spread = spread ? spread[i] : 0U;
+
         if (!s->calibrated)
         {
+            /* 未标定的关节可能根本没接电位器，悬空的输入本来就乱跳，
+             * 不能因此报故障：全局故障位会挡住其他关节的运动。 */
+            s->spread_bad = 0U;
+            reset_speed(s);
+            continue;
+        }
+
+        /* 抖得离谱的读数不能拿来闭环（问题清单 B4）。 */
+        if (s->spread > JOINT_POT_SPREAD_MAX)
+        {
+            if (s->spread_bad < 0xFFU)
+            {
+                ++s->spread_bad;
+            }
+        }
+        else
+        {
+            s->spread_bad = 0U;
+        }
+        if ((s->spread_bad >= JOINT_POT_SPREAD_SAMPLES) &&
+            ((s->faults & JOINT_FAULT_SENSOR) == 0U))
+        {
+            if (s->motion.active || s->motion.holding)
+            {
+                (void)finish(j, i, "SENSOR", JOINT_FAULT);
+            }
+            else
+            {
+                s->faults |= JOINT_FAULT_SENSOR;
+                s->fault = "SENSOR";
+            }
             reset_speed(s);
             continue;
         }

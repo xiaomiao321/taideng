@@ -216,6 +216,12 @@ def parse(line):
             return "STATE", tick, motor, duty, bool(pending), bool(locked)
         if p[0] == "ADCERR" and len(p) == 3:
             return "ADCERR", int(p[1]), int(p[2])
+        if p[0] == "STAT" and len(p) == 7:
+            # 时刻、发送丢弃行数、接收溢出、回复入队失败、接收错误、主循环间隔峰值 ms
+            values = tuple(map(int, p[1:]))
+            if any(v < 0 for v in values):
+                raise ValueError()
+            return ("STAT", *values)
         if p[0] == "EVENT" and len(p) == 2:
             return "EVENT", p[1]
     except ValueError:

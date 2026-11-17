@@ -78,10 +78,13 @@ class SerialWorker(threading.Thread):
                     send("PING")
                     next_ping = now + 0.2
                 if ready:
-                    try:
-                        send(*self.commands.get_nowait())
-                    except queue.Empty:
-                        pass
+                    # 每轮最多发 4 条：一轮只发一条时，六个关节的定位命令要相隔
+                    # 好几轮才发完，各关节启动时刻差出上百毫秒。
+                    for _ in range(4):
+                        try:
+                            send(*self.commands.get_nowait())
+                        except queue.Empty:
+                            break
                 buf.extend(serial_port.read(256))
                 if len(buf) > 4096:
                     raise ValueError("串口数据行过长")

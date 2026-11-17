@@ -299,6 +299,67 @@ static void test_bad_crc_resync(void)
     check(mcu_protocol_error_count() >= 1U, "bad-crc: error counted");
 }
 
+/** @brief 坏帧后面紧跟好帧、在同一批字节里：直接跳到下一个帧头，好帧不丢。 */
+static void test_resync_within_one_chunk(void)
+{
+    uint8_t stream[sizeof(k_bad_crc) + sizeof(k_motion_stop) + 3U];
+    mcu_frame_t frame = {0};
+
+    memcpy(stream, k_bad_crc, sizeof(k_bad_crc));
+    memcpy(&stream[sizeof(k_bad_crc)], k_motion_stop, sizeof(k_motion_stop));
+    /* 末尾再带半个帧头和噪声：不能把它当成新帧，也不能丢掉最后的 A5。 */
+    stream[sizeof(stream) - 3U] = 0x11U;
+    stream[sizeof(stream) - 2U] = 0x22U;
+    stream[sizeof(stream) - 1U] = MCU_PROTOCOL_SOF1;
+
+    mcu_protocol_reset();
+    mcu_protocol_feed(stream, sizeof(stream));
+    check(mcu_protocol_pop_frame(&frame) && (frame.seq == 0x03U),
+          "resync: good frame after a bad one in the same chunk");
+    check(!mcu_protocol_pop_frame(&frame), "resync: nothing else parsed");
+
+    /* 上一批末尾的 A5 和这一批开头的 5A 拼成帧头。 */
+    mcu_protocol_feed(&k_get_status[1], sizeof(k_get_status) - 1U);
+    check(mcu_protocol_pop_frame(&frame) && (frame.seq == 0x04U),
+          "resync: header split across chunks survives");
+}
+
+/** @brief 半帧超过帧间超时就丢弃，不会把后面的好帧拖住。 */
+static void test_half_frame_timeout(void)
+{
+    mcu_frame_t frame = {0};
+
+    /* 超时之内续上：仍是同一帧。 */
+    mcu_protocol_reset();
+    mcu_protocol_feed_at(k_set_light, 5U, 100U);
+    mcu_protocol_poll(100U + MCU_PROTOCOL_INTER_FRAME_GAP_MS);
+    mcu_protocol_feed_at(&k_set_light[5], sizeof(k_set_light) - 5U,
+                         101U + MCU_PROTOCOL_INTER_FRAME_GAP_MS);
+    check(mcu_protocol_pop_frame(&frame) && (frame.seq == 0x01U),
+          "gap: frame continued within the gap is kept");
+
+    /* 半帧之后主机断了一会儿再发新帧：半帧清掉，新帧立即解析出来。
+     * 不清的话半帧的长度字段会读到新帧里的字节，一直等不存在的后续数据。 */
+    mcu_protocol_feed_at(k_set_light, 5U, 1000U);
+    mcu_protocol_poll(1001U + MCU_PROTOCOL_INTER_FRAME_GAP_MS);
+    mcu_protocol_feed_at(k_get_status, sizeof(k_get_status), 1100U);
+    check(mcu_protocol_pop_frame(&frame) && (frame.seq == 0x04U),
+          "gap: stale half frame dropped, next frame parsed at once");
+
+    /* 时刻回绕时也按差值判断。 */
+    mcu_protocol_feed_at(k_set_light, 5U, 0xFFFFFFF0U);
+    mcu_protocol_poll(0xFFFFFFF0U + MCU_PROTOCOL_INTER_FRAME_GAP_MS + 1U);
+    mcu_protocol_feed_at(k_motion_stop, sizeof(k_motion_stop), 40U);
+    check(mcu_protocol_pop_frame(&frame) && (frame.seq == 0x03U),
+          "gap: works across tick wrap");
+
+    /* 空缓冲时 poll 不做任何事，已解析的报文也不受影响。 */
+    mcu_protocol_feed_at(k_get_status, sizeof(k_get_status), 200U);
+    mcu_protocol_poll(5000U);
+    check(mcu_protocol_pop_frame(&frame) && (frame.seq == 0x04U),
+          "gap: parsed frames survive poll");
+}
+
 /** @brief LEN 超过 64 的帧非法，同样要丢弃并重新同步。 */
 static void test_length_too_large(void)
 {
@@ -569,6 +630,8 @@ int main(void)
     test_queue_full_keeps_bytes();
     test_noise_prefix();
     test_bad_crc_resync();
+    test_resync_within_one_chunk();
+    test_half_frame_timeout();
     test_length_too_large();
     test_payload_contains_sof();
     test_version_not_filtered();

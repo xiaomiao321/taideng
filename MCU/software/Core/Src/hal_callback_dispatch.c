@@ -56,14 +56,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART3)
-    {
-        bsp_debug_uart_on_tx_cplt_from_isr();
-    }
-}
-
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART3)
@@ -73,6 +65,18 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     else if (huart->Instance == USART1)
     {
         bsp_linux_uart_on_error_from_isr();
+    }
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART3)
+    {
+        bsp_debug_uart_on_tx_cplt_from_isr();
+    }
+    else if (huart->Instance == USART1)
+    {
+        bsp_linux_uart_on_tx_cplt_from_isr();
     }
 }
 

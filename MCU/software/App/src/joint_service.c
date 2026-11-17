@@ -29,6 +29,13 @@ _Static_assert(JOINT_CAL_BLOB_SIZE % 4U == 0U && JOINT_CAL_BLOB_SIZE <= 1024U &&
 /** @brief 单次六路 ADC 扫描的等待超时，单位毫秒。 */
 #define ADC_TIMEOUT_MS (5U)
 
+/**
+ * @brief ADC 排名顺序到关节下标的映射，见 app_config.h 的 JOINT_ADC_ORDER。
+ *
+ * 默认恒等；板子实测 M1/M3 对调时只改这个宏。
+ */
+static const uint8_t k_adc_order[BSP_ADC_CHANNEL_COUNT] = JOINT_ADC_ORDER;
+
 static joint_control_t s_joints;
 static bool s_is_adc_ok = false;
 /** @brief 标定参数的 Flash 存储是否可用。 */
@@ -105,8 +112,14 @@ static unsigned load_calibration(void)
     return restored;
 }
 
-/** @brief 过采样一次六路电位器，滤波后交给关节控制。 */
-static void sample(void)
+/**
+ * @brief 过采样一次六路电位器，滤波后交给关节控制。
+ *
+ * @param[in] sample_ms 本次采样的起始时刻。关节控制用这个时刻算 dt 和制动
+ *            距离：16 次过采样加两级滤波要花十几毫秒，用采完的时刻会把
+ *            这段时间当成已经过去，dt 偏大、制动距离算得偏短（问题清单 B2）。
+ */
+static void sample(uint32_t sample_ms)
 {
     static uint16_t samples[POT_OVERSAMPLE][BSP_ADC_CHANNEL_COUNT];
     s_is_pot_valid = s_is_adc_ok;
@@ -116,9 +129,17 @@ static void sample(void)
     }
     if (s_is_pot_valid)
     {
+        uint16_t ch_raw[BSP_ADC_CHANNEL_COUNT];
+        uint16_t ch_spread[BSP_ADC_CHANNEL_COUNT];
         uint16_t now_raw[BSP_ADC_CHANNEL_COUNT];
         joint_filter((const uint16_t (*)[JOINT_COUNT])samples, POT_OVERSAMPLE,
-                     now_raw, s_pot_spread);
+                     ch_raw, ch_spread);
+        /* 换成关节顺序：以后发现某两路接反了只改 JOINT_ADC_ORDER。 */
+        for (unsigned i = 0; i < BSP_ADC_CHANNEL_COUNT; ++i)
+        {
+            now_raw[k_adc_order[i]] = ch_raw[i];
+            s_pot_spread[k_adc_order[i]] = ch_spread[i];
+        }
         /* 再和前两次取中值，去掉单次 2～3° 的尖峰，代价是 10ms 延迟。 */
         for (unsigned i = 0; i < BSP_ADC_CHANNEL_COUNT; ++i)
         {
@@ -138,8 +159,7 @@ static void sample(void)
     {
         s_pot_history_count = 0U;
     }
-    joint_feed(&s_joints, s_pot_cache, s_pot_spread, s_is_pot_valid,
-               HAL_GetTick());
+    joint_feed(&s_joints, s_pot_cache, s_pot_spread, s_is_pot_valid, sample_ms);
 }
 
 unsigned joint_service_init(void (*reply)(const char *line))
@@ -162,7 +182,8 @@ bool joint_service_update(void)
     if ((uint32_t)(now - s_last_adc_ms) >= POT_SAMPLE_PERIOD_MS)
     {
         s_last_adc_ms = now;
-        sample();
+        /* 传采样开始时刻：滤波链有十几毫秒延迟，用结束时刻会让 dt 虚高。 */
+        sample(now);
     }
     return joint_tick(&s_joints, HAL_GetTick());
 }

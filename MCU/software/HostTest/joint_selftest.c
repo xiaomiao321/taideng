@@ -951,6 +951,57 @@ static void approach_blob_test(void)
     assert(joint_cal_import(&migrated, v3, sizeof(v3)) == 0U);
 }
 
+/** 读数抖得离谱：连续几次极差超限就报传感器故障；只管已标定的关节。 */
+static void spread_test(void)
+{
+    joint_control_t j = fresh(normal());
+    uint16_t raw[6] = {2000, 2000, 2000, 2000, 2000, 2000};
+    uint16_t noisy[6], quiet[6] = {3, 3, 3, 3, 3, 3};
+    for (unsigned i = 0; i < 6; ++i)
+    {
+        noisy[i] = JOINT_POT_SPREAD_MAX + 1U;
+    }
+    uint32_t now = 0;
+    /* 差一次不到次数，中间好一次就重新数。 */
+    for (unsigned i = 0; i + 1U < JOINT_POT_SPREAD_SAMPLES; ++i)
+    {
+        joint_feed(&j, raw, noisy, true, now += 10);
+    }
+    joint_feed(&j, raw, quiet, true, now += 10);
+    for (unsigned i = 0; i + 1U < JOINT_POT_SPREAD_SAMPLES; ++i)
+    {
+        joint_feed(&j, raw, noisy, true, now += 10);
+    }
+    assert(j.states[0].faults == 0);
+    joint_feed(&j, raw, noisy, true, now += 10);
+    assert(j.states[0].faults == JOINT_FAULT_SENSOR &&
+           !strcmp(j.states[0].fault, "SENSOR"));
+    /* 没标定的关节可能没接电位器，悬空乱跳不算故障，也不挡住全局故障位。 */
+    for (unsigned i = 1; i < JOINT_COUNT; ++i)
+    {
+        assert(j.states[i].faults == 0);
+    }
+    assert(joint_fault_flags(&j) == JOINT_FAULT_SENSOR);
+    /* 读数还在抖时清不掉：下一次采样又锁存；安静下来才清得掉。 */
+    joint_clear_faults(&j, now);
+    joint_feed(&j, raw, noisy, true, now += 10);
+    assert(j.states[0].faults == JOINT_FAULT_SENSOR);
+    joint_feed(&j, raw, quiet, true, now += 10);
+    joint_clear_faults(&j, now);
+    joint_feed(&j, raw, quiet, true, now += 10);
+    assert(j.states[0].faults == 0);
+
+    /* 运动中出现：停机并报 JRESULT SENSOR。 */
+    assert(!joint_move(&j, 40, 0, 150000, 10000, now));
+    reply[0] = 0;
+    for (unsigned i = 0; i < JOINT_POT_SPREAD_SAMPLES; ++i)
+    {
+        joint_feed(&j, raw, noisy, true, now += 10);
+    }
+    assert(strstr(reply, "SENSOR") && !joint_any_active(&j) &&
+           output_duty == 0 && j.states[0].phase == JOINT_FAULT);
+}
+
 /** 用带惯性的模型跑一次比例积分式定位，直到报 REACHED；返回到达时刻。 */
 static uint32_t pi_run(joint_control_t *j, double *raw, int32_t target,
                        uint32_t timeout_ms, uint32_t start_ms)
@@ -993,6 +1044,8 @@ static void pi_test(void)
     double raw = 2000;
     uint32_t reached = pi_run(&j, &raw, 120000, 20000, 0);
     assert(j.states[0].phase == JOINT_HOLD && joint_any_active(&j));
+    /* HOLD 只是盯着漂移，不算正在运动：失联保护不该因此用运动中的时限。 */
+    assert(!joint_any_moving(&j));
     assert(j.states[0].angle >= 118000 && j.states[0].angle <= 122000);
     assert(!strcmp(joint_set_tune(&j, 0, j.states[0].tune), "BUSY"));
     uint32_t now = reached;
@@ -1309,6 +1362,7 @@ int main(void)
     fault_latch_test();
     outside_limit_test();
     pi_test();
+    spread_test();
     puts("joint control: calibration, inverse sensor, simulated plant, "
          "arrival, stale ADC, limits, direction, stall, timeout, cancellation, "
          "rollover, calibration export/import, nominal calibration, limits, "
