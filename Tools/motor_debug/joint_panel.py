@@ -5,16 +5,18 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from joint_model import Calibration, Nominal, millidegrees, decode_profile, device_profile, query_order
 from shell_commands import percent, kilohms
+from joint_tuning import (PI_COLUMNS, PI_DIRECTIONS, PI_KEYS, pi_texts, pi_values, pi_summary, metrics_text,
+                          StepCapture, BacklashRun)
 
 DIRECTIONS = {"正转使角度增大": 1, "正转使角度减小": -1}
-MODES = {"开关式": 0, "比例式": 1, "轨迹式": 2}
+MODES = {"开关式": 0, "比例式": 1, "轨迹式": 2, "比例积分式": 3}
 APPROACHES = {"不限定": 0, "最后角度增大": 1, "最后角度减小": -1}
 DECAYS = {"滑行": 0, "刹车": 1}
 PWM_KHZ = ("1", "2", "4", "5", "10", "20")
 SENSOR_DIRECTIONS = {"角度增大时 ADC 增大": 1, "角度增大时 ADC 减小": -1}
 FAULTS = {"NONE": "无", "SENSOR": "采样失败/过期", "LIMIT": "超出标定范围", "STALL": "运动无进展",
           "DIRECTION": "方向错误/误差增大", "TIMEOUT": "定位超时", "HARDWARE": "驱动失败"}
-PHASES = {"IDLE": "空闲", "SETTLE": "准备", "MOVE": "运动", "DONE": "到位", "FAULT": "故障"}
+PHASES = {"IDLE": "空闲", "SETTLE": "准备", "MOVE": "运动", "DONE": "到位", "FAULT": "故障", "HOLD": "保持"}
 STATE_FRESH_S = 1.0  # 非焦点空闲关节的 JSTATE 约每 600ms 轮到一次
 # MCU 写 Flash 失败时只发一行 EVENT，终端里容易漏看，改为弹窗。
 STORE_ERRORS = {
@@ -35,6 +37,12 @@ class JointPanel:
         self.last_query = 0.
         self.tunes = {}      # MCU 回报的控制参数（JTUNE），键为关节号
         self.approaches = {}  # MCU 回报的单向逼近参数（JDIR），键为关节号
+        self.pis = {}        # MCU 回报的比例积分式参数（JPI），键为关节号
+        self.mode_fill = True  # 下一次收到当前关节的 JTUNE 时，把控制方式下拉框同步成 MCU 的值
+        self.pi_fill = True    # 下一次收到当前关节的 JPI 时填入表单
+        self.captures = {}   # 正在采集的定位过程，键为关节号
+        self.metrics = {}    # 各关节上一次定位的指标文字
+        self.backlash = None  # 正在进行的背隙测量
         self.pwm = None      # MCU 回报的 (kHz, 刹车)
         self.tracing = False
         self.trace_at = 0.   # 最近一次收到当前关节 JT 行的时刻
@@ -136,7 +144,7 @@ class JointPanel:
         ttk.Label(tune, textvariable=self.pwm_status).grid(row=0, column=5, columnspan=4, sticky="w")
         ttk.Label(tune, text="控制方式").grid(row=1, column=0, padx=5, pady=4, sticky="w")
         ttk.Combobox(tune, textvariable=self.tune_fields["mode"], values=list(MODES), state="readonly",
-                     width=6).grid(row=1, column=1, sticky="w")
+                     width=10).grid(row=1, column=1, sticky="w")
         ttk.Label(tune, text="比例 %/°").grid(row=1, column=2, padx=(12, 5))
         ttk.Entry(tune, textvariable=self.tune_fields["kp"], width=6).grid(row=1, column=3, sticky="w")
         ttk.Label(tune, text="起转 %").grid(row=1, column=4, padx=(12, 5))
@@ -160,6 +168,13 @@ class JointPanel:
         ttk.Entry(tune, textvariable=self.approach_fields["overshoot"], width=6).grid(row=3, column=6, sticky="w")
         self.approach_btn = ttk.Button(tune, text="下发单向逼近", command=self.apply_approach)
         self.approach_btn.grid(row=3, column=7, columnspan=2, padx=8, sticky="w")
+        measure = ttk.Frame(tune)
+        measure.grid(row=3, column=9, columnspan=2, sticky="w")
+        ttk.Label(measure, text="摆幅 °").pack(side="left")
+        self.backlash_delta = tk.StringVar(value="5")
+        ttk.Entry(measure, textvariable=self.backlash_delta, width=4).pack(side="left", padx=4)
+        self.backlash_btn = ttk.Button(measure, text="测量背隙", command=self.measure_backlash)
+        self.backlash_btn.pack(side="left")
         self.approach_status = tk.StringVar(value="反向到达时先越过目标再回来，最后一段总朝同一方向，消除回程误差；超调至少取背隙加容差")
         ttk.Label(tune, textvariable=self.approach_status).grid(row=4, column=0, columnspan=11, sticky="w")
         record = ttk.Frame(tune)
@@ -168,6 +183,30 @@ class JointPanel:
         self.trace_btn.pack(side="left")
         self.trace_status = tk.StringVar(value="每 10ms 记录当前关节的读数、噪声、角度、占空比，存为 records 目录下的 CSV")
         ttk.Label(record, textvariable=self.trace_status).pack(side="left", padx=12)
+
+        pi = ttk.Frame(sections, padding=10)
+        sections.add(pi, text="比例积分式参数 · 两个方向各一套，存入 MCU")
+        self.pi_fields = {key: tk.StringVar() for key in PI_KEYS}
+        ttk.Label(pi, text="电机转向").grid(row=0, column=0, padx=5, sticky="w")
+        for column, (_, label) in enumerate(PI_COLUMNS, 1):
+            ttk.Label(pi, text=label).grid(row=0, column=column, padx=6)
+        for d, name in enumerate(PI_DIRECTIONS):
+            ttk.Label(pi, text=name).grid(row=d+1, column=0, padx=5, pady=3, sticky="w")
+            for column, (key, _) in enumerate(PI_COLUMNS, 1):
+                ttk.Entry(pi, textvariable=self.pi_fields[f"{key}{d}"], width=8).grid(row=d+1, column=column, padx=6)
+        extra = ttk.Frame(pi)
+        extra.grid(row=3, column=0, columnspan=7, sticky="w", pady=(6, 0))
+        ttk.Label(extra, text="慢速段门限 °").pack(side="left", padx=(5, 4))
+        ttk.Entry(extra, textvariable=self.pi_fields["slow"], width=6).pack(side="left")
+        ttk.Label(extra, text="维持比例 %").pack(side="left", padx=(12, 4))
+        ttk.Entry(extra, textvariable=self.pi_fields["run"], width=6).pack(side="left")
+        ttk.Button(extra, text="读取 MCU 参数", command=self.read_pi).pack(side="left", padx=(16, 0))
+        self.pi_btn = ttk.Button(extra, text="下发当前关节", command=self.apply_pi)
+        self.pi_btn.pack(side="left", padx=8)
+        ttk.Label(extra, text="误差大于门限用快速段增益，进入门限后用慢速段增益并压低占空比；"
+                              "只在控制方式为比例积分式时起作用").pack(side="left", padx=8)
+        self.pi_status = tk.StringVar(value="MCU：—")
+        ttk.Label(pi, textvariable=self.pi_status).grid(row=4, column=0, columnspan=7, sticky="w", pady=(6, 0))
 
         move = ttk.LabelFrame(parent, text="角度定位 · 勾选的关节同时定位，到位后停止，不自动保持或恢复运动", padding=10)
         move.pack(fill="x", pady=8)
@@ -244,6 +283,7 @@ class JointPanel:
         for key in ("raw_ref", "limit_min", "limit_max"): self.nominal[key].set("")
         self.tune_fields["high"].set("")  # 收到新关节的 JTUNE 后重新填入
         for key in ("backlash", "overshoot"): self.approach_fields[key].set("")  # 收到 JDIR 后重新填入
+        self.mode_fill = self.pi_fill = True  # 控制方式和 PI 表单都换成新关节的 MCU 值
         self.fill_limits()
         for key, value in self.forms.get(self.selected, {}).items(): self.fields[key].set(value)
         self.history.clear()
@@ -368,8 +408,11 @@ class JointPanel:
             if errors:
                 raise ValueError("\n".join(errors))
             if not self.app.confirm_joint_move(): return
+            if self.backlash and self.backlash.active and self.backlash.joint in joints:
+                self.backlash = None  # 手动定位优先，不让测量再接着发下一段
             for joint, target in requests:
                 self.app.worker.submit("JMOVE", joint, target, timeout)
+                self.captures[joint] = StepCapture(target, self.device_calibration(joint).tolerance)
             self.notice.set(f"已请求 {'、'.join(f'M{j}' for j in joints)} 定位；到位依据真实 POT 反馈与所设容差判定。")
         except ValueError as exc: messagebox.showerror("角度定位", str(exc))
 
@@ -398,8 +441,68 @@ class JointPanel:
                 raise ValueError("请连接支持电机调试的新固件")
             if not self.app.confirm_exclusive(): return
             self.app.worker.submit("JTUNE", self.selected, values)
-            self.notice.set("下发控制参数会先停止全部电机，并随标定保存到 MCU；最高占空比即标定里的占空比，两种方式都受它限制。")
+            self.notice.set("下发控制参数会先停止全部电机，并随标定保存到 MCU；最高占空比即标定里的占空比，各种方式都受它限制。"
+                            "比例积分式不用这一行的比例、起转和制动，它的参数在“比例积分式参数”页。")
         except (KeyError, ValueError) as exc: messagebox.showerror("控制参数", str(exc))
+
+    def read_pi(self):
+        """重新读取当前关节的参数，并用 MCU 的值覆盖 PI 表单。"""
+        self.pi_fill = True
+        self.query()
+
+    def apply_pi(self):
+        try:
+            values = pi_values({key: field.get() for key, field in self.pi_fields.items()})
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持比例积分式的新固件")
+            if not self.app.confirm_exclusive(): return
+            self.app.worker.submit("JPI", self.selected, values)
+            self.notice.set("下发比例积分式参数会先停止全部电机，并随标定保存到 MCU；各方向的最高占空比还受标定里的占空比限制。")
+        except (KeyError, ValueError) as exc: messagebox.showerror("比例积分式参数", str(exc))
+
+    def measure_backlash(self):
+        """从两侧逼近当前关节的目标角度，把落点之差填进背隙，不自动下发。"""
+        try:
+            if self.backlash and self.backlash.active:
+                raise ValueError("背隙测量正在进行，停止请按“停止全部 / 解锁”")
+            if not self.capable or not self.app.ready or not self.app.worker:
+                raise ValueError("请连接支持电机调试的新固件")
+            joint = self.selected
+            center = self.check_target(joint)
+            delta = millidegrees(self.backlash_delta.get())
+            if not 1000 <= delta <= 30000:
+                raise ValueError("摆幅须为 1～30°")
+            low, high = self.device_calibration(joint).limits
+            if not low <= center - delta or not center + delta <= high:
+                raise ValueError(f"目标角度两侧各留不出 {delta/1000:g}°，请改目标角度或摆幅")
+            approach = self.approaches.get(joint)
+            if approach is None or approach[0] != 0:
+                raise ValueError("请先把单向逼近设为“不限定”并下发：单向逼近开着时两侧的落点本来就一样，测不出背隙")
+            if not self.app.confirm_joint_move(): return
+            self.backlash = BacklashRun(joint, center, delta)
+            self.app.worker.submit("JMOVE", joint, self.backlash.first(), 10000)
+            self.notice.set(self.backlash.progress())
+        except ValueError as exc: messagebox.showerror("测量背隙", str(exc))
+
+    def step_backlash(self, now):
+        """推进背隙测量：机构静止后下发下一段，走完后把结果填进单向逼近的表单。"""
+        run = self.backlash
+        if not run or not run.active or not self.app.worker: return
+        record = self.states.get(run.joint)
+        fresh = record and now - record[0] <= STATE_FRESH_S and record[1][3] and record[1][4]
+        target = run.tick(now, record[1][6] if fresh else None)
+        if target is not None:
+            self.app.worker.submit("JMOVE", run.joint, target, 10000)
+            self.notice.set(run.progress())
+        elif run.done:
+            backlash = run.backlash
+            overshoot = max(3 * backlash, 3000)  # 与固件 JBL 的取法一致
+            if run.joint == self.selected:
+                self.approach_fields["backlash"].set(f"{backlash/1000:g}")
+                self.approach_fields["overshoot"].set(f"{overshoot/1000:g}")
+            self.notice.set(f"M{run.joint} 回程误差 {backlash/1000:.2f}°（低侧落点 {run.landings[0]/1000:.2f}°，"
+                            f"高侧落点 {run.landings[1]/1000:.2f}°，含重复性）。已填入背隙 {backlash/1000:g}° 和"
+                            f"超调 {overshoot/1000:g}°，选好逼近方向后按“下发单向逼近”才生效。")
 
     def apply_approach(self):
         try:
@@ -451,7 +554,12 @@ class JointPanel:
         except (ValueError, OSError) as exc: messagebox.showerror("载入标定", str(exc))
 
     def sent(self, kind, seq, args):
-        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "JDIR", "MPWM"): self.pending[seq] = (kind, args[0])
+        if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JTRACE", "JDIR", "JPI", "MPWM"): self.pending[seq] = (kind, args[0])
+        # 停止、手动驱动、改参数都会让 MCU 取消定位；两段之间没有运动时不会有 JRESULT，所以在这里中止测量，
+        # 免得停下之后它又自己发出下一段。
+        if self.backlash and self.backlash.active and kind not in ("JMOVE", "JGET", "JTRACE"):
+            self.backlash = None
+            self.notice.set("背隙测量已中止。")
 
     def receive(self, msg):
         now = time.monotonic()
@@ -465,6 +573,16 @@ class JointPanel:
             self.tunes[msg[2]] = msg[3:]
             if msg[2] == self.selected and msg[7] and not self.tune_fields["high"].get():
                 self.tune_fields["high"].set(f"{msg[7]/10:g}")
+            if msg[2] == self.selected and self.mode_fill:
+                # 下拉框跟着 MCU 走，免得一按下发就把控制方式换掉。
+                name = next((k for k, v in MODES.items() if v == msg[3]), None)
+                if name: self.tune_fields["mode"].set(name)
+                self.mode_fill = False
+        elif msg[0] == "JPI":
+            self.pis[msg[2]] = msg[3]
+            if msg[2] == self.selected and self.pi_fill:
+                for key, text in pi_texts(msg[3]).items(): self.pi_fields[key].set(text)
+                self.pi_fill = False
         elif msg[0] == "JDIR":
             self.approaches[msg[2]] = msg[3:]
             if msg[2] == self.selected and not self.approach_fields["backlash"].get():
@@ -476,6 +594,7 @@ class JointPanel:
             if msg[2] == self.selected:
                 self.trace_at, self.spread = now, msg[4]
                 self.history.append((now, msg[5]/1000, msg[10]/1000))  # 轨迹式画参考位置
+            if msg[2] in self.captures: self.captures[msg[2]].add(now, msg[5], msg[7])
         elif msg[0] == "STATE": self.motion = (now, msg)
         elif msg[0] == "JCAL": self.device[msg[2]] = msg[3]
         elif msg[0] == "EVENT" and msg[1] in STORE_ERRORS:
@@ -491,21 +610,36 @@ class JointPanel:
                 self.limits.pop(msg[2], None)
             if msg[2] == self.selected and msg[3] and msg[4] and now - self.trace_at > .5:
                 self.history.append((now, msg[6]/1000, msg[7]/1000))
+            # 正在记录的关节由 10ms 一行的 JT 提供样本，其余用 100ms 一行的 JSTATE。
+            if msg[2] in self.captures and msg[3] and msg[4] and not (msg[2] == self.selected and now - self.trace_at <= .5):
+                self.captures[msg[2]].add(now, msg[6], msg[8])
         elif msg[0] in ("ACK", "ERR") and msg[1] in self.pending:
             kind, joint = self.pending.pop(msg[1])
             if kind == "JTRACE" and msg[0] == "ERR": self.tracing = False
             # 同时下发多个定位、连上后一次读六个关节时，不让 ACK 盖掉别的提示。
             if kind in ("JMOVE", "JGET") and msg[0] == "ACK": return
             label = {"MPWM": "电机 PWM", "JTUNE": f"M{joint} 控制参数", "JTRACE": f"M{joint} 数据记录",
-                     "JDIR": f"M{joint} 单向逼近"}.get(kind, f"M{joint} {kind}")
+                     "JDIR": f"M{joint} 单向逼近", "JPI": f"M{joint} 比例积分式参数"}.get(kind, f"M{joint} {kind}")
             self.notice.set(f"{label}：" + ("已接受" if msg[0] == "ACK" else "拒绝：" + msg[2]))
+            if kind in ("JTUNE", "JPI", "JDIR") and msg[0] == "ACK" and joint == self.selected:
+                # 读回 MCU 实际生效的值；PI 表单也用它覆盖，确认写进去的就是填的。
+                self.pi_fill = self.pi_fill or kind == "JPI"
+                self.query()
         elif msg[0] == "JRESULT":
+            if msg[2] in self.captures: self.captures[msg[2]].finish(msg[3], now)
+            if self.backlash and self.backlash.active and msg[2] == self.backlash.joint:
+                self.backlash.on_result(msg[3], now)
+                if self.backlash.error:
+                    self.notice.set(f"M{msg[2]} 背隙测量中止：" + {"CANCELLED": "已取消", "SUPERSEDED": "被新目标替代"}.get(
+                        msg[3], "故障停止：" + FAULTS.get(msg[3], msg[3])))
+                return
             self.notice.set(f"M{msg[2]} 定位：" + {"REACHED": "已在容差内稳定 200ms，停止驱动",
                 "CANCELLED": "已取消", "SUPERSEDED": "已被新目标替代"}.get(msg[3], "故障停止：" + FAULTS.get(msg[3], msg[3])))
 
     def disconnect(self):
         self.capable = False; self.device.clear(); self.limits.clear(); self.states.clear(); self.pending.clear()
         self.motion = None; self.tunes.clear(); self.approaches.clear(); self.pwm = None; self.tracing = False; self.spread = None
+        self.pis.clear(); self.captures.clear(); self.backlash = None; self.mode_fill = self.pi_fill = True
 
     def refresh(self):
         now = time.monotonic()
@@ -538,6 +672,15 @@ class JointPanel:
         self.pwm_btn["state"] = "normal" if ready else "disabled"
         self.tune_btn["state"] = "normal" if ready else "disabled"
         self.approach_btn["state"] = "normal" if ready else "disabled"
+        self.pi_btn["state"] = "normal" if ready else "disabled"
+        self.backlash_btn["state"] = "normal" if ready and not (self.backlash and self.backlash.active) else "disabled"
+        self.step_backlash(now)
+        for joint, capture in list(self.captures.items()):
+            if capture.ready(now):
+                self.metrics[joint] = metrics_text(joint, capture.result, capture.metrics())
+                del self.captures[joint]
+        p = self.pis.get(self.selected)
+        self.pi_status.set(f"M{self.selected} MCU 当前：—" if not p else f"M{self.selected} MCU 当前：{pi_summary(p)}")
         self.trace_btn["state"] = "normal" if self.app.ready and self.capable else "disabled"
         self.trace_btn["text"] = "停止记录" if self.tracing else "开始记录"
         self.pwm_status.set("MCU：—" if not self.pwm else
@@ -546,6 +689,7 @@ class JointPanel:
         high = "" if not t or not t[4] else f" 最高 {t[4]/10:g}%"
         self.tune_status.set(f"M{self.selected} MCU 当前：—" if not t else
                              f"M{self.selected} MCU 当前：开关式{high}" if t[0] == 0 else
+                             f"M{self.selected} MCU 当前：比例积分式，参数见“比例积分式参数”页{high}" if t[0] == 3 else
                              f"M{self.selected} MCU 当前：轨迹式 反馈每度 {t[1]/10:g}% 起转 {t[2]/10:g}%{high}" if t[0] == 2 else
                              f"M{self.selected} MCU 当前：比例式 每度 {t[1]/10:g}% 起转 {t[2]/10:g}% 制动 {t[3]}ms{high}")
         a = self.approaches.get(self.selected)
@@ -570,7 +714,7 @@ class JointPanel:
             elif not m[3]: state_text.set("未标定")
             elif not m[4]: state_text.set("读数无效")
             elif m[9] == "FAULT": state_text.set("故障 " + FAULTS.get(m[10], m[10]).split("/")[0])
-            elif m[9] in ("SETTLE", "MOVE"): state_text.set(f"{PHASES[m[9]]} {m[8]/10:g}%")
+            elif m[9] in ("SETTLE", "MOVE") or (m[9] == "HOLD" and m[8]): state_text.set(f"{PHASES[m[9]]} {m[8]/10:g}%")
             else: state_text.set(PHASES.get(m[9], m[9]))
         self.draw()
 
@@ -579,6 +723,8 @@ class JointPanel:
         w, h = c.winfo_width(), c.winfo_height()
         points = [(t, a, b) for t, a, b in self.history if time.monotonic()-t <= 15]
         c.create_text(8, 8, text="蓝：实测角度  橙：目标，轨迹式记录时为参考位置 · 最近 15 秒", anchor="nw", fill="#526479")
+        # 指标放在图的底边，不和上面的图例抢位置；开着数据记录时按 10ms 采样，否则按 100ms。
+        c.create_text(8, h-6, text=self.metrics.get(self.selected, ""), anchor="sw", fill="#1f2937")
         if not points or w < 100 or h < 50: return
         low = min(min(a, b) for _, a, b in points)-1
         high = max(max(a, b) for _, a, b in points)+1
@@ -589,6 +735,6 @@ class JointPanel:
                 if previous is not None and p[0]-previous > .5:
                     if len(segment) >= 4: c.create_line(*segment, fill=color, width=2)
                     segment = []
-                segment.extend((40+(w-50)*(1-(now-p[0])/15), 28+(h-40)*(high-p[index])/(high-low)))
+                segment.extend((40+(w-50)*(1-(now-p[0])/15), 28+(h-58)*(high-p[index])/(high-low)))
                 previous = p[0]
             if len(segment) >= 4: c.create_line(*segment, fill=color, width=2)

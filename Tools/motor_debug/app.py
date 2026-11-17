@@ -138,7 +138,7 @@ class SerialWorker(threading.Thread):
                 kind, selected, speed, duration = self.commands.get_nowait()
                 self.seq = (self.seq + 1) & 65535
                 self.events.put(("sent", (kind, self.seq, (selected, speed, duration))))
-                if kind in ("STOP", "TEST", "CAL", "JMOVE", "JNOM", "JLIM"):
+                if kind in ("STOP", "TEST", "CAL", "JMOVE", "JNOM", "JLIM", "JTUNE", "JPI", "JDIR"):
                     if kind != "JMOVE": joints.cancel()  # 与固件一致：定位不打断其他关节
                     if board:
                         finish("CANCELLED")
@@ -160,7 +160,7 @@ class SerialWorker(threading.Thread):
                         self.emit(f"ERR {self.seq} BOARD_BUSY")
                         continue
                     lamps[:] = speed
-                if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM"):
+                if kind in ("CAL", "JMOVE", "JGET", "JNOM", "JLIM", "JTUNE", "JPI", "JDIR"):
                     error = joints.request(kind, self.seq, selected, speed, duration, vals, int((now-start)*1000))
                     if error:
                         self.emit(f"ERR {self.seq} {error}")
@@ -363,7 +363,7 @@ class App:
         if self.board_panel.phase != "IDLE":
             return messagebox.askyesno("切换控制", "当前板级测试将取消，停止其输出后切换到手动电机控制，是否继续？")
         joint = self.joint_panel
-        if any(record[1][9] in ("SETTLE", "MOVE") for record in joint.states.values()):
+        if any(record[1][9] in ("SETTLE", "MOVE", "HOLD") for record in joint.states.values()):
             return messagebox.askyesno("切换控制", "当前关节定位将取消，是否切换到手动电机控制？")
         return True
 
@@ -376,7 +376,7 @@ class App:
     def confirm_exclusive(self):
         active = any(self.motor_panel.actual or ()) or any(self.light_panel.actual or ())
         active = active or self.board_panel.phase != "IDLE"
-        active = active or any(record[1][9] in ("SETTLE", "MOVE") for record in self.joint_panel.states.values())
+        active = active or any(record[1][9] in ("SETTLE", "MOVE", "HOLD") for record in self.joint_panel.states.values())
         active = active or bool(getattr(self.motor_panel, "pending_mask", 0))
         return not active or messagebox.askyesno("切换控制", "此操作会停止当前电机和灯光输出、取消正在进行的测试或定位，是否继续？")
 

@@ -155,7 +155,7 @@ def read_angle(link, joint, timeout=1.0):
     while time.monotonic() < end and angle is None:
         event = link.read(0.2)
         if event and event[0] == "JSTATE" and event[2] == joint:
-            angle = event[7]
+            angle = event[6]  # 下标 6 是实测角度，7 是目标
     return angle
 
 
