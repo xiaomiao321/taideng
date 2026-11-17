@@ -224,6 +224,7 @@ typedef struct
     bool holding;           /**< 是否处于到位后的漂移监视。 */
     bool kick;              /**< 起步增量是否还在有效期内。 */
     bool blind;             /**< 起步或换向后读数还没开始变化，见 JOINT_PI_BLIND_EXIT。 */
+    uint32_t blind_ms;      /**< 上述状态下第一次输出的时刻，0 表示还没输出过。 */
     int32_t blind_angle;    /**< 进入上述状态时的角度，毫度。 */
 } joint_motion_t;
 
@@ -247,6 +248,12 @@ typedef struct
     int32_t target;  /**< 目标角度，毫度。 */
     int duty;        /**< 当前输出占空比。 */
     uint16_t spread; /**< 最近一次采样中各样本的极差，反映噪声。 */
+    /**
+     * @brief 读数最近一次被带着走的方向：1 角度增大，-1 减小，0 未知。
+     *
+     * 下一次朝同一方向起步时没有空程；方向相反时要先走完空程读数才会动。
+     */
+    int8_t engaged;
     /** @brief 连续超出 JOINT_POT_SPREAD_MAX 的采样次数，用于判定传感器故障。 */
     uint8_t spread_bad;
     joint_tune_t tune;

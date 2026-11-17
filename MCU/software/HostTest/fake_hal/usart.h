@@ -26,7 +26,8 @@ typedef enum
 typedef enum
 {
     HAL_UART_STATE_RESET = 0,
-    HAL_UART_STATE_READY
+    HAL_UART_STATE_READY,
+    HAL_UART_STATE_BUSY_TX
 } HAL_UART_StateTypeDef;
 
 typedef struct

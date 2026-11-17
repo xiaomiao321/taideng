@@ -826,6 +826,7 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
         m->kick_ms = 0U;
         m->blind = m->kick;
         m->blind_angle = s->angle;
+        m->blind_ms = 0U;
     }
     /* 到位后的漂移监视被新命令接管；积分从零开始，避免旧目标的累积量。 */
     m->holding = false;
@@ -1237,24 +1238,39 @@ static bool pi_apply(joint_control_t *j, unsigned i, int32_t error, uint32_t now
     {
         /* 只认朝目标方向的变化：换向时上一段的滑行还在让读数往反方向走，
          * 那不代表这一段已经带动了电位器。 */
+        if (m->blind_ms == 0U)
+        {
+            m->blind_ms = now;
+        }
         if (sign * (s->angle - m->blind_angle) > JOINT_PI_BLIND_EXIT)
         {
             m->blind = false;
-        }
-        else if (sign * (s->angle - m->blind_angle) < 0)
-        {
-            m->blind_angle = s->angle;
+            s->engaged = (int8_t)sign;
         }
         else
         {
-            /* 这一段固定用起转占空比，不受慢速段限幅的约束：慢速段的占空比
-             * 可以比起转值低，用它来走完旷量要等一两秒，看起来像停住了。
-             * 读数一动就回到正常的限幅。 */
-            float limit = (float)p->duty_min[idx];
-            u = (float)sign * limit;
-            if ((float)cap < limit)
+            if (sign * (s->angle - m->blind_angle) < 0)
             {
-                cap = (unsigned)limit;
+                m->blind_angle = s->angle;
+            }
+            /* 和上次带动读数的方向相反：要先走完空程，固定用起转占空比，不受
+             * 慢速段限幅的约束，否则低占空比走空程要等一两秒，看起来像停住了。
+             * 方向相同：没有空程，直接用限幅以内的占空比，免得起转占空比把
+             * 连杆推快；万一迟迟不动，过一会儿也改用起转占空比。 */
+            float limit = (float)p->duty_min[idx];
+            bool boost = (s->engaged != (int8_t)sign) ||
+                         ((uint32_t)(now - m->blind_ms) >= JOINT_PI_BLIND_BOOST_MS);
+            if (boost)
+            {
+                u = (float)sign * limit;
+                if ((float)cap < limit)
+                {
+                    cap = (unsigned)limit;
+                }
+            }
+            else if (fabsf(u) > limit)
+            {
+                u = (float)sign * limit;
             }
             m->integral = old_i;
         }
@@ -1447,6 +1463,7 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
                 m->kick_ms = 0U;
                 m->blind = true;
                 m->blind_angle = s->angle;
+                m->blind_ms = 0U;
                 m->duty_cmd = 0;
             }
         }
@@ -1536,6 +1553,7 @@ static bool tick_one(joint_control_t *j, unsigned i, uint32_t now)
             m->kick_ms = 0U;
             m->blind = true;
             m->blind_angle = s->angle;
+            m->blind_ms = 0U;
             m->duty_cmd = 0;
         }
         s->phase = JOINT_SETTLE;

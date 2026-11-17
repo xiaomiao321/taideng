@@ -1042,6 +1042,7 @@ static void pi_test(void)
 
     /* 读数还没开始变化时只给起转占空比：电位器和连杆之间有旷量，不能因为
      * 误差大就把占空比一路加上去。读数动了之后才放开。 */
+    joint_pi_t pi0 = j.states[0].tune.pi;
     feed(&j, 2000, 0);
     assert(!joint_move(&j, 29, 0, 150000, 20000, 0));
     int peak = 0;
@@ -1060,6 +1061,46 @@ static void pi_test(void)
     }
     assert(peak > (int)j.states[0].tune.pi.duty_min[0]);
     assert(joint_cancel(&j));
+    /* 读数被带着走过之后，朝同一方向再起步没有空程：占空比不超过限幅，
+     * 即使限幅比起转占空比低；迟迟不动才改用起转占空比。反方向起步则一开始
+     * 就用起转占空比。 */
+    assert(j.states[0].engaged == 1);
+    joint_pi_t slow = j.states[0].tune.pi;
+    slow.duty_max[0] = 400;
+    slow.duty_max[1] = 400;
+    slow.slow_band = 45000; /* 全程按最高占空比的 60% 限幅，即 24% */
+    assert(!joint_set_pi(&j, 0, &slow));
+    uint16_t at = 2051;
+    feed(&j, at, 1000);
+    assert(!joint_move(&j, 28, 0, 130000, 20000, 1000));
+    peak = 0;
+    for (uint32_t t = 1000; t < 1100 + JOINT_PI_BLIND_BOOST_MS - 20U; t += 10)
+    {
+        feed(&j, at, t);
+        assert(joint_tick(&j, t));
+        peak = abs(output_duty) > peak ? abs(output_duty) : peak;
+    }
+    assert(peak > 0 && peak <= 240);
+    for (uint32_t t = 1100 + JOINT_PI_BLIND_BOOST_MS; t < 1700; t += 10)
+    {
+        feed(&j, at, t);
+        assert(joint_tick(&j, t));
+        peak = abs(output_duty) > peak ? abs(output_duty) : peak;
+    }
+    assert(peak == 300);
+    assert(joint_cancel(&j));
+    feed(&j, at, 2000);
+    assert(!joint_move(&j, 27, 0, 60000, 20000, 2000));
+    peak = 0;
+    for (uint32_t t = 2000; t < 2250; t += 10)
+    {
+        feed(&j, at, t);
+        assert(joint_tick(&j, t));
+        peak = abs(output_duty) > peak ? abs(output_duty) : peak;
+    }
+    assert(peak == 300);
+    assert(joint_cancel(&j));
+    assert(!joint_set_pi(&j, 0, &pi0));
 
     /* 到位后先进 HOLD，仍算忙；稳定满 JOINT_PI_HOLD_MS 后才是 DONE。 */
     double raw = 2000;

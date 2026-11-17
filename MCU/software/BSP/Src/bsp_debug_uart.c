@@ -26,6 +26,8 @@ static volatile bool s_is_tx_active = false;
 static uint16_t s_tx_chunk = 0U;
 /** @brief 因队列放不下而丢弃的数据段累计数。 */
 static uint32_t s_tx_drop_count = 0U;
+/** @brief 发送卡住后自恢复的次数，仅供调试器查看。 */
+static uint32_t s_tx_stall_count = 0U;
 
 /**
  * @brief 队列不空时启动下一段的中断发送。
@@ -227,6 +229,21 @@ bsp_status_t bsp_debug_uart_update(void)
     if (s_is_tx_ready && !s_is_tx_active && !tx_queue_is_empty(&s_tx_queue))
     {
         kick_transmit();
+    }
+    /* 自恢复：标记着"正在发送"，HAL 却已经空闲，说明丢了一次发送完成回调。
+     * 不处理的话队列再也发不出去，板子就此不出声。屏蔽中断后再确认一次，
+     * 这时回调不可能正执行到一半；把这一段重新发一遍，宁可重复也不卡死。 */
+    if (s_is_tx_ready && s_is_tx_active &&
+        (huart3.gState == HAL_UART_STATE_READY))
+    {
+        HAL_NVIC_DisableIRQ(USART3_IRQn);
+        if (s_is_tx_active && (huart3.gState == HAL_UART_STATE_READY))
+        {
+            ++s_tx_stall_count;
+            s_is_tx_active = false;
+            start_next_chunk();
+        }
+        HAL_NVIC_EnableIRQ(USART3_IRQn);
     }
     return bsp_uart_stream_update(&s_rx_stream);
 }

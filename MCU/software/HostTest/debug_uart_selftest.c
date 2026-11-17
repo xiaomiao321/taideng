@@ -42,6 +42,7 @@ static void complete_chunk(void)
     wire_length += pending_size;
     wire[wire_length] = '\0';
     pending_data = NULL;
+    huart3.gState = HAL_UART_STATE_READY; /* HAL 在回调之前已经恢复空闲 */
     bsp_debug_uart_on_tx_cplt_from_isr();
 }
 
@@ -69,6 +70,7 @@ HAL_StatusTypeDef HAL_UART_Transmit_IT(UART_HandleTypeDef *huart,
     }
     pending_data = data;
     pending_size = size;
+    huart->gState = HAL_UART_STATE_BUSY_TX;
     return HAL_OK;
 }
 
@@ -302,6 +304,19 @@ int main(void)
     assert(bsp_debug_uart_update() == BSP_OK && pending_data != NULL);
     complete_all();
     assert(!strcmp(wire, "one\r\ntwo\r\n"));
+
+    /* 丢了一次发送完成回调：HAL 已经空闲，驱动还以为在发。update 发现后
+     * 把这一段重新发出，之后恢复正常，不会从此不出声。 */
+    reset();
+    assert(bsp_debug_uart_init() == BSP_OK);
+    assert(reply("lost\r\n", 0U) == BSP_OK && pending_data != NULL);
+    pending_data = NULL;
+    huart3.gState = HAL_UART_STATE_READY;
+    assert(reply("next\r\n", 0U) == BSP_OK && pending_data == NULL);
+    assert(bsp_debug_uart_update() == BSP_OK && pending_data != NULL);
+    complete_all();
+    assert(!strcmp(wire, "lost\r\nnext\r\n"));
+    assert(bsp_debug_uart_update() == BSP_OK && pending_data == NULL);
 
     /* 长时间交替收发：跨过队列末尾许多次，线路上的内容与入队的完全一致。 */
     reset();
