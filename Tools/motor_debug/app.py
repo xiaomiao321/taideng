@@ -19,10 +19,14 @@ from trace_recorder import TraceRecorder
 COLORS = ("#2563eb", "#e45d32", "#159c72", "#995bd6", "#c49c12", "#d74386")
 
 
+BAUDS = ("115200", "230400", "460800", "921600")
+DEFAULT_BAUD = 460800  # 与固件 app_config.h 的 DEBUG_UART_BAUD 一致
+
+
 class SerialWorker(threading.Thread):
-    def __init__(self, port, events, demo=False):
+    def __init__(self, port, events, demo=False, baud=DEFAULT_BAUD):
         super().__init__(daemon=True)
-        self.port, self.events, self.demo = port, events, demo
+        self.port, self.events, self.demo, self.baud = port, events, demo, baud
         self.commands = queue.Queue()
         self.quit = threading.Event()
         self.seq = 0
@@ -47,7 +51,7 @@ class SerialWorker(threading.Thread):
         pending = {}
         try:
             import serial
-            serial_port = serial.Serial(self.port, 115200, timeout=0.02, write_timeout=0.1)
+            serial_port = serial.Serial(self.port, self.baud, timeout=0.02, write_timeout=0.1)
             serial_port.reset_input_buffer()
             buf = bytearray()
 
@@ -243,10 +247,14 @@ class App:
         outer.pack(fill="both", expand=True)
         connect = ttk.Frame(outer)
         connect.pack(fill="x")
-        ttk.Label(connect, text="调试串口 · 115200 / 8N1").pack(side="left")
+        ttk.Label(connect, text="调试串口 · 8N1").pack(side="left")
         self.port = tk.StringVar()
         self.ports = ttk.Combobox(connect, textvariable=self.port, width=17, state="readonly")
         self.ports.pack(side="left", padx=10)
+        # 新固件默认 460800；连旧固件时改选 115200。
+        self.baud = tk.StringVar(value=str(DEFAULT_BAUD))
+        ttk.Combobox(connect, textvariable=self.baud, values=BAUDS, width=8, state="readonly").pack(side="left")
+        ttk.Label(connect, text="bit/s").pack(side="left", padx=(4, 10))
         ttk.Button(connect, text="刷新", command=self.refresh).pack(side="left")
         self.connect_btn = ttk.Button(connect, text="连接", command=self.connect)
         self.connect_btn.pack(side="left", padx=8)
@@ -356,7 +364,7 @@ class App:
         self.ready = False
         self.connection.set("正在连接并确认 MCU…")
         self.connect_btn["state"] = "disabled"
-        self.worker = SerialWorker(self.port.get(), self.events, self.demo)
+        self.worker = SerialWorker(self.port.get(), self.events, self.demo, int(self.baud.get()))
         self.worker.start()
 
     def confirm_manual(self):

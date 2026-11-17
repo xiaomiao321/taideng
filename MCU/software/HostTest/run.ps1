@@ -75,6 +75,24 @@ $suites = @(
         )
     }
     @{
+        Name = 'tx_queue'
+        Sources = @(
+            (Join-Path $projectDir 'BSP\Src\tx_queue.c')
+            (Join-Path $projectDir 'HostTest\tx_queue_selftest.c')
+        )
+    }
+    @{
+        # Uses the fake HAL in HostTest\fake_hal instead of the CubeMX headers.
+        Name = 'debug_uart'
+        Includes = @((Join-Path $projectDir 'HostTest\fake_hal'))
+        Sources = @(
+            (Join-Path $projectDir 'BSP\Src\bsp_debug_uart.c')
+            (Join-Path $projectDir 'BSP\Src\bsp_uart_stream.c')
+            (Join-Path $projectDir 'BSP\Src\tx_queue.c')
+            (Join-Path $projectDir 'HostTest\debug_uart_selftest.c')
+        )
+    }
+    @{
         Name = 'protocol'
         Sources = @(
             (Join-Path $projectDir 'Protocol\Src\mcu_protocol.c')
@@ -97,7 +115,10 @@ foreach ($suite in $suites)
 {
     $name = $suite.Name
     $exePath = Join-Path $projectDir ("HostTest\selftest_{0}.exe" -f $name)
-    $gccArgs = $warnArgs + $includeArgs + $suite.Sources + @('-o', $exePath)
+    # Suite-specific include directories go first so they shadow the defaults.
+    $extraIncludes = @()
+    foreach ($dir in $suite.Includes) { $extraIncludes += @('-I', $dir) }
+    $gccArgs = $warnArgs + $extraIncludes + $includeArgs + $suite.Sources + @('-o', $exePath)
 
     Write-Host ("=== {0} ===" -f $name)
     & $gcc @gccArgs

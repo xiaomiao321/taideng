@@ -37,12 +37,13 @@
  * @retval BSP_ERR_CONFIG 调试串口句柄未绑定 USART3，或未处于可用状态。
  *
  * @note 调用本函数前必须已经执行 MX_USART3_UART_Init()。
- * @note 本模块固定使用 USART3，115200 bit/s、8N1、无硬件流控。
+ * @note 本模块固定使用 USART3，波特率为 DEBUG_UART_BAUD，8N1、无硬件流控；
+ *       初始化时会把 USART3 设成这个波特率并清空发送队列。
  */
 bsp_status_t bsp_log_init(void);
 
 /**
- * @brief 通过调试串口阻塞发送一段原始字节数据。
+ * @brief 通过调试串口排队发送一段原始字节数据。
  *
  * @param[in] data 待发送数据的首地址，不允许为 NULL。
  * @param[in] length 待发送数据长度，单位为字节，必须大于 0。
@@ -54,12 +55,13 @@ bsp_status_t bsp_log_init(void);
  * @retval BSP_ERR_TIMEOUT UART 发送超时。
  * @retval BSP_ERR_HAL UART 发生其他发送错误。
  *
- * @warning 本函数为阻塞接口，不能从中断服务程序调用。
+ * @warning 不能从中断服务程序调用。数据入队后由中断发出；发送队列放不下时
+ *          最多等待约 20ms。
  */
 bsp_status_t bsp_log_write(const uint8_t *data, size_t length);
 
 /**
- * @brief 通过调试串口阻塞发送以空字符结尾的字符串。
+ * @brief 通过调试串口排队发送以空字符结尾的字符串。
  *
  * @param[in] message 待发送字符串，不允许为 NULL。
  *
@@ -70,7 +72,8 @@ bsp_status_t bsp_log_write(const uint8_t *data, size_t length);
  * @retval BSP_ERR_TIMEOUT UART 发送超时。
  * @retval BSP_ERR_HAL UART 发生其他发送错误。
  *
- * @warning 本函数为阻塞接口，不能从中断服务程序调用。
+ * @warning 不能从中断服务程序调用。数据入队后由中断发出；发送队列放不下时
+ *          最多等待约 20ms。
  */
 bsp_status_t bsp_log_write_string(const char *message);
 
@@ -98,9 +101,12 @@ bsp_status_t bsp_log_write_string(const char *message);
  * @note 前缀、正文和 CRLF 共用 BSP_LOG_BUFFER_SIZE 字节缓冲区，
  *       必须为末尾空字符预留空间；发送时不包含该空字符。
  * @note 正文格式化结果为空时，仍输出前缀和 CRLF。
+ * @note ERROR 级日志入队后会等它发到线路上（最多约 100ms）再返回，因为之后
+ *       往往紧跟着停机或复位；其他等级不等待。
  * @note 等级过滤仅作用于分级日志；bsp_log_write()、
  *       bsp_log_write_string() 本身不受等级限制。
- * @warning 本函数为阻塞接口，不能从中断服务程序调用。
+ * @warning 不能从中断服务程序调用。数据入队后由中断发出；发送队列放不下时
+ *          最多等待约 20ms。
  * @warning 当前版本不保证多任务并发调用安全。
  */
 bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,

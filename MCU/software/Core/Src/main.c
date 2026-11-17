@@ -30,6 +30,7 @@
 #include "app_config.h"
 #include "app_main.h"
 #include "bsp_common.h"
+#include "bsp_debug_uart.h"
 #include "bsp_led.h"
 #include "bsp_log.h"
 #include "bsp_motor.h"
@@ -240,6 +241,9 @@ void Error_Handler(void)
     /* 不用 bsp_motor_stop_all()：它要求驱动已初始化，而这里可能在任何阶段进入。 */
     bsp_motor_emergency_stop();
     (void)bsp_led_set(BSP_LED_ID_ERROR, true);
+    /* 日志和终端文本在发送队列里由中断发出，关中断之前给它一点时间发完，
+     * 否则停机原因看不到。已经关了中断或在中断里时它立即返回。 */
+    (void)bsp_debug_uart_drain(100U);
     /* User can add his own implementation to report the HAL error return state
      */
     __disable_irq();

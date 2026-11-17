@@ -5,22 +5,25 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bsp_debug_uart.h"
 #include "main.h"
-#include "usart.h"
 
-/** @brief 单次发送超时，单位为毫秒。 */
-#define BSP_LOG_UART_TIMEOUT_MS (1000U)
+/** @brief 发送队列放不下时最多等待的时间，单位为毫秒。 */
+#define BSP_LOG_QUEUE_WAIT_MS (20U)
+
+/** @brief ERROR 级日志等待发完的最长时间，单位为毫秒。 */
+#define BSP_LOG_ERROR_DRAIN_MS (100U)
 static const char *const s_level_names[] = {"NONE", "ERROR", "WARN", "INFO",
                                             "DEBUG"};
 static bool s_is_log_initialized = false;
 bsp_status_t bsp_log_init(void)
 {
     s_is_log_initialized = false;
-    /* 确保句柄指向 USART3 且已经初始化 */
-    if ((huart3.Instance != USART3) ||
-        (HAL_UART_GetState(&huart3) == HAL_UART_STATE_RESET))
+    /* 日志和调试终端共用 USART3 的发送队列，波特率也在这里按配置设好。 */
+    bsp_status_t status = bsp_debug_uart_tx_init();
+    if (status != BSP_OK)
     {
-        return BSP_ERR_CONFIG;
+        return status;
     }
     s_is_log_initialized = true;
     return BSP_OK;
@@ -28,7 +31,6 @@ bsp_status_t bsp_log_init(void)
 
 bsp_status_t bsp_log_write(const uint8_t *data, size_t length)
 {
-    HAL_StatusTypeDef write_status;
     if (!s_is_log_initialized)
     {
         return BSP_ERR_NOT_INITIALIZED;
@@ -37,24 +39,8 @@ bsp_status_t bsp_log_write(const uint8_t *data, size_t length)
     {
         return BSP_ERR_PARAM;
     }
-    write_status = HAL_UART_Transmit(&huart3, data, (uint16_t)length,
-                                     BSP_LOG_UART_TIMEOUT_MS);
-    if (write_status == HAL_OK)
-    {
-        return BSP_OK;
-    }
-    else if (write_status == HAL_BUSY)
-    {
-        return BSP_BUSY;
-    }
-    else if (write_status == HAL_TIMEOUT)
-    {
-        return BSP_ERR_TIMEOUT;
-    }
-    else
-    {
-        return BSP_ERR_HAL;
-    }
+    /* 日志不可丢弃：入队后由中断发出，队列放不下时才短暂等待。 */
+    return bsp_debug_uart_write(data, length, BSP_LOG_QUEUE_WAIT_MS);
 }
 
 bsp_status_t bsp_log_write_string(const char *message)
@@ -131,5 +117,11 @@ bsp_status_t bsp_log_print(uint32_t level, const char *tag, const char *format,
     buffer[used_length] = '\0'; /* 确保空字符 */
 
     /* 发送字符串 */
-    return bsp_log_write((const uint8_t *)buffer, used_length);
+    bsp_status_t status = bsp_log_write((const uint8_t *)buffer, used_length);
+    if (level == LOG_LEVEL_ERROR)
+    {
+        /* ERROR 之后往往紧跟着停机或复位，等它真正发到线路上再返回。 */
+        (void)bsp_debug_uart_drain(BSP_LOG_ERROR_DRAIN_MS);
+    }
+    return status;
 }

@@ -19,6 +19,7 @@
 #include "bsp_led.h"
 #include "bsp_light.h"
 #include "bsp_linux_power.h"
+#include "bsp_log.h"
 #include "bsp_motor.h"
 #include "debug_board.h"
 #include "debug_control.h"
@@ -29,8 +30,16 @@ _Static_assert(DEBUG_BOARD_LAMP_COUNT == BSP_LIGHT_COUNT,
 _Static_assert(DEBUG_BOARD_LED_COUNT == BSP_LED_ID_COUNT,
                "board test LED count must match the LED driver");
 
-/** @brief 文本发送超时；断开的上位机不能拖住控制循环，单位毫秒。 */
+/**
+ * @brief 回复入队时发送队列放不下的最长等待，单位毫秒。
+ *
+ * 发送在中断里进行，队列里又留有回复专用的空间，正常不会等待；这只是上限，
+ * 保证意外情况下也不会拖住控制循环。
+ */
 #define CONSOLE_TX_TIMEOUT_MS (15U)
+
+/** @brief 报告发送队列丢弃情况的最短间隔，单位毫秒。 */
+#define CONSOLE_TX_DROP_REPORT_MS (1000U)
 
 /** @brief 每次 update 最多处理的接收字节数，限制单次循环耗时。 */
 #define CONSOLE_RX_BUDGET (128U)
@@ -67,8 +76,11 @@ static bool s_is_discarding = false;
 /** @brief 已处理过的 USART3 接收错误和溢出计数，用于发现新事件。 */
 static uint32_t s_seen_rx_errors = 0U;
 static uint32_t s_seen_rx_overflows = 0U;
-/** @brief USART3 发送失败次数，仅供调试器查看。 */
+/** @brief 回复入队失败的次数，仅供调试器查看。 */
 static uint32_t s_tx_error_count = 0U;
+/** @brief 已报告过的发送丢弃数，以及上一次报告的时刻。 */
+static uint32_t s_seen_tx_drops = 0U;
+static uint32_t s_tx_drop_report_ms = 0U;
 
 /** @brief JTRACE 打开时每次采样上报一行 JT。 */
 static bool s_is_trace_on = false;
@@ -87,9 +99,9 @@ static uint32_t s_last_home_count = 0U;
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief 发送一行文本。
+ * @brief 发送一行不可丢弃的文本：命令的回复、结果和事件。
  *
- * @retval false 发送失败（只计数）：发送失败不说明上位机断开，
+ * @retval false 入队失败（只计数）：这不说明上位机断开，
  *         真正的失联由心跳超时负责停机。
  */
 static bool send_line(const char *text)
@@ -101,6 +113,17 @@ static bool send_line(const char *text)
         return false;
     }
     return true;
+}
+
+/**
+ * @brief 发送一行周期状态：发送队列紧张时整行丢弃，从不等待。
+ *
+ * @note 丢掉的状态由下一个周期补上，丢弃数由 report_tx_drops() 报告。
+ */
+static void send_status(const char *text)
+{
+    (void)bsp_debug_uart_write_droppable((const uint8_t *)text, strlen(text),
+                                         false);
 }
 
 /** @brief 供 reply 回调使用的无返回值版本。 */
@@ -387,7 +410,15 @@ static void joint_report(unsigned index, uint32_t now, bool config)
         (unsigned long)now, index + 1U, (unsigned)s->calibrated,
         (unsigned)is_fresh, (unsigned)s->raw, (long)s->angle, (long)s->target,
         s->duty, joint_phase_name(s->phase), s->fault);
-    (void)send_line(out);
+    /* 作为 JGET 等命令的回复时不可丢弃，周期上报时可以丢。 */
+    if (config)
+    {
+        (void)send_line(out);
+    }
+    else
+    {
+        send_status(out);
+    }
 }
 
 /** @brief 上报全部已标定关节的参数和状态，供上位机同步。 */
@@ -805,7 +836,7 @@ static void report_status(uint32_t now)
         append(out, sizeof(out), &used, "ADCERR %lu %d\r\n",
                (unsigned long)HAL_GetTick(), (int)BSP_ERR_HAL);
     }
-    (void)send_line(out);
+    send_status(out);
     check_control();
 
     unsigned motor;
@@ -815,7 +846,7 @@ static void report_status(uint32_t now)
     (void)snprintf(out, sizeof(out), "STATE %lu %u %d %u %u\r\n",
                    (unsigned long)HAL_GetTick(), motor, duty,
                    (unsigned)is_pending, (unsigned)s_control.locked);
-    (void)send_line(out);
+    send_status(out);
     check_control();
 
     int duties[MOTOR_COUNT];
@@ -855,7 +886,7 @@ static void report_status(uint32_t now)
     }
     append(out, sizeof(out), &used, " %u %u\r\n", s_control.multi_pending,
            (unsigned)s_control.locked);
-    (void)send_line(out);
+    send_status(out);
     check_control();
 
     unsigned lights[BSP_LIGHT_COUNT];
@@ -871,20 +902,20 @@ static void report_status(uint32_t now)
         append(out, sizeof(out), &used, " %u", lights[i]);
     }
     append(out, sizeof(out), &used, "\r\n");
-    (void)send_line(out);
+    send_status(out);
     check_control();
 
     (void)snprintf(out, sizeof(out), "BOARD %lu %s %s\r\n",
                    (unsigned long)HAL_GetTick(),
                    s_board.phase == BOARD_IDLE ? "-" : s_board.name,
                    debug_board_phase(&s_board));
-    (void)send_line(out);
+    send_status(out);
     check_control();
 
     (void)snprintf(out, sizeof(out), "KEY %lu %u %lu\r\n",
                    (unsigned long)HAL_GetTick(), (unsigned)s_is_home_pressed,
                    (unsigned long)s_last_home_count);
-    (void)send_line(out);
+    send_status(out);
     check_control();
 
     /* 焦点关节和正在运动的关节每次都报，其余关节每次轮流补报一个，
@@ -907,8 +938,9 @@ static void report_status(uint32_t now)
  *
  * 参考为轨迹式运动中轨迹上的参考位置，其他情况等于目标。
  *
- * @note 占空比取 H 桥最近一次设定值，MSET 开环驱动时也有效；
- *       115200 波特率下一行约 4ms，与周期状态合计约占带宽七成。
+ * @note 占空比取 H 桥最近一次设定值，MSET 开环驱动时也有效。
+ * @note 每秒约 6.5KB；115200 下与周期状态合计会占满带宽，所以调试串口默认
+ *       用 460800，见 DEBUG_UART_BAUD。
  */
 static void report_trace(void)
 {
@@ -930,8 +962,29 @@ static void report_trace(void)
                    s->calibrated ? (long)s->angle : 0L, (long)s->target,
                    (int)duty, (unsigned)is_braking, joint_phase_name(s->phase),
                    (long)joint_reference(s));
-    (void)send_line(out);
+    /* 数据记录量最大，发送队列紧张时最先丢。 */
+    (void)bsp_debug_uart_write_droppable((const uint8_t *)out, strlen(out),
+                                         true);
     check_control();
+}
+
+/**
+ * @brief 发送队列有新的丢弃时报告一次，最多每 CONSOLE_TX_DROP_REPORT_MS 一次。
+ *
+ * @note 出现这条日志说明波特率不够用或上位机没在接收，数据记录不完整。
+ */
+static void report_tx_drops(uint32_t now)
+{
+    uint32_t drops = bsp_debug_uart_tx_drop_count();
+    if ((drops == s_seen_tx_drops) ||
+        ((uint32_t)(now - s_tx_drop_report_ms) < CONSOLE_TX_DROP_REPORT_MS))
+    {
+        return;
+    }
+    LOG_WARN("CONSOLE", "tx queue dropped %lu lines (total %lu)",
+             (unsigned long)(drops - s_seen_tx_drops), (unsigned long)drops);
+    s_seen_tx_drops = drops;
+    s_tx_drop_report_ms = now;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -999,5 +1052,6 @@ void debug_console_update(void)
     {
         s_last_status_ms = now;
         report_status(now);
+        report_tx_drops(now);
     }
 }

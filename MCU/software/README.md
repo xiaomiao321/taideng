@@ -14,7 +14,7 @@
 
 | 串口 | 引脚 | 用途 |
 |---|---|---|
-| [USART3](Core/Src/usart.c) | PB10 TX，PB11 RX | 调试终端，接电脑上的上位机，115200 8N1 |
+| [USART3](Core/Src/usart.c) | PB10 TX，PB11 RX | 调试终端和日志，接电脑上的上位机，460800 8N1，波特率见 `Config/app_config.h` 的 `DEBUG_UART_BAUD`。发送在中断里排队进行，不占用控制循环 |
 | [USART1](Core/Src/usart.c) | PA9 TX，PA10 RX | 和安卓核心板通信的二进制协议，115200 8N1 |
 
 ## 2. 构建与烧录

@@ -225,7 +225,8 @@ def simulate():
 def main(argv=None):
     parser = argparse.ArgumentParser(description="关节 PI 阶跃/背隙测量")
     parser.add_argument("--port", help="串口，例如 COM5")
-    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--baud", type=int, default=460800,
+                        help="与固件 DEBUG_UART_BAUD 一致，旧固件用 115200")
     parser.add_argument("--joint", type=int, default=1, choices=range(1, 7))
     sub = parser.add_subparsers(dest="action", required=True)
 
