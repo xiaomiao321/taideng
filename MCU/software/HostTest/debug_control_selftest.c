@@ -57,6 +57,16 @@ static const char *hw_joint(const char *op, unsigned seq, unsigned id,
     {
         assert(count == 3 && v[0] == 1 && v[1] == 1500 && v[2] == 4000);
     }
+    else if (!strcmp(op, "JPI"))
+    {
+        assert(count == 15 && v[0] == 30 && v[4] == 300 && v[5] == 700 &&
+               v[6] == 25 && v[11] == 650 && v[12] == 8000 && v[13] == 80 &&
+               v[14] == 0);
+    }
+    else if (!strcmp(op, "JBL"))
+    {
+        assert(count == 2 && v[0] == -1 && v[1] == 1200);
+    }
     else
     {
         assert(!strcmp(op, "JGET") && count == 0);
@@ -350,6 +360,21 @@ int main(void)
            stops == stops_before + 1);
     debug_control_line(&c, "JDIR 150 M1 1 1500", 17);
     assert(joint_calls == 8 && strstr(reply, "JOINT_PARAM"));
+    /* JPI：十五个参数；JBL：方向和背隙。都和 JTUNE 一样要心跳并先停机。
+     * 这两条曾经只在 debug_console 里有处理函数，解析器不认识，一律回 PARAM。 */
+    stops_before = stops;
+    debug_control_line(
+        &c, "JPI 151 M1 30 30 8 200 300 700 25 30 8 200 300 650 8000 80 0", 17);
+    assert(joint_calls == 9 && strstr(reply, "ACK 151 JPI") &&
+           stops == stops_before + 1);
+    debug_control_line(
+        &c, "JPI 152 M1 30 30 8 200 300 700 25 30 8 200 300 650 8000 80", 17);
+    assert(joint_calls == 9 && strstr(reply, "JOINT_PARAM"));
+    debug_control_line(&c, "JPI 153 M7 30 30 8 200 300 700 25 30 8 200 300 650 8000 80 0", 17);
+    assert(joint_calls == 9 && strstr(reply, "JOINT_PARAM"));
+    debug_control_line(&c, "JBL 154 M1 -1 1200", 17);
+    assert(joint_calls == 10 && strstr(reply, "ACK 154 JBL"));
+    joint_calls = 8; /* 后面的用例按原来的调用次数继续数 */
     c.linked = false;
     stops_before = stops;
     debug_control_line(&c, "JTRACE 48 M1 1", 18);

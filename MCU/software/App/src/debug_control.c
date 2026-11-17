@@ -27,6 +27,9 @@
 /** @brief 关节命令的最大参数个数（JNOM）。 */
 #define MAX_JOINT_ARGS (9U)
 
+/** @brief JPI 的参数个数：两个转向各六项，加慢速段门限、维持比例和保留位。 */
+#define JOINT_PI_ARGS (15U)
+
 /** @brief 文本协议能寻址的关节数（M1～M6）。 */
 #define JOINT_MOTOR_COUNT (6U)
 
@@ -287,7 +290,8 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
     if (!strcmp(tokens[0], "CAL") || !strcmp(tokens[0], "JMOVE") ||
         !strcmp(tokens[0], "JGET") || !strcmp(tokens[0], "JNOM") ||
         !strcmp(tokens[0], "JLIM") || !strcmp(tokens[0], "JTUNE") ||
-        !strcmp(tokens[0], "JTRACE") || !strcmp(tokens[0], "JDIR"))
+        !strcmp(tokens[0], "JTRACE") || !strcmp(tokens[0], "JDIR") ||
+        !strcmp(tokens[0], "JPI") || !strcmp(tokens[0], "JBL"))
     {
         /* JGET、JTRACE 只读：不要求心跳，也不打断正在进行的运动。 */
         bool trace = !strcmp(tokens[0], "JTRACE");
@@ -299,6 +303,7 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
                          : nominal                     ? MAX_JOINT_ARGS
                          : !strcmp(tokens[0], "JTUNE") ? (n == 8U ? 5U : 4U)
                          : !strcmp(tokens[0], "JDIR")  ? 3U
+                         : !strcmp(tokens[0], "JPI")   ? JOINT_PI_ARGS
                                                        : 2U;
         unsigned joint = (n >= 3U)
                              ? parse_motor_name(tokens[2], JOINT_MOTOR_COUNT)
@@ -308,7 +313,9 @@ void debug_control_line(debug_control_t *c, const char *line, uint32_t now)
             answer(c, (unsigned)seq, "ERR", "JOINT_PARAM");
             return;
         }
-        int32_t values[MAX_JOINT_ARGS];
+        int32_t values[JOINT_PI_ARGS];
+        _Static_assert(JOINT_PI_ARGS >= MAX_JOINT_ARGS,
+                       "values must hold the longest joint command");
         long value;
         for (unsigned i = 0; i < count; ++i)
         {

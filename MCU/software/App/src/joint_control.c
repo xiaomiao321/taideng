@@ -1276,13 +1276,14 @@ static bool tick_pi(joint_control_t *j, unsigned i, uint32_t now)
     {
         return true;
     }
-    /* 速度足够大且仍是朝目标的方向时，按“制动+滑行”距离提前刹车。 */
+    /* 速度足够大且仍是朝目标的方向时，按“制动+滑行”距离提前刹车。
+     * 瞄准的是目标本身（再留一点余量），不是容差带的边缘：原来这里多加了一个
+     * 容差，关节总是停在近侧离目标一两度的地方，再小的步子也到不了位。 */
     int32_t speed = s->speed;
     if (!m->braking && magnitude(speed) > JOINT_PI_BRAKE_SPEED &&
         m->last_sign == sign)
     {
-        int32_t stop = (int32_t)s->cal.tolerance +
-                       (int32_t)((int64_t)magnitude(speed) *
+        int32_t stop = (int32_t)((int64_t)magnitude(speed) *
                                  (int64_t)(s->tune.brake_ms + JOINT_PI_COAST_MS) / 1000) +
                        JOINT_PI_BRAKE_MARGIN;
         if (distance <= stop)
