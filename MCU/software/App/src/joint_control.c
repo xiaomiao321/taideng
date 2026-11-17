@@ -839,7 +839,15 @@ const char *joint_move_speed(joint_control_t *j, unsigned seq, unsigned index,
     m->stable = false;
     m->goal = has_via ? via : target;
     m->via_pending = has_via;
+    /* 从限位外启动时，允许量在当前超出量上再留一个容差吸收读数噪声。不留的话，
+     * 关节刚好停在限位外一点点、读数再往外跳零点几度就会报越限：样机上 M5 的
+     * 档位正好设在限位 90°，到位时略微过冲停在 92.3°，之后每次重发这个目标
+     * 都立刻报 LIMIT，全局故障位把所有关节的命令都挡住，直到 STOP。 */
     m->limit_excess = limit_excess(s);
+    if (m->limit_excess > 0)
+    {
+        m->limit_excess += (int32_t)s->cal.tolerance;
+    }
     m->initial_error = magnitude(m->goal - s->angle);
     m->best_error = m->initial_error;
     m->pulse_on = false;

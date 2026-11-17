@@ -169,6 +169,24 @@ static void outside_limit_test(void)
     feed(&j, 3090, 30); /* 188.1°，超出 6.1° */
     assert(!joint_tick(&j, 30) && j.states[0].faults == JOINT_FAULT_LIMIT);
     assert(!strcmp(j.states[0].fault, "LIMIT"));
+    /* 刚好停在限位外一点点（182.3°，超出 0.3°）时重新定位：读数再往外跳
+     * 零点几度只是噪声，不能报越限；真的继续往外走超过一个容差才报。 */
+    j = fresh(normal());
+    feed(&j, 3026, 0); /* 182.3° */
+    assert(!joint_move(&j, 4, 0, 180000, 10000, 0));
+    feed(&j, 3030, 10); /* 182.7°，比启动时又往外 0.4° */
+    assert(joint_tick(&j, 10) && j.states[0].faults == 0);
+    feed(&j, 3026, 20);
+    assert(joint_tick(&j, 20) && j.states[0].faults == 0);
+    feed(&j, 3056, 30); /* 185.0°，往外 2.7°，超过一个容差 */
+    assert(!joint_tick(&j, 30) && j.states[0].faults == JOINT_FAULT_LIMIT);
+    j = fresh(normal());
+    feed(&j, 3100, 0);
+    assert(!joint_move(&j, 1, 0, 150000, 10000, 0));
+    feed(&j, 3050, 10);
+    assert(joint_tick(&j, 10));
+    feed(&j, 3090, 30);
+    assert(!joint_tick(&j, 30) && j.states[0].faults == JOINT_FAULT_LIMIT);
     /* 停在范围外也能清故障并再次定位。 */
     joint_clear_faults(&j, 40);
     assert(j.states[0].faults == 0);
