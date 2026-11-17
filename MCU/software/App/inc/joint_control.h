@@ -170,7 +170,7 @@ typedef struct
 } joint_traj_cfg_t;
 
 /** @brief 一次采样最多参与滤波的样本数。 */
-#define JOINT_FILTER_MAX_SAMPLES (32U)
+#define JOINT_FILTER_MAX_SAMPLES (128U)
 
 /** @brief 关节状态。 */
 typedef enum

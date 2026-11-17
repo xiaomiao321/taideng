@@ -12,6 +12,9 @@
 
 _Static_assert(JOINT_COUNT == BSP_ADC_CHANNEL_COUNT,
                "each joint needs one potentiometer channel");
+_Static_assert(POT_OVERSAMPLE <= BSP_ADC_BURST_MAX_SCANS &&
+                   POT_OVERSAMPLE <= JOINT_FILTER_MAX_SAMPLES,
+               "oversampling must fit the ADC burst buffer and the filter");
 _Static_assert(JOINT_CAL_BLOB_SIZE % 4U == 0U && JOINT_CAL_BLOB_SIZE <= 1024U &&
                    JOINT_CAL_BLOB_SIZE + 4U <= 1024U &&
                    JOINT_CAL_BLOB_V4_SIZE % 4U == 0U &&
@@ -123,9 +126,12 @@ static void sample(uint32_t sample_ms)
 {
     static uint16_t samples[POT_OVERSAMPLE][BSP_ADC_CHANNEL_COUNT];
     s_is_pot_valid = s_is_adc_ok;
-    for (unsigned i = 0; i < POT_OVERSAMPLE && s_is_pot_valid; ++i)
+    if (s_is_pot_valid)
     {
-        s_is_pot_valid = bsp_adc_read_all(samples[i], ADC_TIMEOUT_MS) == BSP_OK;
+        /* 一次连续扫完全部轮次：各轮间隔均匀，把参考电压上的纹波平均掉。 */
+        s_is_pot_valid =
+            bsp_adc_read_burst(samples, POT_OVERSAMPLE, ADC_TIMEOUT_MS) ==
+            BSP_OK;
     }
     if (s_is_pot_valid)
     {

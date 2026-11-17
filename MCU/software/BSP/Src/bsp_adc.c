@@ -6,7 +6,9 @@
 #include "stm32f4xx_hal_def.h"
 
 static bool s_is_initialized = false;
-static uint32_t s_dma_buffer[BSP_ADC_CHANNEL_COUNT] = {0};
+/** @brief DMA 目标缓冲：单次扫描只用前六个，连续扫描时一轮六个依次排开。 */
+static uint32_t s_dma_buffer[BSP_ADC_CHANNEL_COUNT * BSP_ADC_BURST_MAX_SCANS] =
+    {0};
 static volatile bool s_is_adc_ready = false;
 static volatile bool s_is_adc_error = false;
 
@@ -112,6 +114,75 @@ bsp_status_t bsp_adc_read_all(uint16_t raw_values[BSP_ADC_CHANNEL_COUNT],
     for (uint32_t i = 0U; i < BSP_ADC_CHANNEL_COUNT; i++)
     {
         raw_values[i] = (uint16_t)s_dma_buffer[i];
+    }
+    return BSP_OK;
+}
+
+bsp_status_t bsp_adc_read_burst(uint16_t (*scans)[BSP_ADC_CHANNEL_COUNT],
+                                uint32_t count, uint32_t timeout_ms)
+{
+    if (s_is_initialized == false)
+    {
+        return BSP_ERR_NOT_INITIALIZED;
+    }
+    if ((scans == NULL) || (count == 0U) || (count > BSP_ADC_BURST_MAX_SCANS) ||
+        (timeout_ms == 0U) || (timeout_ms > BSP_ADC_MAX_TIMEOUT_MS))
+    {
+        return BSP_ERR_PARAM;
+    }
+    s_is_adc_error = false;
+    s_is_adc_ready = false;
+    uint32_t start_ms = HAL_GetTick();
+
+    /* 连续转换：一轮扫完自动开始下一轮，DMA 收满 count 轮后不再取数。
+     * 之后 ADC 还会空转到下面的 Stop 为止，没人读的数据会置溢出标志；数据在
+     * DMA 完成时已经收齐，所以关掉溢出中断，不把它当成错误。溢出标志由下一次
+     * HAL_ADC_Start_DMA() 清除。 */
+    SET_BIT(hadc1.Instance->CR2, ADC_CR2_CONT);
+    if (HAL_ADC_Start_DMA(&hadc1, s_dma_buffer,
+                          count * BSP_ADC_CHANNEL_COUNT) != HAL_OK)
+    {
+        CLEAR_BIT(hadc1.Instance->CR2, ADC_CR2_CONT);
+        return BSP_ERR_HAL;
+    }
+    __HAL_ADC_DISABLE_IT(&hadc1, ADC_IT_OVR);
+
+    bsp_status_t result = BSP_OK;
+    while (1)
+    {
+        /* 先看完成：数据收齐之后才出现的错误标志不影响这一批数据。 */
+        if (s_is_adc_ready)
+        {
+            break;
+        }
+        if (s_is_adc_error)
+        {
+            result = BSP_ERR_HAL;
+            break;
+        }
+        if ((uint32_t)(HAL_GetTick() - start_ms) >= timeout_ms)
+        {
+            result = BSP_ERR_TIMEOUT;
+            break;
+        }
+    }
+    HAL_StatusTypeDef stop_status = HAL_ADC_Stop_DMA(&hadc1);
+    CLEAR_BIT(hadc1.Instance->CR2, ADC_CR2_CONT);
+    if (stop_status != HAL_OK)
+    {
+        return BSP_ERR_HAL;
+    }
+    if (result != BSP_OK)
+    {
+        return result;
+    }
+    for (uint32_t k = 0U; k < count; k++)
+    {
+        for (uint32_t i = 0U; i < BSP_ADC_CHANNEL_COUNT; i++)
+        {
+            scans[k][i] =
+                (uint16_t)s_dma_buffer[k * BSP_ADC_CHANNEL_COUNT + i];
+        }
     }
     return BSP_OK;
 }

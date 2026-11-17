@@ -25,6 +25,9 @@
  */
 #define BSP_ADC_CHANNEL_COUNT (6U)
 
+/** @brief bsp_adc_read_burst() 一次最多连续扫描的轮数。 */
+#define BSP_ADC_BURST_MAX_SCANS (128U)
+
 /**
  * @brief 本阶段允许的最大转换等待时间，单位为毫秒。
  */
@@ -89,6 +92,33 @@ bsp_status_t bsp_adc_init(void);
  */
 bsp_status_t bsp_adc_read_all(uint16_t raw_values[BSP_ADC_CHANNEL_COUNT],
                               uint32_t timeout_ms);
+
+/**
+ * @brief 连续扫描 count 轮，一次取回全部读数，然后停止 ADC/DMA。
+ *
+ * 和连续调用 count 次 bsp_adc_read_all() 相比，各轮之间没有软件启动的间隔：
+ * ADC 以连续转换方式一轮接一轮地扫，相邻两轮相隔一轮的转换时间（六路约 27µs），
+ * 间隔均匀，同样的时间里能取到多得多的样本。用于把参考电压上几十 kHz 的纹波
+ * 平均掉：样本均匀铺满许多个纹波周期，平均后纹波基本抵消。
+ *
+ * @param[out] scans 接收读数，scans[k][i] 是第 k 轮里 POT(i+1) 的读数；
+ *             不允许为 NULL，至少 count 行。
+ * @param[in] count 扫描轮数，1 至 BSP_ADC_BURST_MAX_SCANS。
+ * @param[in] timeout_ms 等待全部数据的超时，1 至 BSP_ADC_MAX_TIMEOUT_MS。
+ *
+ * @retval BSP_OK 已写入 count 轮读数。
+ * @retval BSP_ERR_NOT_INITIALIZED 模块尚未初始化。
+ * @retval BSP_ERR_PARAM 参数无效。
+ * @retval BSP_ERR_TIMEOUT 等待超时，ADC/DMA 已停止。
+ * @retval BSP_ERR_HAL ADC/DMA 启动、采样或停止失败。
+ *
+ * @note 只在本次调用期间打开 ADC 的连续转换位，返回前恢复，不改变
+ *       bsp_adc_read_all() 的行为和 CubeMX 生成的配置。
+ * @note 阻塞约 count 乘 27µs；失败时 scans 的内容未定义。其余约束与
+ *       bsp_adc_read_all() 相同。
+ */
+bsp_status_t bsp_adc_read_burst(uint16_t (*scans)[BSP_ADC_CHANNEL_COUNT],
+                                uint32_t count, uint32_t timeout_ms);
 
 /**
  * @brief 记录一次 ADC1 整组转换完成事件，由 HAL 回调在集成层转发。
